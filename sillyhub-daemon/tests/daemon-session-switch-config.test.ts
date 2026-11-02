@@ -120,15 +120,17 @@ function makeState(sessionId: string, leaseId: string): SessionState {
 function buildDaemon(sm: SessionManager | null = createMockSessionManager()): {
   daemon: Daemon;
   sm: SessionManager;
+  client: ReturnType<typeof createMockClient>;
 } {
   const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
+  const client = createMockClient();
   const daemon = new Daemon(
     mockConfig,
-    createMockClient() as never,
+    client as never,
     createMockTaskRunner() as never,
     { detector, sessionManager: sm } as never,
   );
-  return { daemon, sm: sm as SessionManager };
+  return { daemon, sm: sm as SessionManager, client };
 }
 
 async function emit(daemon: Daemon, msg: {
@@ -521,5 +523,143 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
     const second = sm.markPendingConfigSwitch.mock.calls[1]![1] as SessionSwitchConfigPayload;
     expect(second.runId).toBe('run-switch-2');
     expect(second.profile).toBeNull();
+  });
+});
+
+// FR-02（2026-11-02-daemon-resume-gate-fix）：切换轮丢弃即回报——会话不存在 /
+// markPendingConfigSwitch 抛错时，对齐 _reportInjectDropped 先例回报 run 失败
+//（error_during_execution → backend 落 interactive_interrupted），run 秒级收敛
+// 而非卡 pending 300 秒等僵尸轮清扫（2026-11-02 09:08 实证：
+// session_switch_config_session_not_found 仅 warn，run 永停 pending）。
+// 寻址三要素 run_id/lease_id/claim_token——lease_id 由 backend 切换 payload
+// 下发（control.py 切换分支新增键）；旧 payload 缺键降级为仅 warn 不回报。
+describe('daemon SESSION_SWITCH_CONFIG 丢弃回报（FR-02 / 2026-11-02-daemon-resume-gate-fix）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  it('store 无目标会话且三要素齐全 → notifyRunResult 回报 run 失败', async () => {
+    // get 返回 undefined：模拟会话创建失败 / 已被清出 store（实证事故形态）。
+    const sm = createMockSessionManager(undefined);
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: SESSION_SWITCH_CONFIG_MSG,
+      payload: {
+        session_id: 'sess-gone-report',
+        run_id: 'run-switch-gone',
+        lease_id: 'lease-switch-gone',
+        claim_token: CLAIM_TOKEN,
+        prompt: '继续',
+        profile: null,
+        provider_config: null,
+      },
+    });
+    await flushMicro();
+    await flushMicro();
+
+    expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+    expect(client.notifyRunResult).toHaveBeenCalledWith(
+      'lease-switch-gone',
+      CLAIM_TOKEN,
+      'run-switch-gone',
+      expect.objectContaining({
+        status: 'error_during_execution',
+        is_error: true,
+      }),
+    );
+  });
+
+  it('payload 缺 lease_id（旧 backend）→ 维持仅 warn 不回报（降级零回归）', async () => {
+    const sm = createMockSessionManager(undefined);
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: SESSION_SWITCH_CONFIG_MSG,
+      payload: {
+        session_id: 'sess-gone-no-lease',
+        run_id: 'run-switch-nolease',
+        claim_token: CLAIM_TOKEN,
+        prompt: '旧 backend 切换',
+        profile: null,
+        provider_config: null,
+      },
+    });
+    await flushMicro();
+    await flushMicro();
+
+    expect(sm.markPendingConfigSwitch).not.toHaveBeenCalled();
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
+  });
+
+  it('markPendingConfigSwitch 抛错且三要素齐全 → 同样回报 run 失败', async () => {
+    const boom = new Error('SessionNotFoundError: not in store');
+    const sm = createMockSessionManager(
+      makeState(SESSION_ID, LEASE_ID),
+      () => {
+        throw boom;
+      },
+    );
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: SESSION_SWITCH_CONFIG_MSG,
+      payload: {
+        session_id: SESSION_ID,
+        run_id: RUN_ID,
+        lease_id: LEASE_ID,
+        claim_token: CLAIM_TOKEN,
+        prompt: '竞态丢弃',
+        profile: null,
+        provider_config: null,
+      },
+    });
+    await flushMicro();
+    await flushMicro();
+
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+    expect(client.notifyRunResult).toHaveBeenCalledWith(
+      LEASE_ID,
+      CLAIM_TOKEN,
+      RUN_ID,
+      expect.objectContaining({
+        status: 'error_during_execution',
+        is_error: true,
+      }),
+    );
+  });
+
+  it('会话存在且正常路由 → 不回报（零误伤）', async () => {
+    const sm = createMockSessionManager(makeState(SESSION_ID, LEASE_ID));
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: SESSION_SWITCH_CONFIG_MSG,
+      payload: {
+        session_id: SESSION_ID,
+        run_id: RUN_ID,
+        lease_id: LEASE_ID,
+        claim_token: CLAIM_TOKEN,
+        prompt: '正常切换',
+        profile: null,
+        provider_config: null,
+      },
+    });
+    await flushMicro();
+
+    expect(sm.markPendingConfigSwitch).toHaveBeenCalledTimes(1);
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
   });
 });

@@ -767,6 +767,11 @@ async def _dispatch_inject_turn(
                 {
                     "sessionId": str(session.id),
                     "runId": str(run.id),
+                    # FR-02（2026-11-02-daemon-resume-gate-fix）：daemon 丢弃切换轮
+                    # 时回报 run 失败需 lease_id 寻址（对齐 INJECT payload 既有
+                    # lease_id 键语义；旧 daemon 忽略未知键，向后兼容）。lease 缺失
+                    # 归一空串——daemon 侧要素不全自动降级为仅 warn 不回报。
+                    "leaseId": str(session.lease_id) if session.lease_id else "",
                     "claimToken": inject_claim_token,
                     # ql-20260901-002：切换轮带文本时同样剥 /team 前缀（切换
                     # 轮 prompt 也直达 agent）。

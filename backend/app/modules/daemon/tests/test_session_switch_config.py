@@ -266,6 +266,9 @@ class TestSwitchSuccess:
         assert msg_type == DAEMON_MSG_SESSION_SWITCH_CONFIG
         assert payload["sessionId"] == str(s.id)
         assert payload["runId"] == str(run.id)
+        # FR-02（2026-11-02-daemon-resume-gate-fix）：daemon 丢弃切换轮回报
+        # run 失败需 lease_id 寻址——payload 必须携带会话当前 lease。
+        assert payload["leaseId"] == str(s.lease_id)
         assert payload["prompt"] == "switch turn"
         assert payload["claimToken"] == meta["claim_token"]
         assert payload["profile"] == {
