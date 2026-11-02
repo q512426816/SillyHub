@@ -178,7 +178,7 @@ def test_small_corpus_stays_single_batch(tmp_path: Path) -> None:
     root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
     emb = FakeEmbedder()
     search_sync(root, "ws-small", "缓存", 10, emb, "test-model")
-    assert emb.batch_sizes == [3, 1], "≤64 条语料单批嵌入（分批不改变小语料行为面）"
+    assert emb.batch_sizes == [3, 1], "≤批上限条语料单批嵌入（分批不改变小语料行为面）"
 
 
 def test_search_ranking_limit_and_contract(tmp_path: Path) -> None:
