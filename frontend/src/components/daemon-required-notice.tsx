@@ -19,6 +19,12 @@ import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
  * - canBorrow=true：额外提示已有借用能力，可去 Agent 页触发借用
  *   （借用发生在 agent 派发，非读源码页，此处仅引导）。
  *
+ * variant（2026-11-02-scan-docs-unbound-view）：服务端有存量数据的页面
+ *（scan-docs：列表/详情/统计/reparse 全为服务端读取，无绑定也有数据可看）用
+ * degraded 非阻断横幅——主区照常渲染数据，横幅只提示「当前展示工作区已有数据」
+ * 并保留配置入口；缺省 blocked 维持整页空态（runtime 页等真依赖 daemon 实体的
+ * 页面），既有调用与 testid 不变。
+ *
  * 复用：canBorrowSharedDaemon 判定由调用方算好传入（本组件不直接读 session）；
  * WorkspaceAccessGuide 复用既有首次/编辑表单。
  */
@@ -30,6 +36,8 @@ interface Props {
   canBorrow: boolean;
   /** 配置成功回调（调用方刷新 binding 后，主区切回正常数据视图）。 */
   onConfigured?: () => void;
+  /** blocked=整页空态（缺省）；degraded=非阻断横幅（服务端有存量数据的页面）。 */
+  variant?: "blocked" | "degraded";
 }
 
 export function DaemonRequiredNotice({
@@ -37,6 +45,7 @@ export function DaemonRequiredNotice({
   workspaceId,
   canBorrow,
   onConfigured,
+  variant = "blocked",
 }: Props): JSX.Element {
   const [configuring, setConfiguring] = useState(false);
 
@@ -52,9 +61,35 @@ export function DaemonRequiredNotice({
     );
   }
 
+  if (variant === "degraded") {
+    return (
+      <div
+        data-testid="daemon-required-notice"
+        data-variant="degraded"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-3 py-2"
+      >
+        <p className="text-xs font-medium text-foreground">
+          未绑定守护进程：当前展示的是工作区已有数据
+        </p>
+        <p className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+          数据由成员守护进程同步到工作区镜像；绑定后可用本机仓库持续更新。
+          {canBorrow ? "你已有借用能力，也可去 Agent 页借用共享守护进程。" : ""}
+        </p>
+        <Button
+          size="sm"
+          data-testid="daemon-required-config-btn"
+          onClick={() => setConfiguring(true)}
+        >
+          配置我的守护进程
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid="daemon-required-notice"
+      data-variant="blocked"
       className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-4 py-8 text-center"
     >
       <div className="text-2xl" aria-hidden>
