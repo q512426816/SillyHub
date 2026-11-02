@@ -161,15 +161,16 @@ def test_index_rebuild_embeds_in_batches(tmp_path: Path) -> None:
     root = _seed_spec_root(tmp_path, _gen_bulk_entries(150))
     emb = FakeEmbedder()
     out = search_sync(root, "ws-batch", "缓存", 10, emb, "test-model")
-    assert emb.batch_sizes == [
-        _EMBED_BATCH_SIZE,
-        _EMBED_BATCH_SIZE,
-        150 - 2 * _EMBED_BATCH_SIZE,
-        1,
-    ], "语料按 64 条/批顺序分批（64+64+22），查询独立 1 条成批"
+    corpus_batches, query_batch = emb.batch_sizes[:-1], emb.batch_sizes[-1]
+    assert query_batch == 1, "查询独立 1 条成批"
+    assert all(b <= _EMBED_BATCH_SIZE for b in corpus_batches), "每批 ≤ 批上限"
+    assert sum(corpus_batches) == 150, "分批不丢不重（150 条语料全覆盖）"
+    assert len(corpus_batches) == (150 + _EMBED_BATCH_SIZE - 1) // _EMBED_BATCH_SIZE, (
+        "满批条数 = ceil(150/批上限)，末批为余数"
+    )
     assert emb.embedded_texts == 151, "分批不丢不重（150 语料 + 1 查询）"
     assert out["results"][0]["anchor"] == "D-bulk-137@v1", (
-        "分批按序聚合——跨批条目（第 137 条在第 3 批）排序不回归"
+        "分批按序聚合——跨批条目（第 137 条在末批）排序不回归"
     )
 
 

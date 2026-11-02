@@ -19,7 +19,7 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
 - **索引** = 进程内按 decisions 文件集指纹 ``(name, mtime_ns, size)`` 懒构建缓存
   （设计偏差：提案的 daemon sync 挂点灌索引改为查询时懒构建——语料量级 700-2400
   条秒级，免 daemon 改动，文件增删改自动失效自愈）。重建嵌入**必须**经
-  ``_embed_corpus`` 按 64 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
+  ``_embed_corpus`` 按 32 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
   ~2.4k 条曾把 worker RSS 推到 2.3~2.45GB，撞 2500m cgroup 配额被强杀 6 次）。
 - **相似度** = 归一化点积（余弦），纯 Python（2.4k×512 毫秒级，不引入 numpy 耦合；
   fastembed 自带 numpy 但不作为本模块直接依赖）。
@@ -390,8 +390,10 @@ def _cosine_top_k(
 
 # 单次 embed 请求批大小上限：worker 子进程按请求整体解析 texts 并推理，单批过大会把
 # worker RSS 推过容器配额（2026-11-02 生产 6 次 cgroup OOM：全量批 ~2.4k 条 → RSS
-# 2.3~2.45GB 撞 2500m mem_limit）。索引重建必须经 _embed_corpus 分批喂。
-_EMBED_BATCH_SIZE = 64
+# 2.3~2.45GB 撞 2500m mem_limit）。索引重建必须经 _embed_corpus 分批喂。批大小生产
+# A/B 实测（998 条真实语料）：64 → cgroup 峰值 2.09GiB（余量不足），32 → 1.47GiB
+# 稳态 1.26GiB——推理瞬态随 batch×seq² 缩放，32 留 ~1GB 余量给并发 worker。
+_EMBED_BATCH_SIZE = 32
 
 
 def _embed_corpus(embedder: object, texts: list[str]) -> list[list[float]]:
