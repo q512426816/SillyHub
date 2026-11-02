@@ -1,0 +1,32 @@
+---
+author: flow-machine-draft
+created_at: 2026-11-02T01:26:08.614Z
+---
+# 提案书（Proposal）— 2026-11-02-stale-test-sync-contract
+
+## 动机
+
+任务原话转写：契约演进后测试欠同步修复
+
+动机与背景：backend 全量回归存在 10 个存量失败（2026-10-31 审查发现，经基线 worktree 二分定位引入提交），三簇均为生产契约有意演进后测试未同步，非生产 bug：①7 个（test_agent_log_push 6 个 + test_session_service 跨区绑定 1 个）——1015aa22f（2026-10-27-ghost-spec-binding-fix）有意规定绑定通道拒为无日期前缀的新名建占位（CLI flow start 对新名强制 YYYY-MM-DD- 前缀 exit 2 拒绝，为无前缀名建占位即幽灵占位根因），测试仍用 change-hub-claude/shared-key 等旧形态键；②2 个（test_agent_log_messages）——cdcb97fdb（2026-10-28-bg-task-status-report）给 AgentLogMessageItem 增 bg_task_final 可选字段（user_input 系统注入段配对面），两用例整包精确断言（响应 messages[0] 逐字段 + openapi properties 全集）未纳入新字段；③1 个（test_inject_orchestrator_tagging 回滚用例）——2ca991c0（2026-10-30-provider-user-share）把 attachments 切换轮解析入口从 resolve_bound_provider_config 换为 resolve_session_provider_config，测试 monkeypatch 旧缝失效致 DaemonSessionConfigInvalid 未抛。修复全部为测试侧对齐新契约，零生产代码改动。
+
+成功标准：
+- 7 个 placeholder 主题用例改用日期前缀键（形如 2026-10-27-xxx，符合新契约合法名）后，占位行创建/change link/跨区 D-004/降级语义等原断言全部恢复且通过——测试验证的仍是占位与绑定行为本身，非快照现状
+- 2 个 messages 用例按新 schema 把 bg_task_final 纳入精确断言（item dict 增 bg_task_final: None / openapi properties 集合增 bg_task_final）后通过
+- tagging 回滚用例 monkeypatch 缝换为 resolve_session_provider_config 后恢复 DID raise 语义并通过（回滚断言原样保留）
+- 触及的四个测试文件全量绿；platform_sync + daemon 注入相邻面零回归（CLI 亲测）
+
+## 变更范围
+
+按成功标准机械推导，共 4 条验收面：
+1. 7 个 placeholder 主题用例改用日期前缀键（形如 2026-10-27-xxx，符合新契约合法名）后，占位行创建/change link/跨区 D-004/降级语义等原断言全部恢复且通过——测试验证的仍是占位与绑定行为本身，非快照现状
+2. 2 个 messages 用例按新 schema 把 bg_task_final 纳入精确断言（item dict 增 bg_task_final: None / openapi properties 集合增 bg_task_final）后通过
+3. tagging 回滚用例 monkeypatch 缝换为 resolve_session_provider_config 后恢复 DID raise 语义并通过（回滚断言原样保留）
+4. 触及的四个测试文件全量绿；platform_sync + daemon 注入相邻面零回归（CLI 亲测）
+
+## 成功标准（可验证）
+
+1. 7 个 placeholder 主题用例改用日期前缀键（形如 2026-10-27-xxx，符合新契约合法名）后，占位行创建/change link/跨区 D-004/降级语义等原断言全部恢复且通过——测试验证的仍是占位与绑定行为本身，非快照现状
+2. 2 个 messages 用例按新 schema 把 bg_task_final 纳入精确断言（item dict 增 bg_task_final: None / openapi properties 集合增 bg_task_final）后通过
+3. tagging 回滚用例 monkeypatch 缝换为 resolve_session_provider_config 后恢复 DID raise 语义并通过（回滚断言原样保留）
+4. 触及的四个测试文件全量绿；platform_sync + daemon 注入相邻面零回归（CLI 亲测）
