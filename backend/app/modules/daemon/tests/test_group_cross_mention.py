@@ -1201,7 +1201,10 @@ class TestHotSwitch:
         member = await db_session.get(AgentGroupMember, seeded.member.id)
         assert member is not None
         assert member.llm_provider_id == llm.id
-        assert (member.config_snapshot or {}).get("model") == "GLM-测试"
+        # 2026-11-02-group-member-footer-config 语义修正：快照 model 键存真实
+        # 所选模型名（成员未指定 model → 不落键），供应商名走 provider_name 键。
+        assert (member.config_snapshot or {}).get("provider_name") == "GLM-测试"
+        assert "model" not in (member.config_snapshot or {})
 
     async def test_machine_switch_ends_shadow_and_marks_pending(
         self,

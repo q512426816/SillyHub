@@ -580,6 +580,9 @@ class SessionService(BackgroundTaskMixin):
         busy_strategy: Literal["queue", "inject"] | None = None,
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # 2026-11-02-group-member-footer-config：会话级模型切换维度透传
+        # （三态语义同 inject_session.model；None=不动零回归）。
+        model: str | None = None,
         attachment_ids: list[uuid.UUID] | None = None,
         attachment_owner_user_id: uuid.UUID | None = None,
         auto_resume_of: uuid.UUID | None = None,
@@ -596,6 +599,7 @@ class SessionService(BackgroundTaskMixin):
             busy_strategy=busy_strategy,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            model=model,
             attachment_ids=attachment_ids,
             attachment_owner_user_id=attachment_owner_user_id,
             auto_resume_of=auto_resume_of,

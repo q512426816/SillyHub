@@ -51852,6 +51852,28 @@
             ],
             "title": "Llm Provider Id"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level"
+          },
           "agent_profile_id": {
             "anyOf": [
               {
@@ -52004,7 +52026,33 @@
               }
             ],
             "title": "Llm Provider Id",
-            "description": "模型（LLM 供应商）"
+            "description": "供应商（LLM 供应商）"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level",
+            "description": "思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认"
           },
           "agent_profile_id": {
             "anyOf": [
@@ -52017,7 +52065,7 @@
               }
             ],
             "title": "Agent Profile Id",
-            "description": "智能体方案（AgentProfile）"
+            "description": "档案（AgentProfile，人格/工具集/技能）"
           },
           "team_enabled": {
             "type": "boolean",
@@ -52146,6 +52194,28 @@
               }
             ],
             "title": "Llm Provider Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level"
           },
           "agent_profile_id": {
             "anyOf": [
@@ -52359,6 +52429,28 @@
               }
             ],
             "title": "Llm Provider Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level"
           },
           "agent_profile_id": {
             "anyOf": [
@@ -52598,6 +52690,30 @@
               }
             ],
             "title": "Llm Provider Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking Level"
           },
           "agent_profile_id": {
             "anyOf": [

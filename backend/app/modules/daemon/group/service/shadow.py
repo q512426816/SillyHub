@@ -642,6 +642,10 @@ async def _ensure_shadow_session(
         id=uuid.uuid4(),
         agent_type="claude_code",
         provider=provider,
+        # 2026-11-02-group-member-footer-config：成员级具体模型名直传（None=
+        # 未指定，prepare_interactive_dispatch/lease metadata 维持供应商主模型
+        # 兜底，与现状逐字节一致）。
+        model=member.model,
         status="pending",
         spec_strategy="interactive",
         agent_session_id=shadow.id,
@@ -681,7 +685,12 @@ async def _ensure_shadow_session(
             user_id=group.created_by,
             provider=provider,
             prompt=first_prompt,
-            model=None,  # 模型走 llm_provider_id → lease metadata（下方）
+            # 2026-11-02-group-member-footer-config：成员级具体模型名（None=
+            # 未指定，placement/lease 维持 llm_provider 主模型兜底，与现状一致）。
+            model=member.model,
+            # 思考等级透传（task-05 FR-03 同参先例——写 lease metadata
+            # .thinking_level；None=不写键，引擎默认档位）。
+            thinking_level=member.thinking_level,
             workspace_id=group.workspace_id,  # grants 授权作用域=群工作区
             cwd=cwd,
             pinned_runtime_id=member.runtime_id,

@@ -32,6 +32,7 @@ from app.modules.agent.schema import (
 )
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.session.service.thinking_level import VALID_THINKING_LEVELS
 from app.modules.workspace.model import PpmProjectWorkspace
 
 from .helpers import (
@@ -218,6 +219,17 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
                     "provider": cfg.provider,
                 },
             )
+        # 2026-11-02-group-member-footer-config：思考等级词表校验（同源镜像
+        # 词表，非法 400；None=未指定引擎默认）。
+        if cfg.thinking_level is not None and cfg.thinking_level not in (VALID_THINKING_LEVELS):
+            raise GroupChatInvalid(
+                f"agent 成员「{cfg.display_name}」的思考级别非法"
+                f"（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
+                details={
+                    "display_name": cfg.display_name,
+                    "thinking_level": cfg.thinking_level,
+                },
+            )
 
     profile_ids = [m.agent_profile_id for m in payload.agent_members if m.agent_profile_id]
     profiles: dict[uuid.UUID, AgentProfile] = {}
@@ -354,6 +366,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
                 workspace_id=cfg.workspace_id or workspace.id,
                 provider=cfg.provider,
                 llm_provider_id=cfg.llm_provider_id,
+                model=cfg.model,  # 成员级具体模型名（None=供应商主模型兜底）
+                thinking_level=cfg.thinking_level,  # 七档词表值（None=引擎默认）
                 agent_profile_id=cfg.agent_profile_id,
                 team_enabled=cfg.team_enabled,  # quick 群成员团队能力
                 shadow_status="none",  # design §8 group.member.added
@@ -365,6 +379,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
                     provider=cfg.provider,
                     profile=profile,
                     llm=llm,
+                    model=cfg.model,
+                    thinking_level=cfg.thinking_level,
                 ),
             )
         )

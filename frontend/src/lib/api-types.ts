@@ -19139,6 +19139,10 @@ export interface components {
             provider?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /**
@@ -19203,12 +19207,22 @@ export interface components {
             provider: string;
             /**
              * Llm Provider Id
-             * @description 模型（LLM 供应商）
+             * @description 供应商（LLM 供应商）
              */
             llm_provider_id?: string | null;
             /**
+             * Model
+             * @description 具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置
+             */
+            model?: string | null;
+            /**
+             * Thinking Level
+             * @description 思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认
+             */
+            thinking_level?: string | null;
+            /**
              * Agent Profile Id
-             * @description 智能体方案（AgentProfile）
+             * @description 档案（AgentProfile，人格/工具集/技能）
              */
             agent_profile_id?: string | null;
             /**
@@ -19257,6 +19271,10 @@ export interface components {
             provider?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /**
@@ -19337,6 +19355,10 @@ export interface components {
             provider?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /**
@@ -19422,6 +19444,10 @@ export interface components {
             provider?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Thinking Level */
+            thinking_level?: string | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Team Enabled */

@@ -303,6 +303,10 @@ async def inject_session_as_service(
     # 当前轮结束边界 reload，下轮生效）。
     agent_profile_id: str | None = None,
     llm_provider_id: str | None = None,
+    # 2026-11-02-group-member-footer-config：会话级模型切换维度（语义与用户
+    # 路径 inject_session.model 三态同构——None=不动；空串=显式「跟随供应商
+    # 配置」重置；非空=显式选模型）。群成员模型热切换经本入口携带。
+    model: str | None = None,
     # 群聊附件（FR-05 补遗：群消息附件支持）：参数名与用户路径 inject_session
     # 同名同形（list[uuid.UUID] 引用上传端点产出的 SessionAttachment id）。
     # ``attachment_ids`` 非空豁免空 prompt（D-7 看图说话同口径）；引擎/归属/
@@ -379,6 +383,9 @@ async def inject_session_as_service(
         # 既有 service 路径零回归）。
         agent_profile_id=agent_profile_id,
         llm_provider_id=llm_provider_id,
+        # 2026-11-02-group-member-footer-config：会话级模型切换维度透传
+        # （缺省 None 零回归）。
+        model=model,
         # 群聊附件：透传共享核心（缺省 None 零回归——既有 service 调用方
         # 不携带）。归属基准覆盖见 _inject_into_session 同名参数注释。
         attachment_ids=list(attachment_ids) if attachment_ids else None,

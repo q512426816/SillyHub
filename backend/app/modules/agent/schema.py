@@ -372,9 +372,21 @@ class GroupMemberAgentConfig(BaseModel):
         default=None, description="工作区（cwd 锚）；None=沿用群工作区"
     )
     provider: str = Field(min_length=1, max_length=20, description="引擎类型（claude/codex）")
-    llm_provider_id: uuid.UUID | None = Field(default=None, description="模型（LLM 供应商）")
+    llm_provider_id: uuid.UUID | None = Field(default=None, description="供应商（LLM 供应商）")
+    # 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级（与会话
+    # 底部四选口径对齐）；None=未指定，影子派发维持供应商主模型/引擎默认兜底。
+    model: str | None = Field(
+        default=None,
+        max_length=128,
+        description="具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置",
+    )
+    thinking_level: str | None = Field(
+        default=None,
+        max_length=16,
+        description="思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认",
+    )
     agent_profile_id: uuid.UUID | None = Field(
-        default=None, description="智能体方案（AgentProfile）"
+        default=None, description="档案（AgentProfile，人格/工具集/技能）"
     )
     team_enabled: bool = Field(
         default=False,
@@ -488,6 +500,10 @@ class GroupMemberUpdate(BaseModel):
     workspace_id: uuid.UUID | None = None
     provider: str | None = Field(default=None, min_length=1, max_length=20)
     llm_provider_id: uuid.UUID | None = None
+    # 2026-11-02-group-member-footer-config：模型/思考等级热切换（模型组口径，
+    # 下轮注入生效；None=不改）。
+    model: str | None = Field(default=None, max_length=128)
+    thinking_level: str | None = Field(default=None, max_length=16)
     agent_profile_id: uuid.UUID | None = None
     # 团队能力开关（None=不改）；变更走机器组重建分支（stage 随 lease 建时定，
     # 复用轮改不掉——end 影子 + pending 下次触发重懒建）。
@@ -513,6 +529,9 @@ class GroupMemberRead(BaseModel):
     workspace_id: uuid.UUID | None = None
     provider: str | None = None
     llm_provider_id: uuid.UUID | None = None
+    # 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级（用户成员恒 None）。
+    model: str | None = None
+    thinking_level: str | None = None
     agent_profile_id: uuid.UUID | None = None
     # 团队能力开关（用户成员恒 false）。
     team_enabled: bool = False

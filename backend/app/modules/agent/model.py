@@ -1741,6 +1741,21 @@ class AgentGroupMember(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # ⑤b 具体模型名（2026-11-02-group-member-footer-config）：成员级模型覆盖
+    # （如 "deepseek-v4.1-flash"），影子会话首 run AgentRun.model 直传；NULL=
+    # 未指定，维持 llm_provider 主模型兜底（列口径对齐 AgentRun.model String(128)）。
+    model: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    # ⑤c 思考等级（2026-11-02-group-member-footer-config）：七档词表值
+    # （off/minimal/low/medium/high/xhigh/max，同源镜像见
+    # daemon/session/service/thinking_level.py VALID_THINKING_LEVELS 注释）；
+    # 影子会话 lease metadata.thinking_level 透传；NULL=引擎默认档位。
+    thinking_level: str | None = Field(
+        default=None,
+        sa_column=Column(String(16), nullable=True),
+    )
     # 团队能力开关（quick 群成员团队能力）：开启后影子会话懒建 lease stage
     # 用 'orchestrator'——daemon isMainAgentSession 谓词（cli.ts）命中即注入
     # dispatch_worker 等 5 主控工具（仅 provider=claude 有效，建群/改配置时

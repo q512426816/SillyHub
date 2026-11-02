@@ -523,11 +523,19 @@ def _build_config_snapshot(
     provider: str,
     profile: object | None,
     llm: object | None,
+    model: str | None = None,
+    thinking_level: str | None = None,
 ) -> dict:
     """agent 成员六要素冗余快照（machine_name/engine/model/profile_name 等）。
 
     ``profile`` / ``llm`` 参数化 object 防循环 import（调用方就近 import 的
     AgentProfile/LlmProvider 行）；仅取 name 展示字段。
+
+    2026-11-02-group-member-footer-config：新增 ``model``（成员级具体模型名）
+    与 ``thinking_level`` 两键；**语义修正**——「model」键从此存成员所选真实
+    模型名（None=未指定不落键，影子派发/多模态 gate 走供应商主模型兜底），
+    不再以 LLM 供应商名冒充模型名（供应商名经新增「provider_name」键承载，
+    chips「供应商」行消费）。
     """
     machine_name = None
     if instance is not None:
@@ -542,7 +550,11 @@ def _build_config_snapshot(
     if profile is not None:
         snapshot["profile_name"] = getattr(profile, "name", None)
     if llm is not None:
-        snapshot["model"] = getattr(llm, "name", None)
+        snapshot["provider_name"] = getattr(llm, "name", None)
+    if model:
+        snapshot["model"] = model
+    if thinking_level:
+        snapshot["thinking_level"] = thinking_level
     return snapshot
 
 
@@ -589,6 +601,8 @@ async def _rebuild_config_snapshot(db: AsyncSession, member: AgentGroupMember) -
         provider=member.provider or (member.config_snapshot or {}).get("engine") or "",
         profile=profile,
         llm=llm,
+        model=member.model,
+        thinking_level=member.thinking_level,
     )
     # workspace 锚变更同步进快照（chips 展示「工作区」维度时免查库）。
     if member.workspace_id is not None:

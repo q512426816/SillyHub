@@ -31,6 +31,7 @@ from app.modules.agent.schema import (
 )
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.session.service.thinking_level import VALID_THINKING_LEVELS
 
 from .helpers import (
     GROUP_AGENT_MEMBER_LIMIT,
@@ -273,6 +274,14 @@ async def add_member(
                 "agent 成员绑定的模型（LLM 供应商）不存在。",
                 details={"llm_provider_id": str(cfg.llm_provider_id)},
             )
+    # 2026-11-02-group-member-footer-config：思考等级词表校验（同源镜像词表，
+    # 非法 400；None=未指定引擎默认）。
+    if cfg.thinking_level is not None and cfg.thinking_level not in VALID_THINKING_LEVELS:
+        raise GroupChatInvalid(
+            f"agent 成员「{cfg.display_name}」的思考级别非法"
+            f"（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
+            details={"thinking_level": cfg.thinking_level},
+        )
     # P1 修复：同上——agent 成员昵称查重含已移除行（防撞全量唯一约束）。
     active_names, removed_names = await svc._member_name_occupancy(group.id)
     name = _validate_display_name(cfg.display_name)
@@ -286,6 +295,8 @@ async def add_member(
         workspace_id=cfg.workspace_id or group.workspace_id,
         provider=cfg.provider,
         llm_provider_id=cfg.llm_provider_id,
+        model=cfg.model,  # 成员级具体模型名（None=供应商主模型兜底）
+        thinking_level=cfg.thinking_level,  # 七档词表值（None=引擎默认）
         agent_profile_id=cfg.agent_profile_id,
         team_enabled=cfg.team_enabled,  # quick 群成员团队能力
         shadow_status="none",
@@ -297,6 +308,8 @@ async def add_member(
             provider=cfg.provider,
             profile=profile,
             llm=llm,
+            model=cfg.model,
+            thinking_level=cfg.thinking_level,
         ),
     )
     svc._session.add(member)
@@ -343,6 +356,8 @@ async def update_member(
         or payload.workspace_id is not None
         or payload.provider is not None
         or payload.llm_provider_id is not None
+        or payload.model is not None
+        or payload.thinking_level is not None
         or payload.agent_profile_id is not None
         or payload.team_enabled is not None
     ):
@@ -369,6 +384,8 @@ async def update_member(
         "workspace_id": member.workspace_id,
         "provider": member.provider,
         "llm_provider_id": member.llm_provider_id,
+        "model": member.model,
+        "thinking_level": member.thinking_level,
         "agent_profile_id": member.agent_profile_id,
         "team_enabled": member.team_enabled,
     }
@@ -448,6 +465,25 @@ async def update_member(
                 )
             member.llm_provider_id = payload.llm_provider_id
             snapshot_dirty = True
+        # 2026-11-02-group-member-footer-config：模型/思考等级热切换（模型组
+        # 口径，下轮注入生效）。PATCH None=不改（六要素既有约定）；model 空串=
+        # 显式重置「跟随供应商配置」（归一 NULL 存储，与 footer model:"" 语义
+        # 同构）；thinking_level 空串=重置引擎默认，其余值走词表校验。
+        if (
+            payload.thinking_level is not None
+            and payload.thinking_level != ""
+            and payload.thinking_level not in VALID_THINKING_LEVELS
+        ):
+            raise GroupChatInvalid(
+                f"思考级别非法（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
+                details={"thinking_level": payload.thinking_level},
+            )
+        if payload.model is not None and payload.model != member.model:
+            member.model = payload.model or None
+            snapshot_dirty = True
+        if payload.thinking_level is not None and payload.thinking_level != member.thinking_level:
+            member.thinking_level = payload.thinking_level or None
+            snapshot_dirty = True
         if (
             payload.agent_profile_id is not None
             and payload.agent_profile_id != member.agent_profile_id
@@ -503,6 +539,8 @@ async def update_member(
         model_changed = (
             old_config["provider"] != member.provider
             or old_config["llm_provider_id"] != member.llm_provider_id
+            or old_config["model"] != member.model
+            or old_config["thinking_level"] != member.thinking_level
             or old_config["agent_profile_id"] != member.agent_profile_id
         )
         if machine_changed:
@@ -580,8 +618,15 @@ async def _hot_switch_shadow_config(
     switch_llm: str | None = None
     if old_config["llm_provider_id"] != target_llm_id:
         switch_llm = str(target_llm_id) if target_llm_id is not None else ""
+    # 2026-11-02-group-member-footer-config：成员模型热切换维度（三态同构；
+    # None→""=重置「跟随供应商配置」，同 footer model:"" 语义）。思考等级
+    # 走影子重建/新建生效（已建影子热切边界见 design 边界节）。
+    target_model = member.model
+    switch_model: str | None = None
+    if old_config["model"] != target_model:
+        switch_model = target_model or ""
 
-    if switch_profile is None and switch_llm is None:
+    if switch_profile is None and switch_llm is None and switch_model is None:
         shadow.provider = target_provider or shadow.provider
         shadow.llm_provider_id = target_llm_id
         shadow.agent_profile_id = target_profile_id
@@ -601,6 +646,7 @@ async def _hot_switch_shadow_config(
             prompt="",
             agent_profile_id=switch_profile,
             llm_provider_id=switch_llm,
+            model=switch_model,
             queue_when_busy=True,
         )
     except AppError as exc:
@@ -616,11 +662,21 @@ async def _hot_switch_shadow_config(
 
     # 切换轮（成功与否）后补齐三列：成功路径 profile/llm 已由切换分支刷新，
     # 引擎列恒需手动；失败路径全列兜底同步（真相源跟随，rollforward）。
+    # 2026-11-02-group-member-footer-config：model 维度失败路径同步
+    # shadow.config["model"]（成功路径切换分支已写；与 inject「if model:」
+    # 同口径——空值弹键回落供应商主模型）。
     fresh_shadow = await svc._session.get(AgentSession, shadow_id)
     if fresh_shadow is not None and fresh_shadow.status not in ("ended", "failed"):
         fresh_shadow.provider = target_provider or fresh_shadow.provider
         fresh_shadow.llm_provider_id = target_llm_id
         fresh_shadow.agent_profile_id = target_profile_id
+        if switch_model is not None:
+            fresh_cfg = dict(fresh_shadow.config or {})
+            if member.model:
+                fresh_cfg["model"] = member.model
+            else:
+                fresh_cfg.pop("model", None)
+            fresh_shadow.config = fresh_cfg
         svc._session.add(fresh_shadow)
         await svc._session.commit()
     return switched

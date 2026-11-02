@@ -130,8 +130,10 @@ class TestMigrationStructure:
         # 2026-11-01-provider-share-audit-fixes 仅如实化其降级注释——实删
         # business_member 名下全部 change:read，SQL 与链位零改动）→
         # 20261030180000（llm_provider_shares 按用户共享供应商——
-        # 2026-10-30-provider-user-share）。
-        assert heads[0] == "20261030180000"  # 链尾锚随主线新迁移前移（注释链续写）
+        # 2026-10-30-provider-user-share）→
+        # 20261102140000（agent_group_members 增 model/thinking_level 两列——
+        # 2026-11-02-group-member-footer-config）。
+        assert heads[0] == "20261102140000"  # 链尾锚随主线新迁移前移（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()
