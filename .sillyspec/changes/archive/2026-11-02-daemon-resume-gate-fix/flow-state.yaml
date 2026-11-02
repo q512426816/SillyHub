@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  根治恢复刷新时间戳致会话闸误拒新建
+
+
+  动机：11-02 实证事故——断网恢复时 backend auto-recover 一拍全量下发 SESSION_RESUME，daemon reopen 路径把全部 46 条恢复会话的 lastActiveAt 刷成当下，会话闸「30
+  分钟内活跃」口径被顶满（46≥20），新建会话全部被 SESSION_LIMIT_REACHED 拒绝（run 落 interactive_interrupted 前端显已终止）；配置切换轮在 daemon
+  会话不存在时被静默丢弃无回报，run 卡 pending 300 秒才被僵尸轮清扫兜底。修复依据：2026-08-26-team-subsession-recursion design §5.D 闸的防进程风暴本意（idle
+  恢复会话无进程成本不应占额度）、sillyhub-daemon/src/daemon.ts:9363（reopen
+  lastActiveAt=now）、session-manager.ts:1101-1120（闸计数）、daemon.ts _routeSessionControl switch 分支 not_found 仅 warn
+  无回报（INJECT 有 _reportInjectDropped 先例）。
+
+
+  成功标准：
+
+  - daemon reopen/恢复路径不再把 lastActiveAt 刷新为当下：存在本地持久化记录时保留原值；恢复风暴后 30 分钟内新建会话不再被会话闸拒绝
+
+  - SESSION_SWITCH_CONFIG 到达但目标会话不在 daemon store 且 payload 带 run_id 时，回报该 run 失败（对齐 INJECT 丢弃回报语义），run 秒级收敛而非等 300 秒清扫
+
+  - 两处行为均有自动化测试覆盖
+autopilot: true
+prestage_ack: true
+baseline_commit: 892d72104582ed700c32a4f1897e69f6a4364799
+updatedAt: '2026-11-02T03:25:01.895Z'
+cross_baselines:
+  sillyspec: 05901a963032f87e9c0c0f40b6d94810413730c1
+baseline_sha256: cb632e26006a882875d8170c157175513082583e1e689ff90952946f3913ad44
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx2+jsx3)（23.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261102030207\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 13 个
+

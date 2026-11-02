@@ -9587,3 +9587,57 @@
   confirmed_at: null
   source_change: 2026-11-02-scan-docs-unbound-view
   status: active
+
+## FR-daemon-369 daemon reopen/恢复路径不再把 lastActiveAt 刷新为当下：存在本地持久化记录时保留原值；恢复风暴后 30 分钟内新建会话不再被会话闸拒绝
+变更：2026-11-02-daemon-resume-gate-fix
+状态：active
+摘要：恢复风暴不占闸额度；无本地记录时维持现状兜底；idle 扫描不从历史时间戳起算误杀
+场景正文：
+- 场景：恢复风暴不占闸额度 — Given daemon 本地 sessions.json 有 46 条非终态恢复记录（lastActiveAt 为各自真实历史值），backend 一拍全量下发 SESS；When daemon 逐条完成 reopen 恢复后，用户立即新建会话；Then 每条恢复记录的 lastActiveAt 保留其持久化原值（不等于恢复时刻），会话闸活跃计数 < 上限，新会话正常创建
+- 场景：无本地记录时维持现状兜底 — Given daemon 本地无该会话的持久化记录（跨机移交 / 记录超龄清除）且 payload 未带 last_active_at；When SESSION_RESUME 到达；Then record.lastActiveAt 取 Date.now()（维持现行兜底行为，单点 reopen 不足以顶满闸）
+- 场景：idle 扫描不从历史时间戳起算误杀 — Given SESSION_IDLE_TIMEOUT_SEC>0 且某会话经 reopen 恢复（保留的 lastActiveAt 为 8 天前）；When idle 扫描在恢复后立即运行；Then 空闲时长自 restoredAt（恢复时刻）起算，该会话不被立即回收
+全文：.sillyspec/changes/archive/2026-11-02-daemon-resume-gate-fix/requirements.md#FR-01
+最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-daemon-resume-gate-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/daemon-session-resume-route.test.ts「本地持久化记录存在 → record.lastActiveAt 保留原值（恢复不续命）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-daemon-resume-gate-fix
+  status: active
+
+## FR-daemon-370 SESSION_SWITCH_CONFIG 到达但目标会话不在 daemon store 且 payload 带 run_id 时，回报该 run 失败（对齐 INJECT 丢弃回报语义），run 秒级收敛而非等 300 秒清扫
+变更：2026-11-02-daemon-resume-gate-fix
+状态：active
+摘要：会话不存在秒级收敛；旧 payload 降级不报错
+场景正文：
+- 场景：会话不存在秒级收敛 — Given daemon store 无目标会话（创建阶段已失败，本机 11-02 09:08 实证形态）；When SESSION_SWITCH_CONFIG（含 run_id/lease_id/claim_token）到达
+- 场景：旧 payload 降级不报错 — Given SESSION_SWITCH_CONFIG payload 缺 lease_id（旧 backend）；When 目标会话不存在；Then 维持仅 warn 丢弃现状，不调用回报（要素不全无法寻址），无异常抛出
+全文：.sillyspec/changes/archive/2026-11-02-daemon-resume-gate-fix/requirements.md#FR-02
+最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-02-daemon-resume-gate-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/daemon-session-switch-config.test.ts「store 无目标会话且三要素齐全 → notifyRunResult 回报 run 失败」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-02-daemon-resume-gate-fix
+  status: active
+
+## FR-daemon-371 两处行为均有自动化测试覆盖
+变更：2026-11-02-daemon-resume-gate-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本变更触达的 sillyhub-daemon 源码与 backend control.py；When 运行 daemon vitest 全量与 backend 触达面 pytest；Then 新增用例通过、存量用例零回归、typecheck 零错误
+全文：.sillyspec/changes/archive/2026-11-02-daemon-resume-gate-fix/requirements.md#FR-03
+最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe

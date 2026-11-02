@@ -202,3 +202,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 共享弹窗补密钥可见性告知（解密密钥会下发到会话运行时守护进程含对方机器） |
 | 2026-11-02 | 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复 |
 | 2026-11-02 | 2026-11-02-scan-docs-unbound-view | 扫描文档页无绑定也可浏览服务端存量数据 |
+| 2026-11-02 | 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建 |

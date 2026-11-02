@@ -2623,3 +2623,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：e3a2efbe1d6cba9012dd3d97791cf730ec373991
 理由：- 最大风险：无绑定且该工作区从未被任何成员的 daemon 同步过 → 服务端镜像不存在，reparse 回 DOCS_DIR_MISSING 警告 + 空列表。展示为既有空态 + warnings 横幅（既有渲染面），可接受——本来也无数据可看；不为此加特殊分支。 - 放弃方案①：后端为无绑定用户提供共享 daemon 绑定（把「借用」语义扩到读面）——牵动 runtime 权限模型，改动面大且不为「看存量数据」所需，放弃。 - 放弃方案②：不动 DaemonRequiredNotice、在 scan-docs 页内新写一个降级横幅组件——配置入口与引导展开逻辑得复制一遍，两处漂移风险，放弃（选 variant 复用）。
+
+## D-unmapped-327@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-11-02-daemon-resume-gate-fix
+原编号：D-001@v1
+锚点：未记录
+最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
+理由：答：最大风险是保留旧 `lastActiveAt` 后，显式启用 idle 回收（`SESSION_IDLE_TIMEOUT_SEC>0`）的部署会把刚恢复的会话立即回收——以 `restoredAt` 起算空闲时长封闭该路径（boot 恢复路径顺带修复既有同形态隐患）；默认关闭形态零影响。次风险：record-less 兜底 `Date.now()` 在「跨机移交全量 reopen」的罕见形态下仍可顶闸——接受（规模受 backend 24h GC 约束；彻底封死需协议加 last_active_at 字段，本期不做，留作后续升级位：daemon 已按 payload 显式值优先实现，backend 未来补发即生效，零 daemon 改动）。 放弃的方案：① 改闸计数口径（如排除「恢复后从未 inject」的会话）——需新增跨路径状态位且改动防风暴闸本体，风险面大于收益；改时间戳源头一处即闭环。② backend 全量恢复改分批/限速下发——治标不治本（30 分钟窗口仍在，只是推迟），且改动 backend 调度节奏牵连重连收敛时序。③ 用 `turnCount===0` 判恢复态——新会话首轮未完成前同为 0，误伤新建会话判据，弃。

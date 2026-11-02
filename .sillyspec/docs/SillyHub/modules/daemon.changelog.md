@@ -128,3 +128,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-11-02-stale-test-sync-contract | 契约演进后测试欠同步修复
 - 2026-11-02-embed-batch-chunk | embedding 全量批分批化根治 cgroup OOM
 - 2026-11-02-scan-docs-unbound-view | 扫描文档页无绑定也可浏览服务端存量数据
+- 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建

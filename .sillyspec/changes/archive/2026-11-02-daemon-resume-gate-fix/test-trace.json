@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-daemon-resume-gate-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-02-daemon-resume-gate-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-session-resume-route.test.ts「本地持久化记录存在 → record.lastActiveAt 保留原值（恢复不续命）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-daemon-resume-gate-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-02-daemon-resume-gate-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-session-switch-config.test.ts「store 无目标会话且三要素齐全 → notifyRunResult 回报 run 失败」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-daemon-resume-gate-fix"
+    }
+  ]
+}

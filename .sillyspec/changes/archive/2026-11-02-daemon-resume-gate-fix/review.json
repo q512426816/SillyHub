@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-daemon-resume-gate-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e3a2efbe1d6cba9012dd3d97791cf730ec373991",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "测试绑定用例名与实际用例名不完全一致（FR-03 绑定名无对应 it 用例）",
+      "evidence": "requirements.md FR-01 绑定名「resume 保留本地持久化 lastActiveAt（恢复不续命）」实际为「本地持久化记录存在 → record.lastActiveAt 保留原值（恢复不续命）」、FR-02 绑定名「switch 会话不存在时回报 run 失败」实际为「store 无目标会话且三要素齐全 → notifyRunResult 回报 run 失败」——语义同型可对上，仅字面不一致；FR-03 绑定名「全量回归（vitest run + typecheck）」在绑定文件中不存在同名 it 用例，属过程性绑定，其承诺实质由 ledger 回执（verify-runs/20261102030207/test-result.json passed）+ 本次变更面复跑（vitest 53 过 / pytest 28 过 / tsc --noEmit exit 0）兑现。不影响行为正确性，仅登记口径瑕疵。；已修：requirements.md 测试绑定行改为实际 it 用例名，FR-03 改标不适用（过程性验收由 ledger 回执+评审复跑兑现）",
+      "location": ".sillyspec/changes/2026-11-02-daemon-resume-gate-fix/requirements.md:62-64"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受——①record-less 兜底 Date.now()：跨机移交全量 reopen 的罕见形态仍可顶闸，规模受 backend 24h suspended GC 约束、单点 reopen 不足以顶满 20 上限，且 daemon 已按 payload 显式值优先实现留出升级位；③payload last_active_at 前向兼容位本期不下发：backend 补发即零 daemon 改动生效，本期不发不新增风险面。盲维作答与 diff 实际风险面相符（load 读最近落盘快照、查无记录走 now 兜底与现状一致）",
+    "并发": "ok——design 称 save 单 promise queue 串行化属实（session-store-persistence.ts:273 _saveQueue + :371 链式排队，最后一条 win 不交错损坏）；restoredAt 为恢复链单入口单写者字段，无竞争",
+    "切换": "边界已裁决：可接受——②回报失败降级 300 秒僵尸轮清扫兜底：_reportSwitchDropped catch 仅 warn 实证存在，退化到现状而非更糟；④保留旧 lastActiveAt 后 idle 回收改 restoredAt 起算：scanIdle max 保护有正反两用例覆盖（session-idle-scanner.test.ts），restoredAt 仅内存态、静默驱逐重建时随新 state 重写为当下（persistence.ts:244），保护不失效。SessionBusyError 同 lease 守卫与静默驱逐路径未被本变更触碰，与作答一致",
+    "作用域": "ok——sessions.json 为 daemon 本机文件按 sessionId 精确匹配不串台；backend leaseId 新键仅进切换轮会话级消息，无跨工作区/多实例共享面；基线..HEAD 无 api-types/协议常量文件改动，生成物无需同步"
+  },
+  "reviewedAt": "2026-11-02T11:19:38+08:00"
+}
