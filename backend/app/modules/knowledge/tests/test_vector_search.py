@@ -19,6 +19,7 @@ import pytest
 
 from app.main import app as fastapi_app
 from app.modules.knowledge.vector_search import (
+    _EMBED_BATCH_SIZE,
     decisions_fingerprint,
     parse_decision_entries,
     reset_embedder_for_tests,
@@ -40,10 +41,12 @@ class FakeEmbedder:
     def __init__(self) -> None:
         self.embed_calls = 0
         self.embedded_texts = 0
+        self.batch_sizes: list[int] = []
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self.embed_calls += 1
         self.embedded_texts += len(texts)
+        self.batch_sizes.append(len(texts))
         return [[float(t.count(ch)) for ch in _BUCKET_CHARS] for t in texts]
 
 
@@ -85,6 +88,18 @@ _TWO_ENTRIES = """# 决策知识 — demo
 状态：implemented
 理由：epoch 迁移后形态。
 """
+
+
+def _gen_bulk_entries(n: int, heavy_idx: int = 137) -> str:
+    """n 条批量语料；heavy_idx 条目理由带「缓存」×3（跨批条目排序探针）。"""
+    parts = ["# 决策知识 — bulk\n"]
+    for i in range(1, n + 1):
+        heavy = "缓存 " * 3 if i == heavy_idx else ""
+        parts.append(
+            f"\n## D-bulk-{i:03d}@v1 决策 {i}\n"
+            f"变更：bulk-{i}\n状态：implemented\n理由：{heavy}批量条目 {i} 的理由文本。\n"
+        )
+    return "".join(parts)
 
 
 # ── 解析 ─────────────────────────────────────────────────────────────────────
@@ -138,6 +153,31 @@ def test_index_fingerprint_cache_and_invalidation(tmp_path: Path) -> None:
     # 不同 workspace key 各自建索引（互不串台）：改后语料 4 条，+4 +1 查询 = 15
     search_sync(root, "ws-b", "缓存淘汰", 10, emb, "test-model")
     assert emb.embedded_texts == 15, "workspace 键隔离各自建索引"
+
+
+def test_index_rebuild_embeds_in_batches(tmp_path: Path) -> None:
+    """FR-01（2026-11-02 生产 OOM 根治）：索引重建必须分批喂 embed——单次全量批
+    曾把 embedding 子进程 RSS 推到 2.3~2.45GB 撞 2500m cgroup 配额（dmesg 6 次强杀）。"""
+    root = _seed_spec_root(tmp_path, _gen_bulk_entries(150))
+    emb = FakeEmbedder()
+    out = search_sync(root, "ws-batch", "缓存", 10, emb, "test-model")
+    assert emb.batch_sizes == [
+        _EMBED_BATCH_SIZE,
+        _EMBED_BATCH_SIZE,
+        150 - 2 * _EMBED_BATCH_SIZE,
+        1,
+    ], "语料按 64 条/批顺序分批（64+64+22），查询独立 1 条成批"
+    assert emb.embedded_texts == 151, "分批不丢不重（150 语料 + 1 查询）"
+    assert out["results"][0]["anchor"] == "D-bulk-137@v1", (
+        "分批按序聚合——跨批条目（第 137 条在第 3 批）排序不回归"
+    )
+
+
+def test_small_corpus_stays_single_batch(tmp_path: Path) -> None:
+    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
+    emb = FakeEmbedder()
+    search_sync(root, "ws-small", "缓存", 10, emb, "test-model")
+    assert emb.batch_sizes == [3, 1], "≤64 条语料单批嵌入（分批不改变小语料行为面）"
 
 
 def test_search_ranking_limit_and_contract(tmp_path: Path) -> None:

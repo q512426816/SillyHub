@@ -18,7 +18,9 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
   本地解析——「平台只做语义召回」原则，本地文件是真相源）。
 - **索引** = 进程内按 decisions 文件集指纹 ``(name, mtime_ns, size)`` 懒构建缓存
   （设计偏差：提案的 daemon sync 挂点灌索引改为查询时懒构建——语料量级 700-2400
-  条秒级，免 daemon 改动，文件增删改自动失效自愈）。
+  条秒级，免 daemon 改动，文件增删改自动失效自愈）。重建嵌入**必须**经
+  ``_embed_corpus`` 按 64 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
+  ~2.4k 条曾把 worker RSS 推到 2.3~2.45GB，撞 2500m cgroup 配额被强杀 6 次）。
 - **相似度** = 归一化点积（余弦），纯 Python（2.4k×512 毫秒级，不引入 numpy 耦合；
   fastembed 自带 numpy 但不作为本模块直接依赖）。
 """
@@ -386,6 +388,20 @@ def _cosine_top_k(
     ]
 
 
+# 单次 embed 请求批大小上限：worker 子进程按请求整体解析 texts 并推理，单批过大会把
+# worker RSS 推过容器配额（2026-11-02 生产 6 次 cgroup OOM：全量批 ~2.4k 条 → RSS
+# 2.3~2.45GB 撞 2500m mem_limit）。索引重建必须经 _embed_corpus 分批喂。
+_EMBED_BATCH_SIZE = 64
+
+
+def _embed_corpus(embedder: object, texts: list[str]) -> list[list[float]]:
+    """按 ``_EMBED_BATCH_SIZE`` 分批嵌入并按序聚合（结果等价单次全量调用）。"""
+    vectors: list[list[float]] = []
+    for i in range(0, len(texts), _EMBED_BATCH_SIZE):
+        vectors.extend(embedder.embed(texts[i : i + _EMBED_BATCH_SIZE]))
+    return vectors
+
+
 def search_sync(
     spec_root: Path,
     workspace_key: str,
@@ -416,7 +432,7 @@ def search_sync(
     cached = _index_cache_get(key)
     if cached is None or cached["fingerprint"] != fp:
         entries = parse_decision_entries(spec_root)
-        vectors = embedder.embed([e.text for e in entries]) if entries else []
+        vectors = _embed_corpus(embedder, [e.text for e in entries])
         cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
         _index_cache_put(key, cached)
     results = _cosine_top_k(embedder.embed([q])[0], cached["entries"], cached["vectors"], limit)
