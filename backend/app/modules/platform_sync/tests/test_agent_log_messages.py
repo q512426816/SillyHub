@@ -273,6 +273,7 @@ class TestStatusLayering:
             "duration_ms": None,
             "usage": None,
             "edit_patch": None,
+            "bg_task_final": None,
         }
         tool_use = body["messages"][1]
         assert tool_use["kind"] == "tool_use"
@@ -662,6 +663,7 @@ class TestOpenapiExposure:
             "duration_ms",
             "usage",
             "edit_patch",
+            "bg_task_final",
         }
         usage_props = schemas["AgentLogMessageUsage"]["properties"]
         assert set(usage_props) == {
