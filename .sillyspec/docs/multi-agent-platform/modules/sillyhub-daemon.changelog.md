@@ -63,3 +63,4 @@
 - 2026-10-28-model-retry-visible | 模型限流重试过程实时可见——复用COMPACT_STATUS协议行通道透传api_retry
 - 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception
 - 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试
+- 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复

@@ -1,0 +1,1401 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 55ed87a37..b1b2fa7e3 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -123,3 +123,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限
+ - 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误
+ - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
++- 2026-11-01-provider-share-audit-fixes | 供应商共享审计收尾——畸形UUID 422、密钥可见性告知（弹窗+模块卡）、HTTP层/claim注入链用例补全、迁移降级注释如实化
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 1a3ea912b..9de10b3df 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -199,3 +199,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-30 | 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限 |
+ | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
+ | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
++| 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 共享弹窗补密钥可见性告知（解密密钥会下发到会话运行时守护进程含对方机器） |
+diff --git a/.sillyspec/docs/SillyHub/modules/llm_provider.md b/.sillyspec/docs/SillyHub/modules/llm_provider.md
+index dbe5bb91e..f5dc372e2 100644
+--- a/.sillyspec/docs/SillyHub/modules/llm_provider.md
++++ b/.sillyspec/docs/SillyHub/modules/llm_provider.md
+@@ -22,6 +22,9 @@ created_at: 2026-08-18 01:45:00
+   - `POST /{id}/usage` — 余额/套餐用量代查
+   - `GET /{id}/quota` — 配额查询（智谱 query_zhipu_quota）
+   - `POST /{id}/set-default` — 「启动」；`POST /{id}/unset-default` — 「停止」；均返回 `SetDefaultResult{switched, affected_sessions, error, litellm_registered?}`（router 包装 service 的 DefaultSwitchResult）
++  - `GET /usable` — 会话页可用列表（自己的 + 共享给自己的，2026-10-30-provider-user-share）；共享行 `is_shared=true`/`shared_by_name`/`is_default` 强制 false，且 `settings_config`/`extra_env` 置 None（自由配置可能手填令牌，评审 P2 脱敏）；设置页仍用 `GET ""`（own-only，零回归）
++  - `GET /{id}/shares` — 列共享（仅属主）；`POST /{id}/shares` — 共享（201，幂等；identifier 按 username/email **精确匹配**，未知/禁用目标统一 404 防枚举，共享给自己 400）；`DELETE /{id}/shares/{grantee_user_id}` — 撤销（204 幂等）
++- 按用户共享语义（表 `llm_provider_shares`，`(provider_id, grantee_user_id)` 唯一约束幂等，provider/用户删除级联清理）：授权判定 `provider_usable_by`（属主或有效共享，每次 claim/turn 实时查询不缓存）为会话创建、切换与 daemon claim 三链同源；撤销后下一轮回落默认链不阻断（FR-05）。**密钥可见性（共享方须知，评审 P3 accepted 落地）**：anthropic 形态共享行的**解密 api_key 会随 claim 的 provider_config 下发到会话实际运行时 daemon——包括被共享方自己机器上的守护进程**；openai_chat 形态经 hub LiteLLM 代理不下发密钥。共享即授予凭证使用权，请仅共享给可信用户。
+ - `LlmProvider` 列：
+   - agent_kinds（JSON 数组，D-004 单值改集合）/ base_url / auth_field / api_format
+   - encrypted_api_key(bytes) + key_id（CredentialCipher，xchacha20-poly1305，照 git_identity）
+@@ -38,6 +41,9 @@ created_at: 2026-08-18 01:45:00
+   - `LlmProviderModelsTimeout`(504) — 上游请求超时（10s）
+   - `LlmProviderSsrfBlocked`(400) — base_url 解析私网/保留 IP 或 DNS 失败
+   - `LlmProviderUsageTransient`(502) — 用量查询瞬时失败（前端保上次成功值 10min）
++  - `LlmProviderShareTargetNotFound`(404) — 共享目标不存在/未激活/登录禁用（统一文案防枚举）
++  - `LlmProviderShareSelfForbidden`(400) — 共享给自己
++  - `LlmProviderIdInvalid`(422) — 路径参数非 UUID（2026-11-01-provider-share-audit-fixes；此前裸 ValueError 落通用 handler 变 500）
+ 
+ ## 关键逻辑
+ ```
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index a61bb3209..c9bbc1f23 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -92,3 +92,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-10-30 | 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限 |
+ | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
+ | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
++| 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 供应商路径参畸形UUID返422不再500；共享端点HTTP层用例与claim注入链用例补全；迁移20261030160000降级注释如实化 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 6ece6beb5..cca4b7274 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -133,3 +133,4 @@
+ - 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限
+ - 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误
+ - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
++- 2026-11-01-provider-share-audit-fixes | 供应商共享审计问题修复
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 4480f3afb..548042a11 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -250,3 +250,4 @@
+ | 2026-10-30 | 2026-10-30-business-member-change-read | 业务成员角色补变更查看权限 |
+ | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
+ | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
++| 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 供应商共享审计问题修复 |
+diff --git a/backend/app/modules/daemon/lease/context.py b/backend/app/modules/daemon/lease/context.py
+index f0307cb95..53de7d7bf 100644
+--- a/backend/app/modules/daemon/lease/context.py
++++ b/backend/app/modules/daemon/lease/context.py
+@@ -312,7 +312,41 @@ async def resolve_session_provider_config(
+         return None
+     if not await provider_usable_by(session, provider.id, actor_id):
+         return None
+-    return _provider_config_from_row(provider, agent_kind)
++    config = _provider_config_from_row(provider, agent_kind)
++    _maybe_mint_proxy_token(config, provider, actor_id, fallback_user_id)
++    return config
++
++
++def _maybe_mint_proxy_token(
++    config: dict,
++    provider,
++    actor_id: uuid.UUID,
++    runtime_user_id: uuid.UUID | None,
++) -> None:
++    """2026-10-31-share-openai-chat-proxy-token：openai_chat 且守护进程/会话
++    属主任一≠供应商属主时附限域代理令牌（provider_config 新键）。
++
++    llm-proxy 归属断言的认证主体是守护进程属主（子进程 Bearer=daemon apiKey），
++    共享/借出场景下模型名 uid（供应商属主）与之必然不等 → 403。令牌把会话
++    属主身份随 provider_config 带到子进程（litellm_proxy_token，daemon 侧
++    优先作 Bearer），代理端验签后按 (o, p) 严格断言模型名。仅在「会话属主=
++    供应商属主=守护进程属主」的现状可用链路跳过——payload 与改造前逐字一致，
++    可用路径零改动。runtime_user_id=None（切换附件路径，runtime 未知）时按
++    需要铸造：宁多铸（令牌对该模型名恒可验）不漏铸（漏铸即残留 403）。
++    撤销共享后本函数不再被触达（上游 provider_usable_by 已拒），在途令牌
++    存活至 exp——对齐 anthropic 分支「撤销只影响后续 claim」的凭证时效语义。
++    """
++    if config.get("api_format") != "openai_chat":
++        return
++    if actor_id == provider.user_id and runtime_user_id == provider.user_id:
++        return
++    from app.modules.llm_provider.proxy_token import mint_llm_proxy_token
++
++    config["litellm_proxy_token"] = mint_llm_proxy_token(
++        session_user_id=actor_id,
++        owner_user_id=provider.user_id,
++        provider_id=provider.id,
++    )
+ 
+ 
+ async def _inject_provider_config(
+diff --git a/backend/app/modules/daemon/router/gateway_misc.py b/backend/app/modules/daemon/router/gateway_misc.py
+index 0bb8c92b1..85fea3aee 100644
+--- a/backend/app/modules/daemon/router/gateway_misc.py
++++ b/backend/app/modules/daemon/router/gateway_misc.py
+@@ -48,6 +48,7 @@ from app.modules.daemon.protocol import (
+ )
+ from app.modules.daemon.router import router
+ from app.modules.daemon.service import DaemonService
++from app.modules.llm_provider.proxy_token import PROXY_TOKEN_PREFIX, verify_llm_proxy_token
+ 
+ log = get_logger("app.modules.daemon.router")
+ 
+@@ -160,6 +161,21 @@ def _extract_proxy_model_name(body_bytes: bytes, path: str) -> str | None:
+     return seg or None
+ 
+ 
++def _extract_bearer_value(request: Request) -> str | None:
++    """Authorization Bearer 原值提取（无 Bearer 头/形态不符返回 None）。
++
++    2026-10-31-share-openai-chat-proxy-token：llm-proxy 需在 principal 鉴权前
++    短路识别 shlp_ 限域代理令牌（令牌不映射 User，走独立验签分支）。
++    """
++    raw = request.headers.get("authorization")
++    if not raw:
++        return None
++    parts = raw.split()
++    if len(parts) == 2 and parts[0].lower() == "bearer":
++        return parts[1].strip() or None
++    return None
++
++
+ # 拆 GET/POST 两个入口共享内部实现：api_route 多方法会让 FastAPI 为每个 method 生成
+ # 同名 operation id，openapi-typescript 生成重复 TS 标识符（api-types.ts 编译炸）。
+ # GET/HEAD 同读语义、POST 主通道；OPTIONS 由 Starlette CORSMiddleware 处理。
+@@ -216,13 +232,35 @@ async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
+         )
+ 
+     # ── 1. 鉴权（复用 task-01 分流口径，失败 401）──
+-    principal = await _authenticate_http_bearer(request)
+-    if principal is None:
+-        raise HTTPException(
+-            status_code=status.HTTP_401_UNAUTHORIZED,
+-            detail="authentication required",
+-            headers={"WWW-Authenticate": "Bearer"},
++    # 2026-10-31-share-openai-chat-proxy-token：Bearer 值带 shlp_ 前缀 → 限域
++    # 代理令牌验签分支（共享/借出 openai_chat 链——认证主体是令牌三元组，非
++    # 守护进程属主）。验签失败同 401（fail-closed）；成功以 Grant 替代 principal
++    # 做步骤 2 断言，不触达 apiKey/JWT 路径——存量流量一行不差走旧路径。
++    principal: User | None = None
++    proxy_grant = None
++    bearer = _extract_bearer_value(request)
++    if bearer is not None and bearer.startswith(PROXY_TOKEN_PREFIX):
++        proxy_grant = verify_llm_proxy_token(bearer)
++        if proxy_grant is None:
++            raise HTTPException(
++                status_code=status.HTTP_401_UNAUTHORIZED,
++                detail="authentication required",
++                headers={"WWW-Authenticate": "Bearer"},
++            )
++        log.info(
++            "llm_proxy_proxy_token_auth",
++            path=path,
++            session_user_id=str(proxy_grant.session_user_id),
++            provider_id=str(proxy_grant.provider_id),
+         )
++    else:
++        principal = await _authenticate_http_bearer(request)
++        if principal is None:
++            raise HTTPException(
++                status_code=status.HTTP_401_UNAUTHORIZED,
++                detail="authentication required",
++                headers={"WWW-Authenticate": "Bearer"},
++            )
+ 
+     # ── 2. model 归属断言（Grill UB-4b）──
+     body_bytes = b""
+@@ -231,18 +269,36 @@ async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
+         body_bytes = await request.body()
+         model_name = _extract_proxy_model_name(body_bytes, path)
+         if model_name is not None:
+-            m = _LITELLM_MODEL_NAME_RE.match(model_name)
+-            if m is not None and m.group(1) != str(principal.id):
+-                # 不回显 model 名 / uid——403 detail 固定短语，不泄请求内容。
+-                log.warning(
+-                    "llm_proxy_model_ownership_mismatch",
+-                    path=path,
+-                    principal_user_id=str(principal.id),
+-                )
+-                raise HTTPException(
+-                    status_code=status.HTTP_403_FORBIDDEN,
+-                    detail="model ownership mismatch",
+-                )
++            if proxy_grant is not None:
++                # 令牌路径：usr 形态模型名必须等于令牌 (o,p)——窄授权，仅本令牌
++                # 供应商可达；非 usr 形态与 principal 路径同语义放行（LiteLLM
++                # 自会按无 deployment 失败）。不回显 model 名——403 detail 固定短语。
++                if (
++                    _LITELLM_MODEL_NAME_RE.match(model_name) is not None
++                    and model_name != proxy_grant.expected_model_name
++                ):
++                    log.warning(
++                        "llm_proxy_model_ownership_mismatch",
++                        path=path,
++                        session_user_id=str(proxy_grant.session_user_id),
++                    )
++                    raise HTTPException(
++                        status_code=status.HTTP_403_FORBIDDEN,
++                        detail="model ownership mismatch",
++                    )
++            else:
++                m = _LITELLM_MODEL_NAME_RE.match(model_name)
++                if m is not None and m.group(1) != str(principal.id):
++                    # 不回显 model 名 / uid——403 detail 固定短语，不泄请求内容。
++                    log.warning(
++                        "llm_proxy_model_ownership_mismatch",
++                        path=path,
++                        principal_user_id=str(principal.id),
++                    )
++                    raise HTTPException(
++                        status_code=status.HTTP_403_FORBIDDEN,
++                        detail="model ownership mismatch",
++                    )
+ 
+     if not model_name:
+         # GET /models 等无 model 语义请求放行（warn 留痕，不拦——LiteLLM 侧
+diff --git a/backend/app/modules/daemon/tests/test_lease_context_provider_share.py b/backend/app/modules/daemon/tests/test_lease_context_provider_share.py
+index e4dde1320..c9552dfcf 100644
+--- a/backend/app/modules/daemon/tests/test_lease_context_provider_share.py
++++ b/backend/app/modules/daemon/tests/test_lease_context_provider_share.py
+@@ -16,7 +16,9 @@ import pytest
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.daemon.lease.context import resolve_session_provider_config
++from app.modules.llm_provider.litellm_client import litellm_model_name
+ from app.modules.llm_provider.model import LlmProvider, LlmProviderShare
++from app.modules.llm_provider.proxy_token import verify_llm_proxy_token
+ 
+ 
+ async def _create_user(session: AsyncSession, *, label: str = "") -> uuid.UUID:
+@@ -43,6 +45,7 @@ async def _seed_provider(
+     *,
+     api_key: str = "sk-pshare-secret-0001",
+     model: str = "claude-sonnet-4",
++    api_format: str = "anthropic",
+ ) -> LlmProvider:
+     from app.core.crypto import get_cipher
+ 
+@@ -55,9 +58,9 @@ async def _seed_provider(
+         agent_kinds=["claude"],
+         encrypted_api_key=ct,
+         key_id=key_id,
+-        base_url="https://api.anthropic.com",
++        base_url=None if api_format == "openai_chat" else "https://api.anthropic.com",
+         models=[{"name": model, "roles": ["sonnet"]}],
+-        api_format="anthropic",
++        api_format=api_format,
+     )
+     session.add(row)
+     await session.commit()
+@@ -120,6 +123,8 @@ async def test_session_provider_shared_with_session_owner_is_injected(
+     assert cfg is not None
+     assert cfg["api_key"] == "sk-borrower-can-use"
+     assert cfg["model"] == "claude-sonnet-4"
++    # anthropic 格式禁止出现代理令牌（令牌只服务 openai_chat 的 hub 代理链）。
++    assert "litellm_proxy_token" not in cfg
+ 
+ 
+ @pytest.mark.asyncio
+@@ -183,3 +188,207 @@ async def test_revoked_share_falls_back_to_default_chain(
+ 
+     cfg = await resolve_session_provider_config(db_session, lease_meta, "claude")
+     assert cfg is None
++
++
++# ── 2026-11-01-provider-share-audit-fixes：_inject_provider_config 真实注入链 ──
++# 评审 P3 open：此前用例只测 resolve_session_provider_config 返回值，未走
++# _inject_provider_config 的 payload 注入，也未覆盖 session 缺行回落 runtime 属主。
++
++
++async def _create_lease_with_runtime(session: AsyncSession, host_id: uuid.UUID, metadata: dict):
++    """建 runtime + claimed lease（镜像 test_build_claim_payload._create_dispatch_style_lease，
++    agent_run_id 留 NULL——interactive lease D-005 形态）。"""
++    from app.modules.daemon.model import DaemonTaskLease
++    from app.modules.daemon.tests.test_lease_service import _create_runtime
++
++    rt = await _create_runtime(session, host_id)
++    lease = DaemonTaskLease(
++        id=uuid.uuid4(),
++        runtime_id=rt.id,
++        status="claimed",
++        kind="interactive",
++        metadata_=dict(metadata),
++    )
++    session.add(lease)
++    await session.commit()
++    await session.refresh(lease)
++    return lease
++
++
++@pytest.mark.asyncio
++async def test_inject_chain_shared_provider_runtime_owner_differs(
++    db_session: AsyncSession,
++) -> None:
++    """runtime 属主（出借方）≠ 会话属主（借用方）→ 共享供应商注入 payload。
++
++    agent_kind_raw=claude_code 同时覆盖 X-08 归一化；断言含明文 key 下发与
++    X-10 model 覆盖（FR-05 场景一）。
++    """
++    from app.modules.daemon.lease.context import _inject_provider_config
++
++    host = await _create_user(db_session, label="host-inject")
++    borrower = await _create_user(db_session, label="borrower-inject")
++    provider = await _seed_provider(db_session, host, api_key="sk-inject-chain")
++    sid = await _create_session(db_session, borrower)
++    await _share(db_session, provider, host, borrower)
++    lease = await _create_lease_with_runtime(
++        db_session,
++        host,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
++    )
++
++    payload: dict = {}
++    await _inject_provider_config(
++        db_session,
++        lease,
++        dict(lease.metadata_ or {}),
++        payload,
++        agent_kind_raw="claude_code",
++    )
++
++    cfg = payload.get("provider_config")
++    assert cfg is not None, payload
++    assert cfg["api_key"] == "sk-inject-chain"
++    assert payload["model"] == "claude-sonnet-4"
++
++
++@pytest.mark.asyncio
++async def test_inject_chain_missing_session_row_falls_back_to_runtime_owner(
++    db_session: AsyncSession,
++) -> None:
++    """session_id 指向不存在会话行 → 回落 fallback_user_id（runtime 属主）。
++
++    属主自有供应商照常注入——与改造前（按 runtime 属主解析）行为一致（FR-05 场景二）。
++    """
++    from app.modules.daemon.lease.context import _inject_provider_config
++
++    host = await _create_user(db_session, label="host-fb")
++    provider = await _seed_provider(db_session, host, api_key="sk-fallback-owner")
++    lease = await _create_lease_with_runtime(
++        db_session,
++        host,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(uuid.uuid4())},
++    )
++
++    payload: dict = {}
++    await _inject_provider_config(
++        db_session,
++        lease,
++        dict(lease.metadata_ or {}),
++        payload,
++        agent_kind_raw="claude",
++    )
++
++    cfg = payload.get("provider_config")
++    assert cfg is not None, payload
++    assert cfg["api_key"] == "sk-fallback-owner"
++
++
++@pytest.mark.asyncio
++async def test_inject_chain_unshared_provider_absent(db_session: AsyncSession) -> None:
++    """会话属主无授权（未共享）→ provider_config absent，回落 bound/default 链。"""
++    from app.modules.daemon.lease.context import _inject_provider_config
++
++    host = await _create_user(db_session, label="host-noauth")
++    borrower = await _create_user(db_session, label="borrower-noauth")
++    provider = await _seed_provider(db_session, host, api_key="sk-not-shared")
++    sid = await _create_session(db_session, borrower)
++    lease = await _create_lease_with_runtime(
++        db_session,
++        host,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
++    )
++
++    payload: dict = {}
++    await _inject_provider_config(
++        db_session,
++        lease,
++        dict(lease.metadata_ or {}),
++        payload,
++        agent_kind_raw="claude",
++    )
++
++    assert "provider_config" not in payload
++
++
++# ── 2026-10-31-share-openai-chat-proxy-token：openai_chat 链限域令牌 ──────────
++# llm-proxy 归属断言的认证主体是守护进程属主，与共享/借出场景的模型名 uid（供应
++# 商属主）必然不等——令牌把会话属主身份带到子进程，代理端按 (o,p) 严格断言。
++
++
++@pytest.mark.asyncio
++async def test_openai_chat_shared_provider_gets_proxy_token(
++    db_session: AsyncSession,
++) -> None:
++    """FR-01：受赠者选共享 openai_chat 供应商 → 含令牌，模型名仍为属主 uid。"""
++    host = await _create_user(db_session, label="host-oai")
++    borrower = await _create_user(db_session, label="borrower-oai")
++    provider = await _seed_provider(db_session, host, api_format="openai_chat")
++    sid = await _create_session(db_session, borrower)
++    await _share(db_session, provider, host, borrower)
++
++    cfg = await resolve_session_provider_config(
++        db_session,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
++        "claude",
++        fallback_user_id=host,
++    )
++
++    assert cfg is not None
++    token = cfg.get("litellm_proxy_token")
++    assert isinstance(token, str) and token.startswith("shlp_")
++    grant = verify_llm_proxy_token(token)
++    assert grant is not None
++    assert grant.session_user_id == borrower
++    assert grant.owner_user_id == host
++    assert grant.provider_id == provider.id
++    assert cfg["litellm_model_name"] == litellm_model_name(host, provider.id)
++    assert grant.expected_model_name == cfg["litellm_model_name"]
++
++
++@pytest.mark.asyncio
++async def test_openai_chat_own_provider_borrowed_runtime_gets_proxy_token(
++    db_session: AsyncSession,
++) -> None:
++    """FR-02：会话属主自有供应商跑借出守护进程（runtime≠属主）→ 同样含令牌。"""
++    borrower = await _create_user(db_session, label="self-borrow")
++    host = await _create_user(db_session, label="runtime-host")
++    provider = await _seed_provider(db_session, borrower, api_format="openai_chat")
++    sid = await _create_session(db_session, borrower)
++
++    cfg = await resolve_session_provider_config(
++        db_session,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
++        "claude",
++        fallback_user_id=host,
++    )
++
++    assert cfg is not None
++    grant = verify_llm_proxy_token(cfg["litellm_proxy_token"])
++    assert grant is not None
++    # 会话属主=供应商属主=自有供应商；令牌只为「Bearer 主体（runtime 出借方）
++    # ≠ 属主」的身份缺口服务。
++    assert grant.session_user_id == borrower
++    assert grant.owner_user_id == borrower
++    assert grant.provider_id == provider.id
++
++
++@pytest.mark.asyncio
++async def test_openai_chat_own_machine_no_token(
++    db_session: AsyncSession,
++) -> None:
++    """FR-02 零改动锚：会话属主=供应商属主=守护进程属主 → 不下发令牌。"""
++    borrower = await _create_user(db_session, label="self-host")
++    provider = await _seed_provider(db_session, borrower, api_format="openai_chat")
++    sid = await _create_session(db_session, borrower)
++
++    cfg = await resolve_session_provider_config(
++        db_session,
++        {"session_llm_provider_id": str(provider.id), "session_id": str(sid)},
++        "claude",
++        fallback_user_id=borrower,
++    )
++
++    assert cfg is not None
++    assert "litellm_proxy_token" not in cfg
++    assert cfg["litellm_model_name"] == litellm_model_name(borrower, provider.id)
+diff --git a/backend/app/modules/daemon/tests/test_llm_proxy.py b/backend/app/modules/daemon/tests/test_llm_proxy.py
+index b613d6c7d..2febf4bad 100644
+--- a/backend/app/modules/daemon/tests/test_llm_proxy.py
++++ b/backend/app/modules/daemon/tests/test_llm_proxy.py
+@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from app.core.config import get_settings
+ from app.modules.auth.api_key_service import ApiKeyService
+ from app.modules.auth.model import User
++from app.modules.llm_provider.proxy_token import PROXY_TOKEN_PREFIX, mint_llm_proxy_token
+ 
+ # ── seed / app helpers（范式对齐 test_ws_auth.py）────────────────────────────
+ 
+@@ -468,3 +469,149 @@ class TestLlmProxyForwarding:
+         )
+         assert resp.status_code == 200
+         assert captured["headers"]["Authorization"] == "Bearer sk-litellm-master-test"
++
++
++# ════════════════════════════════════════════════════════════════════════════
++# 5. 限域代理令牌（2026-10-31-share-openai-chat-proxy-token / FR-03）
++#    共享/借出 openai_chat 链的子进程 Bearer = shlp_ 令牌（身份是令牌三元组，
++#    非守护进程属主）——验签分支按 (o,p) 严格断言模型名，不触达 apiKey/JWT。
++# ════════════════════════════════════════════════════════════════════════════
++
++
++class TestLlmProxyScopedToken:
++    @staticmethod
++    def _mint(*, ttl_seconds: int | None = None) -> tuple[str, str]:
++        """铸一把 (session_user, owner, provider) 令牌，返回 (token, 匹配模型名)。"""
++        kwargs: dict[str, Any] = {}
++        if ttl_seconds is not None:
++            kwargs["ttl_seconds"] = ttl_seconds
++        owner, provider = uuid.uuid4(), uuid.uuid4()
++        token = mint_llm_proxy_token(
++            session_user_id=uuid.uuid4(),
++            owner_user_id=owner,
++            provider_id=provider,
++            **kwargs,
++        )
++        # 模型名由 (owner, provider) 直算——过期用例（ttl<0）验签按设计返回 None，
++        # 不能经 grant 取。
++        from app.modules.llm_provider.litellm_client import litellm_model_name
++
++        return token, litellm_model_name(owner, provider)
++
++    async def test_token_with_matching_model_forwards(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """令牌 + 本令牌模型名 → 转发；master key 注入、令牌本体被剥除。"""
++        token, model = self._mint()
++        captured = _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.post(
++            "/api/daemon/llm-proxy/v1/messages",
++            headers={"Authorization": f"Bearer {token}"},
++            json={"model": model},
++        )
++        assert resp.status_code == 200
++        assert captured["url"] == "http://litellm-test:4000/v1/messages"
++        assert captured["headers"]["Authorization"] == "Bearer sk-litellm-master-test"
++        # 令牌是限域 Bearer 凭证，绝不随转发头外泄（R-02 同款纪律）。
++        assert token not in str(captured)
++
++    async def test_token_with_foreign_usr_model_403(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """令牌 + 他人 usr 模型名 → 403，上游不被触达。"""
++        token, _ = self._mint()
++        foreign = f"usr-{uuid.uuid4()}-{uuid.uuid4()}"
++        captured = _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.post(
++            "/api/daemon/llm-proxy/v1/messages",
++            headers={"Authorization": f"Bearer {token}"},
++            json={"model": foreign},
++        )
++        assert resp.status_code == 403
++        assert resp.json()["detail"] == "model ownership mismatch"
++        # 评审 P3：docstring 声称「上游不被触达」——断言假上游零调用钉死。
++        assert "url" not in captured and "method" not in captured
++
++    async def test_token_non_usr_model_forwarded(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """令牌 + 非 usr 形态模型名 → 放行转发（与 principal 路径同语义，
++        LiteLLM 自会按无 deployment 失败）。"""
++        token, _ = self._mint()
++        captured = _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.post(
++            "/api/daemon/llm-proxy/v1/messages",
++            headers={"Authorization": f"Bearer {token}"},
++            json={"model": "glm-5.3-flash"},
++        )
++        assert resp.status_code == 200
++        assert captured["url"] == "http://litellm-test:4000/v1/messages"
++
++    async def test_token_get_models_forwards(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """令牌 GET /v1/models（无 model 语义）→ 放行转发。"""
++        token, _ = self._mint()
++        captured = _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.get(
++            "/api/daemon/llm-proxy/v1/models",
++            headers={"Authorization": f"Bearer {token}"},
++        )
++        assert resp.status_code == 200
++        assert captured["method"] == "GET"
++
++    async def test_tampered_token_401(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """签名篡改的 shlp_ 令牌 → 401（fail-closed），不触上游。"""
++        token, _ = self._mint()
++        payload_b64, sig = token[len(PROXY_TOKEN_PREFIX) :].split(".")
++        flipped = ("A" if not sig.startswith("A") else "B") + sig[1:]
++        _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.get(
++            "/api/daemon/llm-proxy/v1/models",
++            headers={"Authorization": f"Bearer {PROXY_TOKEN_PREFIX}{payload_b64}.{flipped}"},
++        )
++        assert resp.status_code == 401
++
++    async def test_expired_token_401(
++        self,
++        db_session: AsyncSession,
++        proxy_client: AsyncClient,
++        proxy_settings: None,
++        monkeypatch: pytest.MonkeyPatch,
++    ) -> None:
++        """过期令牌 → 401（fail-closed）。"""
++        token, _ = self._mint(ttl_seconds=-60)
++        _install_fake_upstream(monkeypatch)
++
++        resp = await proxy_client.get(
++            "/api/daemon/llm-proxy/v1/models",
++            headers={"Authorization": f"Bearer {token}"},
++        )
++        assert resp.status_code == 401
+diff --git a/backend/app/modules/llm_provider/proxy_token.py b/backend/app/modules/llm_provider/proxy_token.py
+new file mode 100644
+index 000000000..d08b7988c
+--- /dev/null
++++ b/backend/app/modules/llm_provider/proxy_token.py
+@@ -0,0 +1,120 @@
++"""限域 LiteLLM 代理令牌（2026-10-31-share-openai-chat-proxy-token）。
++
++背景：llm-proxy 归属断言的认证主体是守护进程属主（子进程 Bearer = daemon
++apiKey），而共享/借出场景下会话级 openai_chat 供应商的模型名 uid 是供应商
++属主——代理层拿不到「真正选择供应商的会话属主」身份。本模块把该身份以
++短期 HMAC 令牌形式随 provider_config 下发（``litellm_proxy_token``），子进程
++以它作 Bearer，代理端验签后按令牌 (o, p) 严格断言模型名。
++
++令牌形态：``shlp_<b64url(payload_json)>.<b64url(hmac_sha256)>``；payload 键
++``v``=版本 / ``u``=会话属主 / ``o``=供应商属主 / ``p``=供应商 id / ``exp``=unix
++秒。签名密钥 = ``settings.secret_key``（与 JWT/access token 同源，不新增部署
++前提）。验签纯无状态（不查 DB）、常量时间比较；过期/篡改/形态不符一律
++None（fail-closed）。
++
++撤销语义：令牌不吊销——撤销共享后新 claim 不再铸造（provider_usable_by
++拒绝 → 回落默认链），已下发令牌存活至 exp，对齐 anthropic 分支「撤销只
++影响后续 claim、在途 turn 继续用已下发凭证」的既有语义。
++"""
++
++from __future__ import annotations
++
++import base64
++import hashlib
++import hmac
++import json
++import time
++import uuid
++from dataclasses import dataclass
++
++from app.core.config import get_settings
++
++#: 令牌前缀（区别于 shk_live_ apiKey 与 eyJ JWT，代理端据此短路验签分支）。
++PROXY_TOKEN_PREFIX = "shlp_"
++
++#: 默认有效期：覆盖多轮 claim 间隔 + 长轮次余量；每次 claim 重铸，正常流量
++#: 远早于 TTL 刷新。与 anthropic 分支下发凭证的时效语义同量级。
++PROXY_TOKEN_TTL_SECONDS = 24 * 3600
++
++
++@dataclass(frozen=True)
++class ProxyTokenGrant:
++    """验签产物：令牌授权的三元组 + 过期时刻（代理端断言用）。"""
++
++    session_user_id: uuid.UUID
++    owner_user_id: uuid.UUID
++    provider_id: uuid.UUID
++    expires_at: int
++
++    @property
++    def expected_model_name(self) -> str:
++        """令牌唯一允许的 usr 模型名（单一真相源 litellm_model_name）。"""
++        from app.modules.llm_provider.litellm_client import litellm_model_name
++
++        return litellm_model_name(self.owner_user_id, self.provider_id)
++
++
++def mint_llm_proxy_token(
++    *,
++    session_user_id: uuid.UUID,
++    owner_user_id: uuid.UUID,
++    provider_id: uuid.UUID,
++    ttl_seconds: int = PROXY_TOKEN_TTL_SECONDS,
++) -> str:
++    """铸造限域令牌（lease 解析链调用；ttl_seconds 仅供测试注入）。"""
++    payload = {
++        "v": 1,
++        "u": str(session_user_id),
++        "o": str(owner_user_id),
++        "p": str(provider_id),
++        "exp": int(time.time()) + int(ttl_seconds),
++    }
++    payload_b64 = _b64url(
++        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
++    )
++    return f"{PROXY_TOKEN_PREFIX}{payload_b64}.{_sign(payload_b64)}"
++
++
++def verify_llm_proxy_token(token: str) -> ProxyTokenGrant | None:
++    """验签（代理端调用）：任何不完整/篡改/过期形态一律 None，fail-closed。"""
++    if not isinstance(token, str) or not token.startswith(PROXY_TOKEN_PREFIX):
++        return None
++    body = token[len(PROXY_TOKEN_PREFIX) :]
++    if not body.isascii():
++        # 非 ASCII 不可能是合法 base64url——先挡，防 _sign 的 encode("ascii")
++        # UnicodeEncodeError / compare_digest 非 ASCII str TypeError 逃逸成 500
++        # （fail-closed 契约：任何畸形输入一律 None，评审 P2）。
++        return None
++    payload_b64, sep, sig = body.partition(".")
++    if not sep or not payload_b64 or not sig:
++        return None
++    if not hmac.compare_digest(_sign(payload_b64), sig):
++        return None
++    try:
++        raw = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
++        payload = json.loads(raw)
++    except (ValueError, TypeError):
++        return None
++    if not isinstance(payload, dict) or payload.get("v") != 1:
++        return None
++    try:
++        grant = ProxyTokenGrant(
++            session_user_id=uuid.UUID(str(payload["u"])),
++            owner_user_id=uuid.UUID(str(payload["o"])),
++            provider_id=uuid.UUID(str(payload["p"])),
++            expires_at=int(payload["exp"]),
++        )
++    except (KeyError, ValueError, TypeError):
++        return None
++    if grant.expires_at <= int(time.time()):
++        return None
++    return grant
++
++
++def _sign(payload_b64: str) -> str:
++    key = get_settings().secret_key.encode("utf-8")
++    return _b64url(hmac.new(key, payload_b64.encode("ascii"), hashlib.sha256).digest())
++
++
++def _b64url(raw: bytes) -> str:
++    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+diff --git a/backend/app/modules/llm_provider/router.py b/backend/app/modules/llm_provider/router.py
+index 918863ede..52e2c157c 100644
+--- a/backend/app/modules/llm_provider/router.py
++++ b/backend/app/modules/llm_provider/router.py
+@@ -31,7 +31,7 @@ from app.modules.llm_provider.schema import (
+     SetDefaultResult,
+     UsageResult,
+ )
+-from app.modules.llm_provider.service import LlmProviderService
++from app.modules.llm_provider.service import LlmProviderIdInvalid, LlmProviderService
+ from app.modules.llm_provider.usage_handlers import query_zhipu_quota
+ from app.modules.tool_gateway.tool_policy import SsrfBlocked, ToolPolicyService
+ 
+@@ -42,7 +42,18 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
+ 
+ 
+ def _parse_id(provider_id: str) -> uuid.UUID:
+-    return uuid.UUID(provider_id)
++    """畸形 UUID → ``LlmProviderIdInvalid`` 422（2026-11-01-provider-share-audit-fixes）。
++
++    路径参声明为 str 不走 FastAPI 校验；此前裸 ValueError 落通用 Exception
++    handler 变 500。合法 UUID 路径零变化。
++    """
++    try:
++        return uuid.UUID(provider_id)
++    except (ValueError, AttributeError, TypeError) as exc:
++        raise LlmProviderIdInvalid(
++            "供应商 ID 格式无效。",
++            details={"provider_id": provider_id},
++        ) from exc
+ 
+ 
+ @router.get("", response_model=LlmProviderList)
+diff --git a/backend/app/modules/llm_provider/service.py b/backend/app/modules/llm_provider/service.py
+index fd33264cd..3f2c58919 100644
+--- a/backend/app/modules/llm_provider/service.py
++++ b/backend/app/modules/llm_provider/service.py
+@@ -64,6 +64,18 @@ class LlmProviderShareSelfForbidden(AppError):
+     http_status = 400
+ 
+ 
++class LlmProviderIdInvalid(AppError):
++    """路径参数非 UUID（2026-11-01-provider-share-audit-fixes）。
++
++    此前 router ``_parse_id`` 裸 ``uuid.UUID`` 的 ValueError 落通用 Exception
++    handler 变 500；改抛 422（客户端格式错误，与 RequestValidationError 同族），
++    code 循 ``HTTP_<status>_<EVENT>`` 范式。全端点单点受益。
++    """
++
++    code = "HTTP_422_LLM_PROVIDER_ID_INVALID"
++    http_status = 422
++
++
+ class LlmProviderKindFormatForbidden(AppError):
+     """pi × openai_chat 禁配 Update 侧兜底（task-05 / FR-04 / D-012 连带声明）。
+ 
+diff --git a/backend/app/modules/llm_provider/tests/test_proxy_token.py b/backend/app/modules/llm_provider/tests/test_proxy_token.py
+new file mode 100644
+index 000000000..81ec3ab8c
+--- /dev/null
++++ b/backend/app/modules/llm_provider/tests/test_proxy_token.py
+@@ -0,0 +1,111 @@
++"""proxy_token 单测（2026-10-31-share-openai-chat-proxy-token / FR-01）。
++
++纯函数面：铸造→验签往返 / 签名与载荷篡改 / 过期 / 前缀与形态不符。
++安全语义：任何不完整/篡改/过期形态必须 fail-closed 返回 None。
++"""
++
++from __future__ import annotations
++
++import base64
++import json
++import uuid
++
++from app.modules.llm_provider.litellm_client import litellm_model_name
++from app.modules.llm_provider.proxy_token import (
++    PROXY_TOKEN_PREFIX,
++    mint_llm_proxy_token,
++    verify_llm_proxy_token,
++)
++
++
++def _ids() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
++    return uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
++
++
++def test_mint_verify_roundtrip() -> None:
++    session_user, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=session_user, owner_user_id=owner, provider_id=provider
++    )
++    assert token.startswith(PROXY_TOKEN_PREFIX)
++    grant = verify_llm_proxy_token(token)
++    assert grant is not None
++    assert grant.session_user_id == session_user
++    assert grant.owner_user_id == owner
++    assert grant.provider_id == provider
++    assert grant.expires_at > 0
++
++
++def test_expected_model_name_is_owner_scoped() -> None:
++    session_user, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=session_user, owner_user_id=owner, provider_id=provider
++    )
++    grant = verify_llm_proxy_token(token)
++    assert grant is not None
++    # 模型名仍以供应商属主为 uid（LiteLLM 路由键零改动）。
++    assert grant.expected_model_name == litellm_model_name(owner, provider)
++    assert str(session_user) not in grant.expected_model_name
++
++
++def test_tampered_signature_rejected() -> None:
++    _, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=uuid.uuid4(), owner_user_id=owner, provider_id=provider
++    )
++    payload_b64, sig = token[len(PROXY_TOKEN_PREFIX) :].split(".")
++    flipped = ("A" if not sig.startswith("A") else "B") + sig[1:]
++    assert verify_llm_proxy_token(f"{PROXY_TOKEN_PREFIX}{payload_b64}.{flipped}") is None
++
++
++def test_tampered_payload_rejected() -> None:
++    session_user, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=session_user, owner_user_id=owner, provider_id=provider
++    )
++    payload_b64, sig = token[len(PROXY_TOKEN_PREFIX) :].split(".")
++    raw = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
++    payload = json.loads(raw)
++    payload["o"] = str(uuid.uuid4())  # 换属主：签名不再匹配
++    forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
++    assert verify_llm_proxy_token(f"{PROXY_TOKEN_PREFIX}{forged}.{sig}") is None
++
++
++def test_expired_token_rejected() -> None:
++    _, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=uuid.uuid4(),
++        owner_user_id=owner,
++        provider_id=provider,
++        ttl_seconds=-60,
++    )
++    assert verify_llm_proxy_token(token) is None
++
++
++def test_non_proxy_prefix_not_recognized() -> None:
++    assert verify_llm_proxy_token("shk_live_not_a_proxy_token") is None
++    assert verify_llm_proxy_token("eyJhbGciOi.example.jwt") is None
++    assert verify_llm_proxy_token("") is None
++
++
++def test_malformed_body_rejected() -> None:
++    _, owner, provider = _ids()
++    token = mint_llm_proxy_token(
++        session_user_id=uuid.uuid4(), owner_user_id=owner, provider_id=provider
++    )
++    # 无分隔点 / 空段 / 损坏 base64 均拒绝。
++    assert (
++        verify_llm_proxy_token(
++            PROXY_TOKEN_PREFIX + token[len(PROXY_TOKEN_PREFIX) :].replace(".", "")
++        )
++        is None
++    )
++    assert verify_llm_proxy_token(PROXY_TOKEN_PREFIX + ".") is None
++    assert verify_llm_proxy_token(PROXY_TOKEN_PREFIX + "%%%." + "AAAA") is None
++
++
++def test_non_ascii_token_rejected() -> None:
++    """非 ASCII Bearer（UTF-8 CJK / latin-1 均）→ None 不抛（评审 P2 fail-closed）。"""
++    assert verify_llm_proxy_token("shlp_非ASCII载荷.签名") is None
++    assert verify_llm_proxy_token("shlp_payload\xe9.sig") is None
++    assert verify_llm_proxy_token("shlp_ok.\xe9") is None
+diff --git a/backend/app/modules/llm_provider/tests/test_router.py b/backend/app/modules/llm_provider/tests/test_router.py
+index c51f5c94d..6cf4c245e 100644
+--- a/backend/app/modules/llm_provider/tests/test_router.py
++++ b/backend/app/modules/llm_provider/tests/test_router.py
+@@ -304,3 +304,193 @@ class TestUnsetDefaultEndpoint:
+         resp = await client.post(f"/api/llm-providers/{pid}/unset-default", headers=auth_headers)
+ 
+         assert resp.status_code == 403, resp.text
++
++
++# ── 2026-11-01-provider-share-audit-fixes：/usable 与 shares CRUD HTTP 层 ──────
++
++
++async def _create_grantee(
++    db_session: AsyncSession, *, label: str = "g"
++) -> tuple[uuid.UUID, dict[str, str], str]:
++    """建被共享方用户并签发 Bearer（复刻 conftest.auth_admin_token 范式）。
++
++    返回 (user_id, headers, email)——email 即共享 identifier（精确匹配）。
++    """
++    from app.core.config import get_settings
++    from app.core.security import create_access_token
++    from app.modules.auth.model import User
++
++    settings = get_settings()
++    uid = uuid.uuid4()
++    email = f"grantee-{uid.hex[:8]}-{label}@example.com"
++    db_session.add(
++        User(
++            id=uid,
++            email=email,
++            username=f"grantee-{uid.hex[:8]}",
++            password_hash="irrelevant",
++            display_name=f"Grantee {label}",
++            status="active",
++            login_enabled=True,
++        )
++    )
++    await db_session.commit()
++    token, _ = create_access_token(user_id=uid, email=email, is_admin=False, settings=settings)
++    return uid, {"Authorization": f"Bearer {token}"}, email
++
++
++class TestUsableEndpoint:
++    """``GET /api/llm-providers/usable``：路由顺序 + 共享行脱敏（FR-04）。"""
++
++    async def test_route_not_shadowed_and_shared_row_sanitized(
++        self,
++        client: AsyncClient,
++        auth_headers: dict,
++        db_session: AsyncSession,
++    ) -> None:
++        """GET /usable 先于 GET /{provider_id} 注册不被吞；共享行四脱敏。"""
++        _, grantee_headers, grantee_email = await _create_grantee(db_session)
++
++        # admin（属主）经 HTTP 建 provider，自由配置里埋秘密标记（NFR-02/评审 P2 脱敏面）。
++        create = await client.post(
++            "/api/llm-providers",
++            headers=auth_headers,
++            json={
++                **_create_body(name="share-src"),
++                "extra_env": {"MY_SECRET_ENV": "secret-extra-marker"},
++                "settings_config": {"env": {"MY_SECRET_KEY": "secret-settings-marker"}},
++            },
++        )
++        assert create.status_code == 201, create.text
++        pid = create.json()["id"]
++
++        share = await client.post(
++            f"/api/llm-providers/{pid}/shares",
++            headers=auth_headers,
++            json={"identifier": grantee_email},
++        )
++        assert share.status_code == 201, share.text
++
++        usable = await client.get("/api/llm-providers/usable", headers=grantee_headers)
++        # 路由顺序断言：若被 GET /{provider_id}（provider_id="usable"）遮蔽，
++        # 这里会是 404/422 而非列表。
++        assert usable.status_code == 200, usable.text
++        rows = {item["id"]: item for item in usable.json()["items"]}
++        assert pid in rows, rows.keys()
++        shared = rows[pid]
++        assert shared["is_shared"] is True
++        assert shared["shared_by_name"] == "Admin"
++        assert shared["is_default"] is False
++        # 评审 P2 脱敏：自由配置不回传（可能手填令牌）；密钥仅 masked。
++        assert shared["settings_config"] is None
++        assert shared["extra_env"] is None
++        assert "secret-extra-marker" not in usable.text
++        assert "secret-settings-marker" not in usable.text
++        assert shared["api_key_masked"]
++
++        # own-only 列表零回归：被共享方在设置页列表看不到共享项。
++        own = await client.get("/api/llm-providers", headers=grantee_headers)
++        assert own.status_code == 200, own.text
++        assert pid not in {item["id"] for item in own.json()["items"]}
++
++
++class TestSharesCrudEndpoints:
++    """shares CRUD：201/204/404/403 语义 + 畸形 UUID 422（FR-01/FR-04）。"""
++
++    async def test_share_list_unshare_semantics(
++        self,
++        client: AsyncClient,
++        auth_headers: dict,
++        db_session: AsyncSession,
++    ) -> None:
++        """共享 201（body 带 grantee user_id）→ 列表可见 → 撤销 204 幂等。"""
++        grantee_uid, _, grantee_email = await _create_grantee(db_session, label="crud")
++
++        create = await client.post(
++            "/api/llm-providers", headers=auth_headers, json=_create_body(name="crud-src")
++        )
++        pid = create.json()["id"]
++
++        share = await client.post(
++            f"/api/llm-providers/{pid}/shares",
++            headers=auth_headers,
++            json={"identifier": grantee_email},
++        )
++        assert share.status_code == 201, share.text
++        assert share.json()["user_id"] == str(grantee_uid)
++
++        listed = await client.get(f"/api/llm-providers/{pid}/shares", headers=auth_headers)
++        assert listed.status_code == 200, listed.text
++        assert [item["user_id"] for item in listed.json()["items"]] == [str(grantee_uid)]
++
++        delete = await client.delete(
++            f"/api/llm-providers/{pid}/shares/{grantee_uid}", headers=auth_headers
++        )
++        assert delete.status_code == 204, delete.text
++        # 幂等：再删一次仍 204。
++        again = await client.delete(
++            f"/api/llm-providers/{pid}/shares/{grantee_uid}", headers=auth_headers
++        )
++        assert again.status_code == 204, again.text
++
++        listed2 = await client.get(f"/api/llm-providers/{pid}/shares", headers=auth_headers)
++        assert listed2.json()["items"] == []
++
++    async def test_share_unknown_target_404(self, client: AsyncClient, auth_headers: dict) -> None:
++        """identifier 无匹配用户 → 统一 404（防用户枚举）。"""
++        create = await client.post(
++            "/api/llm-providers", headers=auth_headers, json=_create_body(name="t404")
++        )
++        pid = create.json()["id"]
++
++        resp = await client.post(
++            f"/api/llm-providers/{pid}/shares",
++            headers=auth_headers,
++            json={"identifier": "nobody-unknown@example.com"},
++        )
++        assert resp.status_code == 404, resp.text
++
++    async def test_non_owner_shares_denied(
++        self,
++        client: AsyncClient,
++        auth_headers: dict,
++        db_session: AsyncSession,
++    ) -> None:
++        """非属主列共享/撤销 → service.get 403（owner 级不泄漏）。"""
++        _, grantee_headers, _ = await _create_grantee(db_session, label="nonowner")
++        create = await client.post(
++            "/api/llm-providers", headers=auth_headers, json=_create_body(name="own-only")
++        )
++        pid = create.json()["id"]
++
++        listed = await client.get(f"/api/llm-providers/{pid}/shares", headers=grantee_headers)
++        assert listed.status_code == 403, listed.text
++        delete = await client.delete(
++            f"/api/llm-providers/{pid}/shares/{uuid.uuid4()}", headers=grantee_headers
++        )
++        assert delete.status_code == 403, delete.text
++
++    async def test_valid_uuid_unknown_provider_404(
++        self, client: AsyncClient, auth_headers: dict
++    ) -> None:
++        """合法 UUID 但 provider 不存在 → 404（422 改动零回归护栏）。"""
++        resp = await client.get(f"/api/llm-providers/{uuid.uuid4()}/shares", headers=auth_headers)
++        assert resp.status_code == 404, resp.text
++
++    async def test_shares_invalid_provider_uuid_returns_422(
++        self, client: AsyncClient, auth_headers: dict
++    ) -> None:
++        """畸形 UUID → 422 JSON 错误体（HTTP_422_LLM_PROVIDER_ID_INVALID），不再 500。"""
++        for method, path in (
++            ("GET", "/api/llm-providers/not-a-uuid/shares"),
++            ("POST", "/api/llm-providers/not-a-uuid/shares"),
++            ("DELETE", f"/api/llm-providers/not-a-uuid/shares/{uuid.uuid4()}"),
++            ("GET", "/api/llm-providers/12345/shares"),
++        ):
++            resp = await client.request(
++                method, path, headers=auth_headers, json={"identifier": "x@example.com"}
++            )
++            assert resp.status_code == 422, f"{method} {path}: {resp.status_code} {resp.text}"
++            body = resp.json()
++            assert body["code"] == "HTTP_422_LLM_PROVIDER_ID_INVALID"
++            assert "request_id" in body
+diff --git a/backend/migrations/versions/20261030160000_grant_business_member_change_read.py b/backend/migrations/versions/20261030160000_grant_business_member_change_read.py
+index 29cdfd796..5808db04c 100644
+--- a/backend/migrations/versions/20261030160000_grant_business_member_change_read.py
++++ b/backend/migrations/versions/20261030160000_grant_business_member_change_read.py
+@@ -44,7 +44,11 @@ WHERE r.key = 'business_member'
+ ON CONFLICT DO NOTHING
+ """
+ 
+-#: 只撤销本迁移授予的权限，不动角色行与其他权限。
++#: 降级删除 business_member 名下**全部** change:read 行——role_permissions 无来源
++#: 标记，无法只删「本迁移授予的」（2026-11-01-provider-share-audit-fixes 如实化）。
++#: 可接受：business_member 是后台不可修改的系统内置角色（RoleSystemProtected），
++#: 本迁移即该 (角色, 权限) 组合的唯一合法来源；升级幂等（NOT EXISTS）保证手工
++#: 预置行不重复，降级一并移除语义等价。不动角色行与其他权限。
+ _REVOKE_SQL = """
+ DELETE FROM role_permissions
+ WHERE permission = 'change:read'
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 1bf68b5cd..239955591 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -126,7 +126,9 @@ class TestMigrationStructure:
+         # 20261023090100（agent_session_queued_messages.network_context 排队
+         # 网络块快照列——同变更 task-08 / D-012@v1 派发实时重算）→
+         # 20261030160000（business_member 补 change:read 权限——2026-10-30-
+-        # business-member-change-read / D-001；系统角色后台不可编辑，走迁移）→
++        # business-member-change-read / D-001；系统角色后台不可编辑，走迁移；
++        # 2026-11-01-provider-share-audit-fixes 仅如实化其降级注释——实删
++        # business_member 名下全部 change:read，SQL 与链位零改动）→
+         # 20261030180000（llm_provider_shares 按用户共享供应商——
+         # 2026-10-30-provider-user-share）。
+         assert heads[0] == "20261030180000"  # 链尾锚随主线新迁移前移（注释链续写）
+diff --git a/frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx b/frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx
+index 108d4847c..e6d4b8680 100644
+--- a/frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx
++++ b/frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx
+@@ -69,6 +69,17 @@ afterEach(() => {
+ });
+ 
+ describe("ShareProviderDialog（2026-10-30-provider-user-share）", () => {
++  it("2026-11-01-provider-share-audit-fixes：描述区含密钥可见性告知（防静默移除）", () => {
++    render(<ShareProviderDialog provider={PROVIDER} onOpenChange={() => {}} />);
++
++    // 告知三要素：密钥解密下发 / 会到达对方机器 / 仅共享可信用户。
++    expect(
++      screen.getByText(/解密形式下发到会话实际运行的守护进程/),
++    ).toBeInTheDocument();
++    expect(screen.getByText(/对方自己的机器/)).toBeInTheDocument();
++    expect(screen.getByText(/仅共享给可信用户/)).toBeInTheDocument();
++  });
++
+   it("打开拉取共享列表；按用户名共享追加行；撤销移除行", async () => {
+     render(<ShareProviderDialog provider={PROVIDER} onOpenChange={() => {}} />);
+ 
+diff --git a/frontend/src/components/llm-providers/share-provider-dialog.tsx b/frontend/src/components/llm-providers/share-provider-dialog.tsx
+index 022354b48..381e9f639 100644
+--- a/frontend/src/components/llm-providers/share-provider-dialog.tsx
++++ b/frontend/src/components/llm-providers/share-provider-dialog.tsx
+@@ -107,6 +107,7 @@ export function ShareProviderDialog({
+           <DialogTitle>共享供应商{provider ? ` · ${provider.name}` : ""}</DialogTitle>
+           <DialogDescription>
+             被共享用户只能在会话配置条中选择该供应商，不能编辑、删除、设默认或查看额度。
++            注意：共享后，该供应商的访问密钥会以解密形式下发到会话实际运行的守护进程（包括对方自己的机器），请仅共享给可信用户。
+           </DialogDescription>
+         </DialogHeader>
+ 
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index cda8e59f7..031ca1be3 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -157,7 +157,9 @@ function resolveCodexForm(
+     const baseUrl = nonEmpty(provider.litellm_base_url);
+     const model = nonEmpty(provider.litellm_model_name);
+     return {
+-      key: nonEmpty(daemonApiKey),
++      // 2026-10-31-share-openai-chat-proxy-token：限域代理令牌优先（共享/借出链
++      // Bearer 主体），缺省回落 daemon 自身 key（旧 payload 兼容）。
++      key: nonEmpty(provider.litellm_proxy_token) ?? nonEmpty(daemonApiKey),
+       baseUrl,
+       model,
+       requireOpenAiAuth: false,
+diff --git a/sillyhub-daemon/src/credential-injector.ts b/sillyhub-daemon/src/credential-injector.ts
+index 894ad2a4e..95249e3e8 100644
+--- a/sillyhub-daemon/src/credential-injector.ts
++++ b/sillyhub-daemon/src/credential-injector.ts
+@@ -185,7 +185,14 @@ export class ClaudeCredentialInjector implements CredentialInjector {
+     if (c.api_format === 'openai_chat') {
+       if (c.litellm_base_url) env.ANTHROPIC_BASE_URL = c.litellm_base_url;
+       if (c.litellm_proxy) {
+-        if (_daemonApiKey) env.ANTHROPIC_AUTH_TOKEN = _daemonApiKey;
++        // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链
++        // Bearer 主体是令牌三元组，非守护进程属主）；缺省回落 daemon 自身
++        // apiKey（旧 payload 兼容，零回归）。
++        if (c.litellm_proxy_token) {
++          env.ANTHROPIC_AUTH_TOKEN = c.litellm_proxy_token;
++        } else if (_daemonApiKey) {
++          env.ANTHROPIC_AUTH_TOKEN = _daemonApiKey;
++        }
+       } else if (c.litellm_auth_token) {
+         env.ANTHROPIC_AUTH_TOKEN = c.litellm_auth_token;
+       }
+diff --git a/sillyhub-daemon/src/types.ts b/sillyhub-daemon/src/types.ts
+index 203676e58..86ea0d56e 100644
+--- a/sillyhub-daemon/src/types.ts
++++ b/sillyhub-daemon/src/types.ts
+@@ -384,6 +384,15 @@ export interface ProviderConfig {
+    * 老直连形态（litellm_auth_token 存在）向后兼容保留。
+    */
+   litellm_proxy?: boolean;
++  /**
++   * 2026-10-31-share-openai-chat-proxy-token：限域代理令牌（共享/借出
++   * openai_chat 链）。litellm_proxy 形态下优先于 daemon 自身 apiKey 作子进程
++   * Bearer（ANTHROPIC_AUTH_TOKEN / zcode provider_config.json / codex auth.toml
++   * 三消费点同口径）；backend llm-proxy 验签后按令牌 (o,p) 断言模型名。缺省
++   * undefined=旧 payload，回落 daemon 自身 apiKey（向后兼容）。限域凭证，
++   * 遵守 R-02 不泄漏铁律：不进日志/序列化（与 api_key 同处置）。
++   */
++  litellm_proxy_token?: string;
+   /**
+    * task-11：LiteLLM 内 model_name（openai 形态）→ ANTHROPIC_MODEL。
+    * = `usr-{user_id}-{provider_id}`（R-03，与 backend task-09 register 写入 LiteLLM 的
+diff --git a/sillyhub-daemon/src/zcode-settings.ts b/sillyhub-daemon/src/zcode-settings.ts
+index 69bd50d5c..4ff19c75f 100644
+--- a/sillyhub-daemon/src/zcode-settings.ts
++++ b/sillyhub-daemon/src/zcode-settings.ts
+@@ -72,15 +72,16 @@ function effectiveBaseUrl(provider: ProviderConfig): string | undefined {
+ }
+ 
+ /**
+- * 有效密钥：openai_chat + litellm_proxy 形态用 daemon 自身 key（hub 代理凭据）；
+- * 其余形态用 provider.api_key。
++ * 有效密钥：openai_chat + litellm_proxy 形态优先限域代理令牌（2026-10-31-
++ * share-openai-chat-proxy-token，共享/借出链 Bearer 主体），缺省回落 daemon
++ * 自身 key（hub 代理凭据，旧 payload 兼容）；其余形态用 provider.api_key。
+  */
+ function effectiveApiKey(
+   provider: ProviderConfig,
+   daemonApiKey: string | null | undefined,
+ ): string | undefined {
+   if (provider.api_format === 'openai_chat' && provider.litellm_proxy === true) {
+-    return nonEmpty(daemonApiKey);
++    return nonEmpty(provider.litellm_proxy_token) ?? nonEmpty(daemonApiKey);
+   }
+   return nonEmpty(provider.api_key);
+ }
+diff --git a/sillyhub-daemon/tests/codex-settings.test.ts b/sillyhub-daemon/tests/codex-settings.test.ts
+index b7fd8be8a..d041ca53c 100644
+--- a/sillyhub-daemon/tests/codex-settings.test.ts
++++ b/sillyhub-daemon/tests/codex-settings.test.ts
+@@ -252,6 +252,30 @@ describe('writeCodexHome openai_chat 形态（litellm_proxy 通道，D-006）',
+     );
+   });
+ 
++  // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链 Bearer
++  // 主体），空串/缺省回落 daemonApiKey（旧 payload 兼容）。
++  it('litellm_proxy_token 存在 → auth.json key 取令牌（优先于 daemonApiKey）', async () => {
++    const home = newCodexHome();
++    await writeCodexHome({
++      codexHome: home,
++      provider: openaiChatProvider({ litellm_proxy_token: 'shlp_scoped_token' }),
++      daemonApiKey: 'sk-daemon-master-1',
++    });
++    const auth = readJson(home, 'auth.json');
++    expect(auth.OPENAI_API_KEY).toBe('shlp_scoped_token');
++  });
++
++  it('litellm_proxy_token 空串 → 回落 daemonApiKey（旧 payload 兼容）', async () => {
++    const home = newCodexHome();
++    await writeCodexHome({
++      codexHome: home,
++      provider: openaiChatProvider({ litellm_proxy_token: '' }),
++      daemonApiKey: 'sk-daemon-master-1',
++    });
++    const auth = readJson(home, 'auth.json');
++    expect(auth.OPENAI_API_KEY).toBe('sk-daemon-master-1');
++  });
++
+   it('全程不引用 provider.api_key（master key 不出 backend；诱饵 key 不落盘）', async () => {
+     const home = newCodexHome();
+     // 诱饵：即使 payload 意外带上 anthropic 分支字段，openai_chat 产物也不得引用
+diff --git a/sillyhub-daemon/tests/credential-injector.test.ts b/sillyhub-daemon/tests/credential-injector.test.ts
+index e0059cdb7..6fdb48390 100644
+--- a/sillyhub-daemon/tests/credential-injector.test.ts
++++ b/sillyhub-daemon/tests/credential-injector.test.ts
+@@ -553,6 +553,20 @@ describe('ClaudeCredentialInjector', () => {
+       expect(env.ANTHROPIC_BASE_URL).toBe('http://hub:8000/api/daemon/llm-proxy');
+     });
+ 
++    // 2026-10-31-share-openai-chat-proxy-token：共享/借出链的限域令牌优先
++    // （Bearer 主体是令牌三元组，非守护进程属主）；缺省回落 daemon apiKey。
++    it('litellm_proxy_token 优先作 AUTH_TOKEN（setDaemonApiKey 已注入亦不覆盖）', () => {
++      setDaemonApiKey('shk_live_daemon_key_xyz');
++      const env = injector.toEnv({ ...proxyConfig, litellm_proxy_token: 'shlp_scoped_token' });
++      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('shlp_scoped_token');
++    });
++
++    it('litellm_proxy_token 空串 → 等价未下发，回落 daemon apiKey（旧 payload 兼容）', () => {
++      setDaemonApiKey('shk_live_daemon_key_xyz');
++      const env = injector.toEnv({ ...proxyConfig, litellm_proxy_token: '' });
++      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('shk_live_daemon_key_xyz');
++    });
++
+     it('litellm_proxy 优先于老 litellm_auth_token（两者并存取 daemon apiKey，防御性）', () => {
+       setDaemonApiKey('shk_live_daemon_key_xyz');
+       const env = injector.toEnv({
+diff --git a/sillyhub-daemon/tests/zcode-settings.test.ts b/sillyhub-daemon/tests/zcode-settings.test.ts
+index 5595937db..01ec7ed93 100644
+--- a/sillyhub-daemon/tests/zcode-settings.test.ts
++++ b/sillyhub-daemon/tests/zcode-settings.test.ts
+@@ -97,6 +97,40 @@ describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () =>
+     expect(rule.config.access['apiKey']).toBe('daemon-key');
+   });
+ 
++  // 2026-10-31-share-openai-chat-proxy-token：限域令牌优先（共享/借出链 Bearer
++  // 主体），空串/缺省回落 daemonApiKey（旧 payload 兼容）。
++  it('litellm_proxy + litellm_proxy_token → apiKey 取令牌（优先于 daemonApiKey）', () => {
++    const cfg = buildZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({
++        api_format: 'openai_chat',
++        litellm_base_url: 'http://hub/proxy',
++        litellm_proxy: true,
++        litellm_proxy_token: 'shlp_scoped_token',
++      }),
++      daemonApiKey: 'daemon-key',
++    });
++    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { access: Record<string, unknown> } }> } } })
++      .config.providerConfigRules.providerRules[0]!;
++    expect(rule.config.access['apiKey']).toBe('shlp_scoped_token');
++  });
++
++  it('litellm_proxy_token 空串 → 回落 daemonApiKey（旧 payload 兼容）', () => {
++    const cfg = buildZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({
++        api_format: 'openai_chat',
++        litellm_base_url: 'http://hub/proxy',
++        litellm_proxy: true,
++        litellm_proxy_token: '',
++      }),
++      daemonApiKey: 'daemon-key',
++    });
++    const rule = (cfg as { config: { providerConfigRules: { providerRules: Array<{ config: { access: Record<string, unknown> } }> } } })
++      .config.providerConfigRules.providerRules[0]!;
++    expect(rule.config.access['apiKey']).toBe('daemon-key');
++  });
++
+   it('default_fallback_model 优先于 model（D-010 取值链）', () => {
+     const cfg = buildZcodeProviderConfig({
+       zcodeDir: dir,

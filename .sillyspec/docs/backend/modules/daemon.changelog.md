@@ -93,3 +93,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
 | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
 | 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 供应商路径参畸形UUID返422不再500；共享端点HTTP层用例与claim注入链用例补全；迁移20261030160000降级注释如实化 |
+| 2026-11-02 | 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复 |

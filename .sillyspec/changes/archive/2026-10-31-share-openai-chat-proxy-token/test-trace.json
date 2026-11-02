@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-31-share-openai-chat-proxy-token",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/llm_provider/tests/test_proxy_token.py「铸造→验签往返 / 篡改签名无效 / 过期无效 / 非 shlp_ 前缀不识别」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_lease_context_provider_share.py「共享 openai_chat 供应商解析含令牌且模型名仍为属主 uid」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_lease_context_provider_share.py「借出守护进程自有供应商获得令牌 / 自机自供应商零令牌零改动」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/app/modules/daemon/tests/test_llm_proxy.py「令牌+匹配模型转发 / 令牌+错配模型 403 / 篡改与过期 401 / 既有 apiKey 用例零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/credential-injector.test.ts「litellm_proxy_token 优先 / 缺省回落 daemon apiKey」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/zcode-settings.test.ts「effectiveApiKey 令牌优先回落」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/codex-settings.test.ts「openai_chat key 令牌优先回落」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-31-share-openai-chat-proxy-token"
+    }
+  ]
+}

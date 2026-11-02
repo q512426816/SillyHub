@@ -9331,3 +9331,86 @@
 摘要：回归门
 全文：.sillyspec/changes/archive/2026-10-30-provider-user-share/requirements.md#FR-06
 最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
+
+## FR-daemon-354 受赠者会话（共享 openai_chat 供应商）的 provider_config 含 litellm_proxy_token，模型名仍为 usr-<属主>-<pid>；llm-proxy 收到令牌 Bearer + 匹配模型名 → 放行转发（单测断言）
+变更：2026-10-31-share-openai-chat-proxy-token
+状态：active
+摘要：受赠者选用共享 openai_chat 供应商；令牌本体安全语义
+全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-01
+最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-01
+  tests: test/backend/app/modules/daemon/tests/test_lease_context_provider_share.py「共享 openai_chat 供应商解析含令牌且模型名仍为属主 uid」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-31-share-openai-chat-proxy-token
+  status: active
+
+## FR-daemon-355 会话属主自有 openai_chat 供应商跑在借出守护进程（runtime ≠ 属主）的 claim 同样获得令牌；自有供应商跑自有守护进程（现状可用路径）不下发令牌、载荷字节不变
+变更：2026-10-31-share-openai-chat-proxy-token
+状态：active
+摘要：自有供应商跑在借出的守护进程；自机自供应商自守护进程（零改动锚）
+全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-02
+最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-02
+  tests: test/backend/app/modules/daemon/tests/test_lease_context_provider_share.py「借出守护进程自有供应商获得令牌 / 自机自供应商零令牌零改动」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-31-share-openai-chat-proxy-token
+  status: active
+
+## FR-daemon-356 llm-proxy 令牌路径安全语义：签名篡改/过期 → 401；令牌 + 非本令牌供应商模型名 → 403；既有 apiKey/JWT 鉴权与归属断言行为不变（既有 test_llm_proxy 用例零回归）
+变更：2026-10-31-share-openai-chat-proxy-token
+状态：active
+摘要：令牌 + 匹配模型名放行；令牌 + 非本令牌供应商模型名拒绝；篡改/过期令牌拒绝
+全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-03
+最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-03
+  tests: test/backend/app/modules/daemon/tests/test_llm_proxy.py「令牌+匹配模型转发 / 令牌+错配模型 403 / 篡改与过期 401 / 既有 apiKey 用例零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-31-share-openai-chat-proxy-token
+  status: active
+
+## FR-daemon-357 daemon injector：litellm_proxy_token 存在时优先作 ANTHROPIC_AUTH_TOKEN，缺省回落 daemon apiKey（既有注入用例零回归）；zcode/codex 同口径
+变更：2026-10-31-share-openai-chat-proxy-token
+状态：active
+摘要：claude injector 优先令牌；缺省回落（向后兼容）
+全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-04
+最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-31-share-openai-chat-proxy-token:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/codex-settings.test.ts「openai_chat key 令牌优先回落」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-31-share-openai-chat-proxy-token
+  status: active
+
+## FR-daemon-358 回归伞——backend pytest + daemon 测试 + lint 全绿
+变更：2026-10-31-share-openai-chat-proxy-token
+状态：active
+摘要：收口实测
+全文：.sillyspec/changes/archive/2026-10-31-share-openai-chat-proxy-token/requirements.md#FR-05
+最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05

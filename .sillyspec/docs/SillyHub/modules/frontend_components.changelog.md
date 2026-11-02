@@ -200,3 +200,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-30 | 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误 |
 | 2026-10-30 | 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用 |
 | 2026-11-01 | 2026-11-01-provider-share-audit-fixes | 共享弹窗补密钥可见性告知（解密密钥会下发到会话运行时守护进程含对方机器） |
+| 2026-11-02 | 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复 |

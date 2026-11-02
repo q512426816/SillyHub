@@ -124,3 +124,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-30-quota-error-visible | 共享守护进程额度耗尽时页面不显示错误
 - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
 - 2026-11-01-provider-share-audit-fixes | 供应商共享审计收尾——畸形UUID 422、密钥可见性告知（弹窗+模块卡）、HTTP层/claim注入链用例补全、迁移降级注释如实化
+- 2026-10-31-share-openai-chat-proxy-token | 共享openai_chat供应商代理403修复

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-31-share-openai-chat-proxy-token",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a5232008b61c34a2cf1c3541871e56a1ad5be88a",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "非 ASCII 形态的 shlp_ Bearer 令验签抛未捕获异常（500）而非 fail-closed 401",
+      "evidence": "实测（uv run python 直调模块）：verify_llm_proxy_token('shlp_AAABBã.CCCC') 在 _sign 的 payload_b64.encode(\"ascii\") 抛 UnicodeEncodeError、非 ASCII 签名段使 hmac.compare_digest 抛 TypeError（'comparing strings with non-ASCII characters is not supported'）——两处 try 均未覆盖；gateway_misc.py:243 调用点无 try/except，未认证客户端发送 latin-1 高位字节的 Bearer 即诱导 HTTP 500，违背 FR-01/FR-03『任何不完整/篡改/过期形态一律 None→401』契约。方向是错关不错开（无绕过、无令牌泄漏：traceback 不含令牌本体，全局 handler 亦不回显请求头），但构成未认证 500 生成器与监控噪声面。",
+      "location": "backend/app/modules/llm_provider/proxy_token.py:85,110; backend/app/modules/daemon/router/gateway_misc.py:243"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "令牌 403 用例 docstring 声称『上游不被触达』但未断言上游零调用",
+      "evidence": "test_token_with_foreign_usr_model_403 安装了 _install_fake_upstream（captured dict）却只断言 403+detail，未断言 captured 为空——若未来回归为先转发后 403（或断言逻辑旁移）该用例仍绿；文档承诺强于断言强度。",
+      "location": "backend/app/modules/daemon/tests/test_llm_proxy.py:530-547"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（无状态验签不查 DB，逐请求独立验 exp；多令牌并存互不干扰——与代码实际相符。边界已裁决：可接受——过期后旧请求 401，对齐 anthropic 分支在途语义）",
+    "并发": "ok（签发即忘、无共享可变状态；并发铸造幂等同签名仅 exp 平移。边界已裁决：可接受——zcode/codex 令牌落盘与既有明文 api_key 同盘同防护等级，实测令牌仅进 access.apiKey/auth.json 既有字段位，无新暴露面）",
+    "切换": "ok（撤销共享 → provider_usable_by 先拒（attachments.py:428 / context.py:313），铸造不可达；切换路径 fallback_user_id=None 宁多铸不漏铸已按声明落地。边界已裁决：可接受——令牌不吊销存活至 exp 24h，与 anthropic 分支在途凭证同语义且作用域更窄（单模型名）；R-07 只覆写 model 键不动 litellm_model_name，令牌断言不受切模型影响——attachments.py:462-470 核实）",
+    "作用域": "ok（令牌绑定 (u,o,p) 且 usr 形态模型名必须逐字等于 usr-<o>-<p>，不能跨供应商/跨用户；secret_key 与 JWT 同源同部署约束。边界已裁决：可接受——非 usr 形态模型名令牌路径放行与既有 principal 路径同语义未扩大攻击面（本平台 LiteLLM 仅注册 usr- 命名 deployment，litellm_client.register 核实），存量风险属既有面；X-API-Key 与 shlp_ Bearer 并存时令牌分支优先、无效令牌 fail-closed 401，无绕过路径）"
+  },
+  "reviewedAt": "2026-11-02T08:57:52+08:00"
+}
