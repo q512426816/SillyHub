@@ -51,8 +51,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
 import { Bot, Plus, Trash2 } from "lucide-react";
 
-import { useMineAgentProfiles } from "@/lib/agent-profiles";
-import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+import { MemberConfigFields } from "@/components/group-chat/member-config-fields";
 import { errMessage, useNotify } from "@/lib/errors";
 import { listSimpleProjects, listProjectMembers } from "@/lib/ppm/project";
 import type { ProjectMember } from "@/lib/ppm/types";
@@ -135,6 +134,10 @@ export interface AgentMemberCardState {
   provider: string;
   /** 空串 = 不指定（本机/供应商默认）。 */
   llmProviderId: string;
+  /** 2026-11-02-group-member-footer-config：具体模型名（空串=跟随供应商配置）。 */
+  model: string;
+  /** 思考等级七档词表值（空串=引擎默认）。 */
+  thinkingLevel: string;
   /** 空串 = 不指定（走默认档案兜底链）。 */
   agentProfileId: string;
   /** 团队能力（可派分身并行干活；仅 Claude 引擎——开成员级主控 5 工具注入）。 */
@@ -151,6 +154,8 @@ function newAgentCard(): AgentMemberCardState {
     workspaceId: "",
     provider: "claude",
     llmProviderId: "",
+    model: "",
+    thinkingLevel: "",
     agentProfileId: "",
     teamEnabled: false,
   };
@@ -291,9 +296,13 @@ export function CreateGroupWizard({
         label: machineOnline ? alias : `${alias}（离线）`,
         options: runtimes.map((r) => ({
           value: r.id,
+          // 2026-11-02-group-member-footer-config（FR-02）：别名优先，缺失
+          // 回落「机器别名 · 引擎名」——不再引擎名单独兜底。
           label:
             r.display_alias?.trim() ||
-            PROVIDER_META[r.provider ?? ""]?.label ||
+            [alias, PROVIDER_META[r.provider ?? ""]?.label]
+              .filter(Boolean)
+              .join(" · ") ||
             r.id,
           disabled: !machineOnline || r.status !== "online",
         })),
@@ -302,30 +311,8 @@ export function CreateGroupWizard({
     return groups;
   }, [machineCandidates]);
 
-  // 模型（llm_provider 下拉）：listProviders（sessions-portal providersQ 同源）。
-  const providersQ = useQuery({
-    queryKey: ["llmProviders", "create-group-wizard"],
-    queryFn: listProviders,
-    staleTime: 30_000,
-    enabled: open,
-  });
-  const providerOptions = useMemo(() => {
-    const base = (providersQ.data ?? []).map((p) => ({
-      value: p.id,
-      label: p.name,
-    }));
-    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
-    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
-    return base;
-  }, [providersQ.data]);
-
-  // 智能体方案（AgentProfile 下拉）：useMineAgentProfiles（跨工作区可见，
-  // session-config-bar 档案下拉同源）。
-  const { profiles } = useMineAgentProfiles();
-  const profileOptions = useMemo(
-    () => profiles.map((p) => ({ value: p.id, label: p.name })),
-    [profiles],
-  );
+  // 2026-11-02-group-member-footer-config：供应商/模型/思考等级/档案四选
+  // 数据源下沉 MemberConfigFields（组件内自取，跨表面 react-query 缓存共享）。
 
   /* ── 校验 ── */
 
@@ -448,6 +435,9 @@ export function CreateGroupWizard({
               workspace_id: c.workspaceId || null,
               provider: c.provider,
               llm_provider_id: c.llmProviderId || null,
+              // 2026-11-02-group-member-footer-config：模型/思考等级随四选提交。
+              model: c.model || null,
+              thinking_level: c.thinkingLevel || null,
               agent_profile_id: c.agentProfileId || null,
               // 团队能力开关（quick 群成员团队能力；生成版类型必填显式传）。
               team_enabled: c.teamEnabled,
@@ -911,64 +901,36 @@ export function CreateGroupWizard({
                         className="w-full"
                         value={card.provider}
                         onChange={(v) => {
-                          // 引擎切换重置模型选择（供应商仅 claude 引擎语义，
-                          // session-config-bar providerLocked 同源）；团队能力
-                          // 仅 Claude 引擎（daemon 主控 5 工具注入谓词）——切
-                          // codex 联动关闭，防 payload 撞后端 400 门控。
+                          // 引擎切换级联重置模型组（供应商/模型/思考等级归
+                          // 默认，claude 引擎语义，session-config-bar
+                          // providerLocked 同源）；团队能力仅 Claude 引擎
+                          //（daemon 主控 5 工具注入谓词）——切 codex 联动
+                          // 关闭，防 payload 撞后端 400 门控。
                           updateCard(card.id, {
                             provider: v,
                             llmProviderId: "",
+                            model: "",
+                            thinkingLevel: "",
                             teamEnabled: v === "claude" ? card.teamEnabled : false,
                           });
                         }}
                         options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
                       />
                     </div>
-                    <div className="col-span-2 flex flex-col gap-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">
-                        模型（LLM 供应商）
-                      </span>
-                      <Select
-                        id={`cgw-model-${idx}`}
-                        aria-label={`Agent 成员 ${idx + 1} 模型`}
-                        className="w-full"
-                        placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
-                        allowClear
-                        value={card.llmProviderId || undefined}
-                        onChange={(v) =>
-                          updateCard(card.id, { llmProviderId: v ?? "" })
-                        }
-                        disabled={card.provider !== "claude"}
-                        options={providerOptions}
-                      />
-                      {card.provider !== "claude" && (
-                        <span className="text-[11px] text-muted-foreground">
-                          Codex 引擎使用其本机模型配置，无需选择供应商
-                        </span>
-                      )}
-                    </div>
-                    <div className="col-span-2 flex flex-col gap-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">
-                        智能体方案（人格 / 工具集 / 技能）
-                      </span>
-                      <Select
-                        id={`cgw-profile-${idx}`}
-                        aria-label={`Agent 成员 ${idx + 1} 智能体方案`}
-                        className="w-full"
-                        placeholder="不指定，用默认"
-                        allowClear
-                        showSearch
-                        optionFilterProp="label"
-                        value={card.agentProfileId || undefined}
-                        onChange={(v) =>
-                          updateCard(card.id, { agentProfileId: v ?? "" })
-                        }
-                        options={[
-                          { value: "", label: "不指定，用默认" },
-                          ...profileOptions,
-                        ]}
-                      />
-                    </div>
+                    {/* 2026-11-02-group-member-footer-config：四选口径（供应商/
+                        模型级联/思考等级/档案）共享子组件——原「模型（LLM 供应
+                        商）」「智能体方案」两块被其取代。 */}
+                    <MemberConfigFields
+                      engine={card.provider}
+                      idPrefix={`cgw-member-${idx}`}
+                      value={{
+                        llmProviderId: card.llmProviderId,
+                        model: card.model,
+                        thinkingLevel: card.thinkingLevel,
+                        agentProfileId: card.agentProfileId,
+                      }}
+                      onChange={(next) => updateCard(card.id, next)}
+                    />
                     {/* 团队能力开关（quick 群成员团队能力）：仅 Claude 引擎可开
                         （daemon 主控 5 工具注入谓词；codex 禁用 + tooltip 提示） */}
                     <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">

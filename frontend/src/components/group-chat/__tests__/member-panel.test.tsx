@@ -628,7 +628,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
 
     await openSwitchModal("agent-member-card-mem-1");
     // 模型：不指定 → GLM 供应商（小码 llm_provider_id=null）。
-    await chooseAntdOptionByText("mp-switch-model", "GLM 供应商");
+    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
 
     await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
@@ -647,7 +647,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
 
     await openSwitchModal("agent-member-card-mem-1");
     // 机器：rt-1（Claude Code）→ rt-2（Codex）。
-    await chooseAntdOptionByText("mp-switch-runtime", "Codex");
+    await chooseAntdOptionByText("mp-switch-runtime", "本机-Mac · Codex");
     // 即时警示条出现（原型 callout 语义）。
     expect(
       await screen.findByTestId("mp-switch-memory-warn"),
@@ -672,7 +672,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
     const confirmSpy = spyConfirmCancel();
 
     await openSwitchModal("agent-member-card-mem-1");
-    await chooseAntdOptionByText("mp-switch-runtime", "Codex");
+    await chooseAntdOptionByText("mp-switch-runtime", "本机-Mac · Codex");
     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -688,7 +688,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
     const confirmSpy = spyConfirmOk();
 
     await openSwitchModal("agent-member-card-mem-1");
-    await chooseAntdOptionByText("mp-switch-model", "GLM 供应商");
+    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
@@ -864,11 +864,11 @@ describe("MemberPanel 添加 Agent 对话框（quick 内建入口，六要素表
     fireEvent.change(screen.getByLabelText("Agent 成员群昵称"), {
       target: { value: "小新" },
     });
-    await chooseAntdOptionByText("mp-add-agent-runtime", "Claude Code");
+    await chooseAntdOptionByText("mp-add-agent-runtime", "本机-Mac · Claude Code");
     await chooseAntdOptionByText("mp-add-agent-workspace", "主工作区");
-    // 模型（llm 供应商）+ 方案可选填。
-    await chooseAntdOptionByText("mp-add-agent-model", "GLM 供应商");
-    await chooseAntdOptionByText("mp-add-agent-profile", "资深前端工程师");
+    // 四选（供应商/模型/思考等级/档案）：供应商+档案可选填（模型未选=跟随配置）。
+    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
+    await chooseAntdOptionByText("member-config-profile", "资深前端工程师");
     await waitFor(() => expect(submit).toBeEnabled());
     fireEvent.click(submit);
 
@@ -884,6 +884,8 @@ describe("MemberPanel 添加 Agent 对话框（quick 内建入口，六要素表
             workspace_id: "ws-1",
             provider: "claude",
             llm_provider_id: "lp-1",
+            model: null,
+            thinking_level: null,
             agent_profile_id: "ap-1",
             team_enabled: false,
           },

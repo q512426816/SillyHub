@@ -19,8 +19,9 @@
  *   - 群设置区（quick 群 P2）：输入草稿预览开关（群主可见；本地态 +
  *     PATCH settings_json.typing_preview——群读体未透出 settings_json，
  *     无服务端回显真值）；
- *   - Agent 成员区：六要素卡片（昵称/机器/工作区/引擎/模型/方案——config_snapshot
- *     JSON 自取键容错）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
+ *   - Agent 成员区：成员配置卡片（昵称/机器/工作区/引擎/供应商/模型/思考等级/
+ *     档案——config_snapshot JSON 自取键容错；2026-11-02-group-member-footer-config
+ *     四选口径）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
  *     热切换走重建分支——确认弹窗照机器组惯例；仅 Claude 可开）+ shadow_status
  *     徽标（active 在线 / pending 待建 / none 未建 / ended 已结束 / failed 异常）
  *     +「运行中」动态徽标（runningMemberIds 命中——群详情 shadow_running ∪
@@ -35,13 +36,14 @@
  *   - 分区头「+ 邀请用户」「+ 添加 Agent」入口（群聊体验对齐 quick 内建：
  *     群主可见）——邀请 = 项目人员多选（listProjectMembers 排除已在群）逐个
  *     POST members（user 体含 display_name 默认用户名）；添加 Agent = 单张
- *     六要素表单（昵称/机器/工作区=项目关联/引擎/模型/方案/团队能力/头像——
- *     照建群向导第三步单卡字段）POST members（agent 体）。
+ *     成员配置表单（昵称/机器/工作区=项目关联/引擎/供应商/模型/思考等级/档案/
+ *     团队能力/头像——照建群向导第三步单卡字段）POST members（agent 体）。
  *
- * 热切换弹窗（对照原型 switchModal）：引擎/模型/方案/机器/工作区五下拉（数据源
- * 同 task-07 向导：useDaemonMachines / listProviders / useMineAgentProfiles /
- * listWorkspaces），提交 updateGroupMember（仅送变更字段——后端 PATCH None=不改
- * 口径）；**机器或工作区变更时 Modal.confirm 二次确认提示「将重置该成员的
+ * 热切换弹窗（对照原型 switchModal）：引擎 + 四选（供应商/模型级联/思考等级/
+ * 档案，MemberConfigFields 共享子组件）+ 机器/工作区下拉（机器数据源
+ * useDaemonMachines；四选数据源组件内自取），提交 updateGroupMember（仅送
+ * 变更字段——后端 PATCH None=不改口径；model/thinking_level 空串=显式重置）；
+ * **机器或工作区变更时 Modal.confirm 二次确认提示「将重置该成员的
  * 独立记忆」**（design §4.5）。群主权限后端强校验（update_member
  * _require_group_owner），前端按钮按 isOwner 门控。
  */
@@ -53,9 +55,12 @@ import { Plus, Square, UserMinus } from "lucide-react";
 
 import { SessionPanel } from "@/components/daemon/session-panel";
 import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
-import { useMineAgentProfiles } from "@/lib/agent-profiles";
+import {
+  MemberConfigFields,
+  thinkingLevelLabel,
+} from "@/components/group-chat/member-config-fields";
 import { ApiError } from "@/lib/api";
-import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
+import { listProviders } from "@/lib/api/llm-providers";
 import { errMessage, useNotify } from "@/lib/errors";
 import { listProjectMembers } from "@/lib/ppm/project";
 import { listProjectWorkspaces } from "@/lib/workspace";
@@ -134,6 +139,10 @@ export function buildMemberUpdatePayload(
   next: {
     provider: string;
     llmProviderId: string;
+    /** 成员级具体模型名（""=跟随供应商配置；后端 PATCH ""=显式重置语义）。 */
+    model: string;
+    /** 思考等级七档词表值（""=引擎默认；后端 PATCH ""=显式重置语义）。 */
+    thinkingLevel: string;
     agentProfileId: string;
     runtimeId: string;
     workspaceId: string;
@@ -143,6 +152,14 @@ export function buildMemberUpdatePayload(
   if (next.provider !== (member.provider ?? "")) payload.provider = next.provider;
   if (next.llmProviderId !== (member.llm_provider_id ?? "")) {
     payload.llm_provider_id = next.llmProviderId || null;
+  }
+  // 2026-11-02-group-member-footer-config：模型/思考等级 diff（""=重置，
+  // 送空串而非 null——后端 PATCH null=不改、空串=显式重置语义）。
+  if (next.model !== (member.model ?? "")) {
+    payload.model = next.model;
+  }
+  if (next.thinkingLevel !== (member.thinking_level ?? "")) {
+    payload.thinking_level = next.thinkingLevel;
   }
   if (next.agentProfileId !== (member.agent_profile_id ?? "")) {
     payload.agent_profile_id = next.agentProfileId || null;
@@ -796,11 +813,23 @@ export function MemberPanel({
                   member.provider ??
                   "—"}
               </dd>
+              {/* 2026-11-02-group-member-footer-config：四选展示——供应商
+                  （provider_name）/ 模型（真实模型名）/ 思考等级 / 档案。 */}
+              <dt className="text-muted-foreground/70">供应商</dt>
+              <dd className="truncate font-medium text-muted-foreground">
+                {snapshotString(member, "provider_name") ?? "未指定（本机默认）"}
+              </dd>
               <dt className="text-muted-foreground/70">模型</dt>
               <dd className="truncate font-medium text-muted-foreground">
-                {snapshotString(member, "model") ?? "未指定（本机默认）"}
+                {snapshotString(member, "model") ?? "未指定（跟随供应商配置）"}
               </dd>
-              <dt className="text-muted-foreground/70">方案</dt>
+              <dt className="text-muted-foreground/70">思考等级</dt>
+              <dd className="truncate font-medium text-muted-foreground">
+                {snapshotString(member, "thinking_level")
+                  ? thinkingLevelLabel(snapshotString(member, "thinking_level")!)
+                  : "引擎默认"}
+              </dd>
+              <dt className="text-muted-foreground/70">档案</dt>
               <dd className="truncate font-medium text-muted-foreground">
                 {snapshotString(member, "profile_name") ?? "默认"}
               </dd>
@@ -1085,6 +1114,12 @@ function AgentConfigSwitchModal({
   const [llmProviderId, setLlmProviderId] = useState(
     member.llm_provider_id ?? "",
   );
+  // 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级
+  //（""=各维默认态；初始值=成员行现值）。
+  const [model, setModel] = useState(member.model ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState(
+    member.thinking_level ?? "",
+  );
   const [agentProfileId, setAgentProfileId] = useState(
     member.agent_profile_id ?? "",
   );
@@ -1093,16 +1128,10 @@ function AgentConfigSwitchModal({
     member.workspace_id ?? group.workspace_id,
   );
 
-  // 数据源同 task-07 向导：机器（useDaemonMachines 融合候选）/ 模型
-  // （listProviders）/ 方案（useMineAgentProfiles）；工作区选项经 props 复用
-  // 面板查询。弹窗条件挂载 → 仅打开时发起查询。
+  // 数据源同 task-07 向导：机器（useDaemonMachines 融合候选）；供应商/模型/
+  // 思考等级/档案四选数据源已下沉 MemberConfigFields（组件内自取）。弹窗
+  // 条件挂载 → 仅打开时发起查询。
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
-  const providersQ = useQuery({
-    queryKey: ["llmProviders", "member-panel-switch"],
-    queryFn: listProviders,
-    staleTime: 30_000,
-  });
-  const { profiles } = useMineAgentProfiles();
 
   const runtimeOptions = useMemo(() => {
     const groups: {
@@ -1124,9 +1153,14 @@ function AgentConfigSwitchModal({
         label: machineOnline ? alias : `${alias}（离线）`,
         options: runtimes.map((r) => ({
           value: r.id,
+          // 2026-11-02-group-member-footer-config（FR-02）：label=runtime 别名
+          // 优先，缺失回落「机器别名 · 引擎名」——不再以引擎名单独兜底
+          //（「机器: Claude Code」形态消失，机器身份可辨识）。
           label:
             r.display_alias?.trim() ||
-            PROVIDER_META[r.provider ?? ""]?.label ||
+            [alias, PROVIDER_META[r.provider ?? ""]?.label]
+              .filter(Boolean)
+              .join(" · ") ||
             r.id,
           disabled: !machineOnline || r.status !== "online",
         })),
@@ -1147,49 +1181,28 @@ function AgentConfigSwitchModal({
     return groups;
   }, [machineCandidates, member]);
 
-  const providerOptions = useMemo(() => {
-    const opts = (providersQ.data ?? []).map((p) => ({
-      value: p.id,
-      label: p.name,
-    }));
-    // 已设模型不在列表（供应商被删）时补回退项；未设模型提供「不指定」。
-    if (member.llm_provider_id && !opts.some((o) => o.value === member.llm_provider_id)) {
-      opts.unshift({
-        value: member.llm_provider_id,
-        label: `${member.llm_provider_id.slice(0, 8)}（当前）`,
-      });
-    }
-    if (!member.llm_provider_id) {
-      // 2026-10-21-provider-default-ui-hint：兜底文案按用户默认供应商动态化。
-      opts.unshift({ value: "", label: noProviderLabel(providersQ.data) });
-    }
-    return opts;
-  }, [providersQ.data, member]);
-
-  const profileOptions = useMemo(() => {
-    const opts = profiles.map((p) => ({ value: p.id, label: p.name }));
-    if (member.agent_profile_id && !opts.some((o) => o.value === member.agent_profile_id)) {
-      opts.unshift({
-        value: member.agent_profile_id,
-        label: `${member.agent_profile_id.slice(0, 8)}（当前）`,
-      });
-    }
-    if (!member.agent_profile_id) {
-      opts.unshift({ value: "", label: "不指定，用默认" });
-    }
-    return opts;
-  }, [profiles, member]);
-
   const payload = useMemo(
     () =>
       buildMemberUpdatePayload(member, group, {
         provider,
         llmProviderId,
+        model,
+        thinkingLevel,
         agentProfileId,
         runtimeId,
         workspaceId,
       }),
-    [member, group, provider, llmProviderId, agentProfileId, runtimeId, workspaceId],
+    [
+      member,
+      group,
+      provider,
+      llmProviderId,
+      model,
+      thinkingLevel,
+      agentProfileId,
+      runtimeId,
+      workspaceId,
+    ],
   );
   const dirty = Object.keys(payload).length > 0;
   // 机器或工作区变更 → 重建影子会话重置记忆（design §4.5）：弹窗内即时警示 +
@@ -1239,53 +1252,37 @@ function AgentConfigSwitchModal({
           其他成员。
         </p>
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            引擎供应商
-          </span>
+          <span className="text-xs font-medium text-muted-foreground">引擎</span>
           <Select
             id="mp-switch-engine"
-            aria-label="引擎供应商"
+            aria-label="引擎"
             className="w-full"
             value={provider}
-            onChange={setProvider}
+            onChange={(v) => {
+              // 引擎切换级联重置模型组（供应商/模型/思考等级归默认，claude 语义）。
+              setProvider(v);
+              setLlmProviderId("");
+              setModel("");
+              setThinkingLevel("");
+            }}
             options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            模型（LLM 供应商）
-          </span>
-          <Select
-            id="mp-switch-model"
-            aria-label="模型（LLM 供应商）"
-            className="w-full"
-            value={llmProviderId}
-            onChange={(v) => setLlmProviderId(v ?? "")}
-            disabled={provider !== "claude"}
-            options={providerOptions}
-          />
-          {provider !== "claude" && (
-            <span className="text-[11px] text-muted-foreground">
-              Codex 引擎使用其本机模型配置，无需选择供应商
-            </span>
-          )}
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            智能体方案（人格 / 工具集 / 技能）
-          </span>
-          <Select
-            id="mp-switch-profile"
-            aria-label="智能体方案（人格 / 工具集 / 技能）"
-            className="w-full"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            value={agentProfileId || undefined}
-            onChange={(v) => setAgentProfileId(v ?? "")}
-            options={profileOptions}
-          />
-        </div>
+        {/* 2026-11-02-group-member-footer-config：四选口径（供应商/模型级联/
+            思考等级/档案）共享子组件——原「模型（LLM 供应商）」「智能体方案」
+            两块被其取代，模型候选级联与档位门控同 session-config-bar 口径。 */}
+        <MemberConfigFields
+          engine={provider}
+          value={{ llmProviderId, model, thinkingLevel, agentProfileId }}
+          onChange={(next) => {
+            setLlmProviderId(next.llmProviderId);
+            setModel(next.model);
+            setThinkingLevel(next.thinkingLevel);
+            setAgentProfileId(next.agentProfileId);
+          }}
+          memberLlmProviderId={member.llm_provider_id}
+          memberAgentProfileId={member.agent_profile_id}
+        />
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-muted-foreground">机器</span>
           <Select
@@ -1532,20 +1529,17 @@ function AddAgentMemberModal({
   const [workspaceId, setWorkspaceId] = useState("");
   const [provider, setProvider] = useState("claude");
   const [llmProviderId, setLlmProviderId] = useState("");
+  // 2026-11-02-group-member-footer-config：具体模型名与思考等级（""=默认态）。
+  const [model, setModel] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState("");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [teamEnabled, setTeamEnabled] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
-  // 数据源同向导第三步：机器（useDaemonMachines 融合候选）/ 模型
-  // （listProviders）/ 方案（useMineAgentProfiles）/ 工作区=项目关联
-  // （listProjectWorkspaces——agent 工作区须在项目关联集内必选）。
+  // 数据源同向导第三步：机器（useDaemonMachines 融合候选）/ 工作区=项目关联
+  //（listProjectWorkspaces——agent 工作区须在项目关联集内必选）；供应商/模型/
+  // 思考等级/档案四选数据源下沉 MemberConfigFields（组件内自取）。
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
-  const providersQ = useQuery({
-    queryKey: ["llmProviders", "member-panel-add-agent"],
-    queryFn: listProviders,
-    staleTime: 30_000,
-  });
-  const { profiles } = useMineAgentProfiles();
   const projectWorkspacesQ = useQuery({
     queryKey: ["projectWorkspaces", "member-panel-add-agent", group.project_id],
     queryFn: () => listProjectWorkspaces(group.project_id!),
@@ -1569,9 +1563,12 @@ function AddAgentMemberModal({
         label: machineOnline ? alias : `${alias}（离线）`,
         options: runtimes.map((r) => ({
           value: r.id,
+          // FR-02：别名优先，缺失回落「机器别名 · 引擎名」，不再引擎名单独兜底。
           label:
             r.display_alias?.trim() ||
-            PROVIDER_META[r.provider ?? ""]?.label ||
+            [alias, PROVIDER_META[r.provider ?? ""]?.label]
+              .filter(Boolean)
+              .join(" · ") ||
             r.id,
           disabled: !machineOnline || r.status !== "online",
         })),
@@ -1587,20 +1584,6 @@ function AddAgentMemberModal({
         label: w.name,
       })),
     [projectWorkspacesQ.data],
-  );
-  const providerOptions = useMemo(() => {
-    const base = (providersQ.data ?? []).map((p) => ({
-      value: p.id,
-      label: p.name,
-    }));
-    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化
-    //（评审 R1：与 wizard 同款，防「不指定」显式项丢失）。
-    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
-    return base;
-  }, [providersQ.data]);
-  const profileOptions = useMemo(
-    () => profiles.map((p) => ({ value: p.id, label: p.name })),
-    [profiles],
   );
 
   const nameError = validateMemberDisplayName(displayName, existingNames);
@@ -1618,6 +1601,10 @@ function AddAgentMemberModal({
       workspace_id: workspaceId || null,
       provider,
       llm_provider_id: llmProviderId || null,
+      // 2026-11-02-group-member-footer-config：模型/思考等级随四选提交
+      //（""→null=未指定走兜底）。
+      model: model || null,
+      thinking_level: thinkingLevel || null,
       agent_profile_id: agentProfileId || null,
       team_enabled: provider === "claude" ? teamEnabled : false,
     });
@@ -1649,8 +1636,8 @@ function AddAgentMemberModal({
     >
       <div className="flex flex-col gap-3">
         <p className="rounded-md bg-info/10 px-2.5 py-1.5 text-xs leading-5 text-info">
-          配置六要素：机器 / 工作区 / 引擎 / 模型 / 智能体方案 / 群昵称
-          （群内唯一，作为 @提及词）。
+          配置块：机器 / 工作区 / 引擎 / 供应商 / 模型 / 思考等级 / 档案 /
+          群昵称（群内唯一，作为 @提及词）。
         </p>
         {/* 成员头像（可选，quick 群成员头像自定义） */}
         <div className="flex items-center gap-2 border-b border-border pb-2.5">
@@ -1717,52 +1704,29 @@ function AddAgentMemberModal({
               className="w-full"
               value={provider}
               onChange={(v) => {
-                // 引擎切换重置模型（供应商仅 claude 语义）；团队能力仅 Claude。
+                // 引擎切换级联重置模型组（供应商/模型/思考等级归默认）；团队能力仅 Claude。
                 setProvider(v);
                 setLlmProviderId("");
+                setModel("");
+                setThinkingLevel("");
                 if (v !== "claude") setTeamEnabled(false);
               }}
               options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
             />
           </div>
-          <div className="col-span-2 flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-muted-foreground">
-              模型（LLM 供应商）
-            </span>
-            <Select
-              id="mp-add-agent-model"
-              aria-label="Agent 成员模型"
-              className="w-full"
-              placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
-              allowClear
-              value={llmProviderId || undefined}
-              onChange={(v) => setLlmProviderId(v ?? "")}
-              disabled={provider !== "claude"}
-              options={providerOptions}
-            />
-            {provider !== "claude" && (
-              <span className="text-[11px] text-muted-foreground">
-                Codex 引擎使用其本机模型配置，无需选择供应商
-              </span>
-            )}
-          </div>
-          <div className="col-span-2 flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-muted-foreground">
-              智能体方案（人格 / 工具集 / 技能）
-            </span>
-            <Select
-              id="mp-add-agent-profile"
-              aria-label="Agent 成员智能体方案"
-              className="w-full"
-              placeholder="不指定，用默认"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              value={agentProfileId || undefined}
-              onChange={(v) => setAgentProfileId(v ?? "")}
-              options={[{ value: "", label: "不指定，用默认" }, ...profileOptions]}
-            />
-          </div>
+          {/* 2026-11-02-group-member-footer-config：四选口径（供应商/模型级联/
+              思考等级/档案）共享子组件——原「模型（LLM 供应商）」「智能体方案」
+              两块被其取代，级联/档位门控同 session-config-bar 口径。 */}
+          <MemberConfigFields
+            engine={provider}
+            value={{ llmProviderId, model, thinkingLevel, agentProfileId }}
+            onChange={(next) => {
+              setLlmProviderId(next.llmProviderId);
+              setModel(next.model);
+              setThinkingLevel(next.thinkingLevel);
+              setAgentProfileId(next.agentProfileId);
+            }}
+          />
           {/* 团队能力开关：仅 Claude 引擎可开（向导第三步同口径）。 */}
           <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">
             <Tooltip

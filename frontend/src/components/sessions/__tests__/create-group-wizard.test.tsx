@@ -645,7 +645,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
       target: { value: "小码" },
     });
     // 机器下拉按机器分组（machine-1 · Claude Code）
-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
     // 工作区=项目关联工作区必选（不再有「沿用群工作区」选项）。
     expect(
       closestAntdSelect(screen.getByLabelText("Agent 成员 1 工作区")),
@@ -705,7 +705,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
       target: { value: "小码" },
     });
-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
     const create = screen.getByRole("button", { name: "创建群聊" });
     expect(create).toBeDisabled();
     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
@@ -727,7 +727,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
     );
     await chooseAntdOptionByText("cgw-engine-0", "Codex");
     await waitFor(() =>
-      expect(antdSelectRoot("cgw-model-0")).toHaveClass(
+      expect(antdSelectRoot("cgw-member-0-model")).toHaveClass(
         "ant-select-disabled",
       ),
     );
@@ -787,7 +787,7 @@ describe("CreateGroupWizard 头像上传（quick 成员头像自定义）", () =
     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
       target: { value: "小码" },
     });
-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
     await fireUpload("Agent 成员 1 头像（选择图片）");
 
@@ -931,7 +931,7 @@ describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）"
     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
       target: { value: "小码" },
     });
-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
   }
 
@@ -1031,7 +1031,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
       target: { value: "小码" },
     });
-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
+    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
   }
 
@@ -1044,7 +1044,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
     expect(warn.className).toContain("text-warning");
 
     // 选中 GLM 供应商 → 警示条消失（已选不显示）。
-    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
+    await chooseAntdOptionByText("cgw-member-0-provider", "GLM 供应商");
     await waitFor(() =>
       expect(screen.queryByTestId("agent-model-warning")).toBeNull(),
     );
@@ -1093,7 +1093,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
   it("建群成功响应无 warnings → 不弹 warning（成功提示照常）", async () => {
     await setupCardForModel();
     // 模型已选 → 卡片警示条不显示。
-    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
+    await chooseAntdOptionByText("cgw-member-0-provider", "GLM 供应商");
 
     fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
     await waitFor(() => expect(mocks.notify.success).toHaveBeenCalledTimes(1));
