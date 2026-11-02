@@ -697,3 +697,686 @@ supersedes：D-035
 理由：用户选定方案二（新增独立心跳事件），事件名细化为 turn_heartbeat（防与 hub-client 机器级 heartbeat 同名混淆，命名细化不改变决策语义）。载荷：kind（awaiting_first_token/generating_tool_args/generating_text）+ est_chars/est_tokens + precision（authoritative/estimated）+ source + parent_tool_use_id；不落库只透传、节流 1s、估算系数 3.5 字符/token（三项 agent 代定，用户核阅无异议）。估算值与权威 usage 彻底分道：预算软切断、计费聚合、ctx 环零污染（对齐 2026-08-27「实时/终态口径必须同类」）；前端专道消费，估算补显标「约」+弱化灰、权威值落定即隐。
 故障面：心跳节流器/计数器轮结束未清理导致跨轮残留（R-02）；估算值误入聚合（R-03，类型级排除防护）
 退役判据：引擎侧（Claude SDK/智谱/codex）原生提供流式 usage 增量且覆盖工具参数期时，本心跳桥接层可简化退役
+
+## D-unmapped-118@v1 参考粒度＝交互模型与数据口径，不移植 DSH 插件化客户端架构
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-001@v1
+锚点：未记录
+最近确认：328788cbe
+理由：沿用既有裁决，不重新论证（我的判断：继承）。2026-08-19-session-stream-ux 在 A 渐进增强 / B 全量移植 deepseek-harness 架构 / C 共享装配器 三条路线中选定 C——「参考 deepseek-harness 设计思想但不移植其插件化架构」。本仓客户端是 Next.js 14 + React 18 + TanStack Query + antd 的单一应用；DSH 客户端是 Cordis 插件图 + 58 个 `packages/client/*` 包 + slot 注册表。移植成本与回归面远超收益，且本仓已用「单一装配器 + 段模型」达到同一目标（事件 → 结构化轮次模型 → 对话/进度多视图消费）。
+故障面：若后续出现「按工具/按视图独立演化」的强需求，集中式渲染（frontend/src/components/agent-log/tool-renderers.tsx，731 行 switch）会先成为瓶颈——届时按需抽轻量注册表，而不是回退到插件化架构。
+退役判据：出现 ≥3 个需要独立加载、独立版本的客户端扩展方（第三方插件生态）时重议本边界。
+
+## D-unmapped-119@v1 动机＝日常主力工作台 + 对外演示可用 + 与 DSH 直接对标（非「会话规模爆炸」驱动）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-003@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户多选三项动机：①与手边在用的 DSH 直接对比，差距刺眼；②想把它当主力工作台，日常别扭感累积到临界；③要给别人用/演示，观感与可读性要能打。**未选**「会话规模变了（几十轮 + 子代理/团队会话撑不住）」——即本次不是为极端长会话/多并发现场做容量设计。
+故障面：「主力工作台」与「演示可用」对同一处有相反要求——前者要高密度、后者要留白与呼吸感；若不分场景一刀切排版，会牺牲其中一侧。
+退役判据：若后续出现真实的规模压力证据（单会话轮次/日志量级或并发会话数成为瓶颈实测），重新评估容量线是否入范围。
+
+## D-unmapped-120@v1 视图模型不在对话里拍板——先出 HTML 原型看效果再定（用户选 C）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-004@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选 C——先出 HTML 原型看效果再定视图模型；本轮**不**承诺 A（允许重构）也不承诺 B（保守增强）。
+故障面：原型先行把"设计定稿"推迟到原型确认之后；若原型用理想化假数据（无超长轮/大 diff/失败轮），确认结论会落空——原型语料必须覆盖真实形态。
+退役判据：用户看过原型并明确选定形态后，本条目由对应的视图模型决策条目取代。
+
+## D-unmapped-121@v1 原型出「A/B 双形态对比」单页（我的判断）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-005@v1
+锚点：未记录
+最近确认：328788cbe
+理由：我的判断：一份单文件 HTML，可切换地并排呈现 A（单视图可伸缩：整轮折叠 → 过程分组 → 单条 disclosure）与 B（两视图保留 + 细节档位），共用同一份真实形态语料（超长轮、连续工具调用、失败轮、子代理轮），并把 D-003 登记的「高密度 vs 呼吸感」张力做成两套排版参数同页对比。依据：仓内既有 AI-Native 视觉方向与既有原型留档形态。
+故障面：两形态同页使状态维度上升（形态 × 展开层 × 档位），需以静态语料 + 少量本地交互实现，避免体积与状态管理失控。
+退役判据：用户选定形态后原型仅作留档，不再迭代。
+
+## D-unmapped-122@v1 成功标准延后到原型确认后定稿（草案 SC-01..SC-05 随原型呈现）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-008@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选「先看原型再定」——成功标准（尤其 SC-01/SC-02/SC-04 的尺度）在看过原型后一并定稿。
+故障面：若原型轮只确认形态而漏确认 SC，后续 tasks 与 verify 探针会缺少判据锚点。
+退役判据：SC 定稿写入 requirements.md 后本条目仅作过程留档。
+
+## D-unmapped-123@v1 方案定稿推迟到原型确认轮；原型出 A/C 双形态（修订 D-005 的 A/B 组合）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-009@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户选「先出双形态原型，看完再定」——本轮不承诺 A 或 C；原型按 **A/C 双形态**出（C ＝ A 的全部呈现 + 旧「进度」视图保留为可切回的入口），看完效果再定稿。Step 4 的三方案对比表与推荐（推荐 A）已被接受为讨论基础，但不构成选择。
+故障面：若把 A/C 做成两页独立实现，对比成本上升且会掩盖真实差异（C 多出的只有回退入口）；须同页可切换、共用同一份语料与同一套排版参数。
+退役判据：方案定稿后本条目由对应的视图模型决策条目取代。
+
+## D-unmapped-124@v1 原型形态升级为 dev 预览路由（直接渲染真实会话组件）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-010@v1
+锚点：frontend/src/app/proto/session-fold/page.tsx
+最近确认：328788cbe
+理由：用户选 ①「dev 预览路由」+ 改动边界「允许改生产链路」。已落地：新增 dev-only 路由 `frontend/src/app/proto/session-fold/page.tsx`，直接 `import` 真实 `TurnTimeline`，喂 fixture 轮次（`segments` 含 thinking / Grep / Read / Edit(structuredPatch) / Bash）。验证：`tsc --noEmit` 0 错；`next dev` 实测 `GET /proto/session-fold 200`，HTML 98KB 内命中真实组件标记（「思考过程」×2、`Grep` ×2、`turn-timeline.tsx` ×10）——即为真实组件树渲染，非复刻。
+故障面：dev 路由需起 `next dev`（本机 spawn 受限，需完整权限跑），且因不受 middleware 守卫而存在未授权访问面——必须保持 dev-only 且不进导航，否则等于新开一个匿名入口。
+退役判据：折叠模型正式落到生产组件后，本路由降级为回归对照页或删除。
+
+## D-unmapped-125@v1 「继续用静态 prototype:build 复刻会话页」被否决
+状态：rejected
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-011@v1
+锚点：未记录
+最近确认：328788cbe
+理由：否决（用户选择 dev 预览路由）。静态管线是 `tsc + react-dom/server`，无浏览器运行时，无法承载 `turn-timeline` 的 antd / zustand `useSession` / `thinking-translate` 依赖；复刻只能逼近观感，功能面永远补不完（用户实测判断「缺很多功能」）。
+否决理由：静态产物只能「像」，无法证明真实组件在折叠模型下的行为，且复刻成本无上限。
+复潮条件：需要完全无运行时的离线观感稿（对外文档配图）时可临时用静态管线生成素材，但不得作为定稿原型。
+
+## D-unmapped-126@v1 静态交付形态＝真实组件树的 SSR 快照 + 内联 CSS（交互仍走 dev 路由）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-014@v1
+锚点：未记录
+最近确认：328788cbe
+理由：采用「dev server 的 SSR 输出 → 内联 CSS → 剥 &lt;script&gt;」导出：`export-proto.ps1` 抓 `/proto/session-redesign`（v2）与 `/proto/session-current`（现状）两份快照，产出 `prototype-session-v2.html` / `prototype-session-current.html`（各 ~295KB，零依赖双击可看）。它是**真实组件树的静态投影**，不是手绘复刻。
+故障面：快照剥掉了 `<script>`（无 hydrate），任何依赖 JS 的交互或懒渲染内容不会出现——拿静态稿当"功能完整性"证据会误判；CSS 已内联但字体等 url() 资源离线可能缺失（回落系统字体）。
+退役判据：若 Next 侧启用 `output: 'export'` 能直接产出静态站，本脚本由官方导出替代。
+
+## D-unmapped-127@v2 视觉基线＝真实页面的**结构**（三主题并存，不把深色当基线）〔取代 D-015@v1〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-015@v2
+锚点：未记录
+最近确认：328788cbe
+理由：用户更正（原话）：「不是颜色问题 平台就是有三套主题，我给你de截图是深色而已」。故 @v1 的「浅色稿作废、以深色为基线」判断错误，本版取代：**基线是真实页面的结构与信息组织**（布局、信息项、行式、chip、轮头/轮尾、工具卡形态）；**主题是三个并存维度**（ai-native / blue / dark），三套都必须成立。
+故障面：三主题共用一套语义 token 时，某些混色（如 brand 边框 + card 底）在浅色主题下对比度不足——每套主题需各自校验对比度（正文与 muted 至少 4.5:1 / 3:1）。
+退役判据：平台若收敛到单主题，则本条的"三主题"要求降为单主题规范。
+
+## D-unmapped-128@v1 视觉稿必须由真实组件产出（手绘 HTML 只作参考，不作定稿）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-017@v1
+锚点：未记录
+最近确认：328788cbe
+理由：不可以。用户指出（原话）：「这个是不是 直接改的 html 而不是 转换的？ 你这样直接改 html 后面代码实现会有偏差的呀」。该判断与仓规一致——`PROTOTYPE.md` 铁律：手绘定稿后每条意见都要反向翻译回真实代码。故 `prototype-session-v3.html` 降级为**视觉参考稿**，不定稿；定稿原型必须是对真实组件（Tailwind + token + 现有 `.sh-*` 类）改造后、由 dev 路由渲染、再由导出脚本固化的 HTML。
+故障面：真实组件改动面大（`turn-timeline` / `turn-segment-views` / `globals.css` / `session-list-panel`），且会话页无 E2E——落地时须逐条配单测断言用户可见行为，否则"稿=实现"只能靠肉眼保证。
+
+## D-unmapped-129@v1 静态原型导出必须「浏览器水合后序列化 DOM」，禁止抓 SSR HTML
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-018@v1
+锚点：frontend/scripts/export-hydrated.mjs
+最近确认：328788cbe
+理由：实测证明 SSR HTML 不可用：`prototype-session-fullpage.html` 含 **138 处 CSR bailout `<template>` 占位、0 个 `.wmde-markdown`**（助手答复正文全缺）。改为 `frontend/scripts/export-hydrated.mjs`：playwright 打开路由 → `networkidle` → `waitForFunction(.wmde-markdown ≥ 50, 120s)` → 逐片收集 `cssRules` → `outerHTML` → 剥 `<script>/<link>/原 style` → 合并单 `<style>` → 落盘，并机械校验各闭合标签恰好一次。
+故障面：导出耗时上升（需起浏览器 + 等水合），且依赖 dev server 在跑。
+退役判据：Next 启用 `output:'export'` 且能正确产出 CSR 子树时，可改用官方导出。
+
+## D-unmapped-130@v1 此前三次「效果不咋地 / 看不出区别」的判定，基于缺正文的残缺稿，需在修复稿上重判
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-019@v1
+锚点：未记录
+最近确认：328788cbe
+理由：部分不成立。三次判定所看的静态稿缺全部答复正文（见 D-018），等于在"没有回答文字的页面"上评判。修复稿（`prototype-session-final.html`）已含 138 个正文块，需在该稿上重判。
+故障面：若重判仍不满意，说明问题不在正文缺失，须回到 D-016 的层次问题继续定位。
+
+## D-unmapped-131@v1 删除轮间 1px hairline，仅以留白分隔轮次（用户方向）
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-020@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户原话「轮间 1px hairline 多余」→ 删除。`turn-block` 容器 `border-b border-border pb-7 last:border-b-0` → 仅 `pb-7`（28px 留白保留）；`globals.css` 全文核对无其它轮间画线规则（已用测试锁死）。
+故障面：长会话滚动时"分轮感"完全依赖留白，若留白被压缩会失去分段感。
+
+## D-unmapped-132@v1 对比加强（答案压过过程）——四组参数定稿
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-021@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户原话「对比加强」→ 落地为四组：①正文 14.5px/1.78/段距 0.6em → **15px/1.8/0.65em**（标题 16.5/15.5、行内 code 13）②过程行（思考+工具）12px → **11.5px + `text-muted-foreground/80`**，并去掉思考摘要额外 `opacity-75`（叠乘后浅色主题 <3:1 不可读）③工具行左规线静息 `border-border` → **`border-border/60`**（hover 仍 brand）④过程块与答复块间距 6px → **14px**（列 gap 7px + 答复块 mt-7px，过程行彼此仍 7px）。
+故障面：11.5px + 80% 墨色在部分浅色主题下接近可读下限，再降即失效。
+
+## D-unmapped-133@v1 轨迹视图形态＝泳道时间轴（共享绝对时间轴 × 输入/模型/工具），账本降为「调用」档
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-024@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户提供 DSH 轨迹截图作为目标：**三条泳道（输入/模型/工具）+ 一条共享绝对时间轴 + 顶部三档视图（时长/轮次/调用）+ 搜索 + 选中区间高亮**，主视图不是表格。此前实现的「每轮一行小刻度 + 856 行账本」判定为形态错误。
+故障面：共享绝对时间轴在 577 分钟窗口下短轮会挤成一小撮，必须有缩放/窗口，否则退化回"看不出哪步慢"。
+
+## D-unmapped-134@v1 过程行采用 DSH 式语义标签（思考 / 运行命令 / 收到任务消息…），daemon 采集缓发
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-025@v1
+锚点：未记录
+最近确认：328788cbe
+理由：用户提供 DSH 截图：每一步是**紧凑单行**——图标 + 语义标签 + 「 · 」+ 一行摘要（如「思考 · The backend model-usage agent finished…」「运行命令 · Regenerate OpenAPI and generated types」），并有独立的 **「收到任务消息」卡片**（带时间、可展开）。**更正**：截图中那张「收到任务消息」实际是变更 `2026-10-21-task-wakeup-restore` 的任务消息**误投到本会话**；用户从未说「daemon 采集缓发」，D-023 的 TTFT/attempt 采集**仍在范围内、不缓**。
+故障面：标签是**展示层映射**，不得改写日志原文；未知 event_type 必须回退「其它」而不是丢弃（否则新工具上线即隐身）。
+
+## D-unmapped-135@v1 1b 快照落库点修正——interactive 轮走 `close_run_steps`，不走 `lease/service.complete_lease`〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-027@v1
+锚点：未记录
+最近确认：328788cbe
+理由：不成立。实证：`_upsert_batch_model_usage` 唯一调用点是 `lease/service.py:457`（batch `complete_lease` 路径）；interactive 轮的终态是 `daemon/hub-client.notifyRunResult` → `POST /leases/{id}/runs/{run_id}/result` → `router/lease.py:233 close_interactive_run` → `run_sync/service/__init__.py:386-449` → `run_sync/service/close_run_steps.py:_close_apply_terminal`，`agent_run_model_usage` 的 upsert 在 `close_run_steps.py:379-417`。若按原写作落点实现，1b 快照对真实产品路径**永不落库**。
+故障面：若未来新增第三条 run 终态写入路径（如离线补报），同样必须在 `_close_apply_terminal` 或新增的共用 helper 处调用，否则快照再次断链；design 的「落库点」表述应改为「`close_run_steps._close_apply_terminal`（interactive）/ `complete_lease`（batch）」两条。
+
+## D-unmapped-136@v1 1b 读模型落点＝`GET /sessions/{id}/runs`（SessionRunRead），`TurnOutlineItemRead` 不加字段〔2026-10-21 execute 期裁决〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-029@v1
+锚点：未记录
+最近确认：328788cbe
+理由：放 `SessionRunRead`（`GET /sessions/{id}/runs`）——前端 `runsMeta`（`session-panel-page.tsx:805` 的 `Map<string, SessionRunRead>`）就是消费面，task-11 的轮级卡片与 task-12 的模型泳道都从它取；`TurnOutlineItemRead` 走进程内 LRU 指纹，指纹不含 `daemon_run_snapshots`，快照晚到时会产生**陈旧读**（读到旧快照却不自知），且当前无消费方。
+故障面：前端若直接吃 turn-outline 缓存而非 `/runs`，会拿不到快照；task-11 必须以 `runsMeta` 为准（设计已如此要求）。
+
+## D-unmapped-137@v1 后到快照必须在「run 已终态」的二次上报里补写侧表（否则 1b 对 interactive 全废）〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-030@v1
+锚点：未记录
+最近确认：328788cbe
+理由：会丢。实测：`close_run_steps.close_interactive_run` 的 terminal 分支（`agent_run.status in TERMINAL_TURN_STATUSES`）先 `rollback()` 再 `return`，**整条不写侧表**；而 daemon 侧 `_onResult` 是「`await onResult(...)`（含首报 close）→ 之后才 fire-and-forget 采集 → 二次上报 file_changes/timing」，因此带快照的那次上报**永远命中 no-op 分支**。若不修，interactive 会话的轮级卡一律退 `tool_only`，1b 数据链路等于没通（只有 batch 路径能出卡）。
+故障面：后到快照是一次**额外**的 result 上报（携带首报终态三字段复述）；若未来把 `notifyRunResult` 的幂等改成 409/抛错，这条补写路径会静默失效。批量补发（outbox）同理需保证只写侧表。
+
+## D-unmapped-138@v1 前端降级判据以 capability 为准；`snapshot=null` 且 `capability` 也缺＝「未接线」，不出卡〔2026-10-21 execute 期裁决〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-031@v1
+锚点：未记录
+最近确认：328788cbe
+理由：三分法（对齐 design E6/E8）：①`capability="tool_only"`（含 snapshot=null）→ 出「仅工具编辑」降级卡 + 说明行；②`status="failed"|"unavailable"` → 同样降级卡（快照不可信）；③`snapshot=null` **且** `capability` 为 `null/undefined` → **不出卡、不出占位**——这是「挂载方没接线」（dialog / 旧消费方），把它显示成「daemon 老版本」是另一种误导；④`status="ok"` 且 `files=[]` → 不出卡（快照确认零改动，且全树禁止出现「本轮无改动」字样）。
+故障面：老 daemon 会话里「每轮一张仅工具编辑卡」会显得吵（20 轮 → 20 张）；这是 E8「显式提示不静默」的代价，收窄需另立设计条目（建议后续：仅末轮/首轮出卡 + 汇总卡统一提示）。
+
+## D-unmapped-139@v1 TTFT/attempt 实际只能 `basis="approx"`（三引擎均无「模型请求起点」事件）；attempt 沿用近似起点而非只记终点〔2026-10-21 execute 期实证〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-032@v1
+锚点：未记录
+最近确认：328788cbe
+理由：**不能**，三引擎在 daemon 事件边界都没有稳定的请求起点：①claude 的 SDK `message_start` 被归一化器吃掉（只用于算 `api_duration_ms`，不产 AgentEvent，`:973-1031`）；②codex 的 `turn/started` 只是**轮**起点，工具结果后无通知；③pi 的 `message_start` 当纯生命周期丢弃（`pi-events.ts:36`），`turn_start` 只产 status。故按 plan 降级口径：attempt 起点＝轮首（首段）/「本批工具全部 result 返回」之后；首 token＝首个 text/thinking delta；终点＝下一个 `tool_use` 或轮终态；`basis` 恒 `"approx"`。
+故障面：前端会**长期**显示「近似（无 TTFT 采样）」而非「真实占用」——UI 的 observed 分支目前只有单测覆盖、生产不可达；若产品要求「真实占用」必须先在 driver 层补 `request_start` 事件（跨 daemon 驱动改造，不在本变更）。
+
+## D-unmapped-140@v1 迁移链尾锚测试随新迁移一并前移（提交 hook 强制连带）〔2026-10-21 execute 期登记〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-033@v1
+锚点：backend/tests/test_align_platform_change_events_migration.py
+最近确认：328788cbe
+理由：仓内 pre-commit hook 的「迁移」钉子会校验迁移链尾锚测试——新增迁移后 `heads[0]` 不再是旧 head，hook **直接拒签**（实测：首次提交被拦，提示「迁移链尾锚测试 heads[0] 前移到新 head（注释链续写）」）。故把 `heads[0]` 由 `c3f8a1d6e2b4` 前移为 `20261021120000` 并在注释链续写一行是本变更的强制连带改动，不是新交付面。
+故障面：该锚点测试是「迁移双头」的守护，若把它改成不校验（例如 `assert len(heads) == 1` 以外全放行），未来并行迁移再出双头就无人拦。
+
+## D-unmapped-141@v1 `partial` 且无文件清单时出「一行提示卡」——不得静默成「本轮无改动」〔2026-10-21 execute 期独立审查阻断项修复〕
+状态：implemented
+变更：2026-10-20-session-page-dsh-alignment
+原编号：D-034@v1
+锚点：未记录
+最近确认：328788cbe
+理由：**该出**。独立审查（execute stage review）实测：daemon 超时与队列溢出都返回 `files: []`（`turn-file-changes.ts:813-824`、`tests/interactive/turn-file-changes.test.ts:433-435`），而前端 `toFileChangesCardProps` 先把 partial→`truncated`，随后 `if (files.length === 0) return null` 整卡不渲染 → 用户看到「没有卡」，无法区分「采集没完成」与「本轮真的没改文件」，与 design「partial 卡片照出」相悖（E6/E8 立意）。修法取 A（实现意图，而非改口径）：partial 且无文件清单 → 渲染 28px 单行提示卡（`data-testid="file-changes-notice"`），文案「工作区快照未完成（超时或队列溢出），本轮改动未知」。
+故障面：提示卡与「仅工具编辑」降级卡是**两种**话术（前者「没拿到清单」、后者「没有这项能力」），未来若合并会再次丢语义；`reason` 细分（timeout vs queue_overflow）在快照里保留，但 UI 合并表述——若要区分需在 `notice` 上带 reason。
+
+## D-unmapped-151@v1 轨迹面板以 dsh（deepseek-harness）ui-trajectory 为视觉与交互基准
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-001@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户提供的截图来自 dsh 的轨迹视图，并明确要求「看 dsh 源码」；参考实现为 deepseek-harness/packages/client/ui-trajectory（CSS Modules + DSH token），本项目需用 Tailwind + themes.ts token 等价实现。
+故障面：直接照搬 CSS Modules 类名/API 会引错依赖；必须翻译为 Tailwind + 本地数据模型。
+退役判据：本项目轨迹视图形成独立设计体系且不再需要对标 dsh 时。
+
+## D-unmapped-152@v1 顶部固定布局——工具栏与时间线不随账本滚动
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-002@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户明确「顶部是固定位置的」。dsh 根容器为纵向 flex + overflow:hidden，工具栏 sticky 32px、时间线固定 50px，唯一滚动容器是账本 pane。
+故障面：若仍挂在 turn-timeline-scroll 内，整页滚动会把顶部带走（当前缺陷根因）。
+
+## D-unmapped-153@v1 工具栏四项语义与行为
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-003@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：时长＝时间线比例开关（实际时长 vs 等宽操作，偏好持久化）；轮次＝展开/收起所有轮次（折叠为“… + 摘要”行）；调用＝展开/收起所有工具调用（合并为“N 个工具调用”摘要行）；搜索＝按文本 AND 过滤账本行并绕过折叠，时间线非命中条降透明。
+
+## D-unmapped-154@v1 账本形态——无表头两列紧凑表格
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-004@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：dsh 为无表头两列（事件列 122px + 内容列自适应），行高 30px、下边框；内容列＝类型标签（19px，图标+文字）+ 摘要，有结果时右侧“→ 结果摘要”；耗时/token/状态文字不进行内而进详情；按 turn 分组用竖线与 Turn 标签表达，子工具通过缩进 +26px，无嵌套 DOM。
+退役判据：账本信息密度与可读性在其他形态下经实测更优时。
+
+## D-unmapped-155@v1 详情面板——多标签 + 可调宽
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-005@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：工具行五标签（概述/参数/结果/Schema/计时），消息类/系统类各有自己的标签集；面板宽默认 clamp(320px,38%,440px)、可拖拽 320–720、双击复位；≤760px 改为抽屉；无选中时不渲染。
+
+## D-unmapped-156@v1 采用组件族拆分方案（B）
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-009@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户选择方案 B——TrajectoryView 只做装配，新增 trajectory-toolbar / trajectory-ledger / trajectory-detail-panel 三个组件，复用现有 trajectory-timeline 与数据层；数据层（build-trajectory / from-turn-views）不动。
+
+## D-unmapped-157@v1 否决「原地重构 trajectory-view.tsx」（方案 A）
+状态：rejected
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-010@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户未选方案 A。
+否决理由：单文件将膨胀到 1000+ 行，职责混杂、测试耦合，与项目大文件拆分既有方向相反。
+复潮条件：若组件族拆分导致回归面显著超出预期（改动文件数或测试返工翻倍），可退回局部原地重构。
+
+## D-unmapped-158@v1 否决「直接移植 dsh 组件」（方案 C）
+状态：rejected
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-011@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：不可行——dsh 使用 CSS Modules + 自有设计 token 与数据模型，本项目为 Tailwind + themes.ts + SessionTurnView，无法直接复制。
+否决理由：依赖与数据模型不兼容，移植成本高于重写且会把两套 token 体系混在一起。
+复潮条件：仅在 dsh 改为输出可复用、无框架绑定组件库时重新评估。
+
+## D-unmapped-159@v1 总览缩略条随 D-017 一并裁剪，实际时长保留缩放/平移/双击重置
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-021@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：50px 高度预算下无法容纳总览条（原 14px）与三泳道+轴；裁决随说明区一并视觉裁剪。实际时长模式仍保留滚轮缩放、拖拽平移、双击重置；等宽模式保持 D-016 的只读概览。D-016 尾句「保持现有全部交互」中的总览刷子部分由本条修订。
+
+## D-unmapped-160@v1 设计方案与真码原型定稿
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-012@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：用户确认按该设计实施；原型经 prototype-as-code 管线编译并登记为变更目录 prototype-trajectory-redesign.html。
+
+## D-unmapped-161@v1 搜索时折叠整体失效，时间线不做降透明
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-013@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：有搜索词时所有折叠失效、直接显示全部命中行（含其父轮次与调用组）；零命中显示「没有匹配的记录」空态；时间线条块不随搜索变化（不实现 dsh 的非命中降透明，减少无数据支撑的视觉分支）。我的判断：降透明属纯装饰，本平台先不做。
+
+## D-unmapped-162@v1 折叠/搜索隐藏选中行时清空选中，键盘只遍历可见行
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-014@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：折叠状态或搜索词变化后，若当前选中行不再可见，立即清空选中并关闭详情；↑/↓ 只在可见行之间移动；scrollIntoView 只对可见行调用。我的判断：保留不可见行的选中会让用户「看不到却占着详情」。
+
+## D-unmapped-163@v1 工具行参数/结果字段来源（允许 from-turn-views 小改）
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-015@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：产品路径工具段已有 `raw`（tool_use JSON 原文）与 `result`（配对的 tool_result 文本）、`primary`（主参数摘要）。映射为 inputText=raw、outputText=result ?? primary；from-turn-views.ts 允许本次小改（仅工具行字段映射与行 id 稳定性），build-trajectory.ts 仍零改动。
+
+## D-unmapped-164@v1 等宽模式为只读概览
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-016@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：等宽模式只做条块等宽排列的概览——禁用滚轮缩放、拖拽平移、总览刷子与双击重置，不拦截滚轮默认行为（页面正常滚动）；隐藏时间刻度与轮边界竖线；点击条块仍按等宽几何命中并选中对应行。实际时长模式保持现有全部交互。
+
+## D-unmapped-165@v1 D-007 覆盖 D-005 的 Schema 子项
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-018@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：D-007 覆盖 D-005 的 Schema 子项；D-005 的其余内容（标签结构、可调宽、抽屉）继续有效。
+
+## D-unmapped-166@v1 时长偏好为全局偏好
+状态：implemented
+变更：2026-10-22-trajectory-view-redesign
+原编号：D-020@v1
+锚点：未记录
+最近确认：49fb620463233b8293784c64a08693bbabdfc6a4
+理由：采用全局偏好（对齐 dsh 的 `dsh.trajectory.duration`），localStorage key `sillyhub.trajectory.scaleMode`，不按会话区分。
+
+## D-unmapped-199@v1 每轮注入【网络环境】前导段，不动首轮一次性策略
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-001@v1
+锚点：backend/app/modules/daemon/session/service/inject.py:433
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：每轮注入。复用【页面上下文】的每轮注入通道先例（backend/app/modules/daemon/session/service/inject.py:433 的 page_context 参数，create.py 与 control.py:246 两处复用）；既有 D-002「前导仅首轮拼装」决策不触碰，网络环境走独立每轮段。
+故障面：每轮注入若不去重会重复烧 token——由 D-006 去重机制对冲。
+退役判据：若平台改为会话级网络信息主动推送（WS 通道）且 agent 可按需查询，可退役每轮注入。
+
+## D-unmapped-200@v1 同网段判定双源——后端观测 daemon 请求源 IP 为 ground truth，daemon 自报网卡列表用于拼访问地址
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-002@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：双源。①后端从 daemon 心跳/注册请求直接观测来源 IP（复用 auth 模块 _client_ip 的 XFF 最右段逻辑，提为公共工具），这是平台亲眼所见、不可伪造的 ground truth，落库 daemon_instances；②daemon 心跳体新增自报 network_interfaces（os.networkInterfaces 过滤后），用于给 agent 拼「用哪个 IP 访问机器上的服务」（机器多网卡时观测 IP 只有一个，拼 URL 需要网卡列表选合适地址）。CIDR 匹配在两源上做：用户请求源 IP vs daemon 观测 IP（主判定）、vs 各网卡 IP（辅助，找可达地址）。
+故障面：daemon 经 NAT 出口访问平台时观测 IP 是 NAT 出口而非机器本机 IP——同网段判定仍成立（用户与 daemon 同 NAT 即同可达域），但拼 URL 必须用自报网卡列表。
+退役判据：无（观测 IP 是零成本副产品，长期保留）。
+
+## D-unmapped-201@v1 共享机器的内网 IP 对借用人可见
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-004@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：可见。内网 IP 属低敏信息（不出局域网无路由意义），共享语义本身即「授权在这台机器上干活」，拼访问地址是借用场景的核心诉求；方案中已建议、用户「做吧」批准。
+故障面：内网拓扑对借用人暴露——接受（共享授权已含更高权限的机器操作权）。
+
+## D-unmapped-202@v2 共享机器权威口径 = grants 表（supersedes D-005@v1）
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-005@v2
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断（经源码查证）：绑定机器仍查 workspace_member_runtimes（本人 runtime 绑定）；共享借用查 daemon grants 表——grants/queries.py:352 的 resolve_granted_daemon_for_borrow 注释明确记录借用判定已从 member_runtimes/queries.py:171 的 binding 表迁移至 grants 表（enabled=TRUE / grantee 工作区+成员 / 非本人 / online，语义逐条等价）。网络环境段的机器清单与派发链路同源，复用该函数族查询。
+supersedes：D-005@v1
+故障面：口径再迁移（grants 表重构）时本清单滞后——与派发链路共用函数族可同步演进。
+
+## D-unmapped-203@v1 注入去重——内容快照变化才重注 + 会话内最短间隔兜底
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-006@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：网络环境段内容做规范化快照（源 IP + 各机器判定结果摘要的 hash），与上一轮相同则不重注（只在首轮注入）；变化（用户切网、机器上下线）才重注；另设最短重注间隔（60s）防移动网络 IP 抖动导致连注。快照存 Redis（会话级 key，TTL 7 天）。
+故障面：Redis 快照丢失→多注一次，无正确性影响。
+
+## D-unmapped-204@v1 排队/steering 轮注入语义——入队存用户 IP，派发时重算判定
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-012@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：镜像 page_context 的入队存储模式——入队时把 user_ip/has_xff 随条目序列化存储（queue.py:304 同款）；派发/steering 重放时用存储的用户 IP + **实时**机器数据（daemon 心跳最新态）重算判定并注入，不重放旧判定文本。排队窗口通常秒级~分钟级，用户 IP 变化概率低，机器状态取最新最准。
+故障面：排队期间用户切网→派发用旧 IP 判定——接受（窗口短，且下轮提问即纠正）。
+
+## D-unmapped-205@v1 快照 60s 窗口语义——不吞变化，到点补注
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-013@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：Redis 存「上次**已注入**的内容 hash + 注入时间戳」。当前渲染 ≠ 上次注入且 ≥60s → 注入并更新；<60s → 不注入也**不更新**快照，下一轮重新比较，到点即补注。变化永不丢失，抖动被窗口吸收。
+故障面：无新增（相对 D-006 仅明确写入时机）。
+
+## D-unmapped-206@v1 心跳契约扩展须同步四个钉子测试文件
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-007@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：知识库共享断言面钉子②：daemon 心跳加参（sillyhub-daemon/src/daemon.ts _sendHeartbeatOnce 平铺传参）后，length 钉四文件必须全部 N→N+1：tests/daemon-heartbeat-pending.test.ts、tests/daemon-heartbeat-sillyspec.test.ts、tests/sillyspec-platform-command.test.ts（6 处）、tests/integration/selfupdate-scenarios.test.ts（2 处）。同一变更内完成，否则 CI 补红。
+故障面：遗漏任一钉子文件即 CI 红——task 清单显式列出四文件。
+
+## D-unmapped-207@v1 daemon_instances 加 JSON 列 + Alembic 迁移，链尾锚测试前移一行
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-008@v1
+锚点：backend/tests/test_align_platform_change_events_migration.py
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：我的判断：daemon_instances 新增 network_info JSON 列（存 {observed_ip, interfaces:[{name,ip,cidr,family}]}，单列整体读写）+ observed 单独查询便利不加独立列（JSON 内取）。不复用 capabilities（语义混杂）。新 Alembic 迁移落库时必须前移链尾锚测试 backend/tests/test_align_platform_change_events_migration.py 的 head 常量一行（知识库钉子①）。
+故障面：老版本 daemon 未升级时 network_info 恒 NULL——判定降级为「无网卡数据，仅观测 IP」，不报错。
+
+## D-unmapped-208@v1 实现方案选定——方案 A 平台自动注入（每轮 CIDR 判定 + 前导段注入）
+状态：implemented
+变更：2026-10-23-session-network-context
+原编号：D-009@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：用户选定方案 A：daemon 心跳上报网卡 + 后端观测落库 + 每轮 CIDR 判定生成【网络环境】段自动注入。理由：原始诉求是「agent 每次回答时都知道网络情况」，只有注入保证 100% 触达；B 依赖 agent 主动查询、最需要的场景最容易漏；C 浏览器探测被 Chrome mDNS 混淆封死且 agent 依旧无感知。
+故障面：见 D-001/D-006（token 成本由去重对冲）。
+
+## D-unmapped-209@v1 落选方案 B——agent 按需查询工具（get_network_info MCP 工具）
+状态：rejected
+变更：2026-10-23-session-network-context
+原编号：D-010@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：落选。不主动注入，新增 MCP 查询工具让 agent 按需调用。
+否决理由：治不了本——agent 不主动调用就依旧不知道网络情况，而用户最需要的场景（问「怎么访问项目地址」）恰恰最容易漏；且需扩 MCP 工具面、daemon 不掌握用户浏览器源 IP 须回平台查询，链路更长。
+复潮条件：若注入 token 成本实测不可接受且 agent 主动调用习惯可被 prompt 稳定养成，可重议按需查询形态。
+
+## D-unmapped-210@v1 落选方案 C——仅前端展示网络徽标不注入
+状态：rejected
+变更：2026-10-23-session-network-context
+原编号：D-011@v1
+锚点：未记录
+最近确认：55e50da155266013c97475c0c6787bd964170980
+理由：落选。仅在聊天界面显示网络徽标，agent 无感知。
+否决理由：浏览器侧探测局域网 IP 已被 Chrome mDNS 混淆机制基本封死（返回 *.local），拿不到可用数据；且不解决核心诉求——agent 依旧不知道网络环境，等于不做。
+复潮条件：若浏览器重新开放可靠的本机 IP 探测能力且需求退化为「仅人看」，可重议。
+
+## D-unmapped-230@v1 按 dsh 引擎机制做全套（消息来源标记 + 请求头快照），跨三端
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-001@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户否决前端启发式（2026-10-25-trajectory-system-rows 已 reject），要求按 dsh 机制做全套：消息来源标记（source）+ 请求级系统提示词/工具快照上报，含 daemon 侧改造，跨 backend + sillyhub-daemon + frontend 三端完整流程。
+故障面：盖戳遗漏新增注入点时该类消息回退「用户」行（可发现的标签回退，非数据损坏）。
+退役判据：若平台日志层未来引入原生来源列，metadata 键机制可整体退役。
+
+## D-unmapped-231@v1 系统提示词行做「配置面快照」口径（引擎全文不可得）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-002@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：做配置面快照——daemon 轮边界上报「档案配置的 systemPrompt 追加段 + 工具清单」快照，变更时显示「系统提示词已更新/工具已更新」行；对比对象是配置面非引擎全文，该边界写入设计文档。
+
+## D-unmapped-232@v1 存量历史会话如实呈现（无标记 → 用户行），不做启发式兜底
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-003@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：如实呈现——新机制只对新产生的会话生效，存量无标记的历史注入仍显示「用户」行，不伪造标记、不保留启发式兜底（与 dsh 数据驱动同构）。
+
+## D-unmapped-233@v1 revert 已提交的启发式代码（77ba0588b / c93aafc84）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-004@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户裁决：在新变更中 revert 这两笔提交，方案彻底切换到 dsh 机制（代码已在 main，通过 revert commit 处理，不 reset 历史）。
+
+## D-unmapped-234@v1 采用方案 A——复用日志通道（metadata 盖戳 + 新 channel 快照 + submit 透传修复）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-005@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户选 A：注入点盖 metadata（照 turn_trigger 先例）；daemon 轮边界把配置快照作为新 channel 日志上报；修复 submit_steps metadata 只落 _agent_event 的透传缺陷；前端新增段类型照 turn_trigger 先例装配。全链路复用现有管道，历史回放自动有快照。
+故障面：channel 扩枚举后旧前端把快照行当未知日志（需前端兼容分类：未知 channel 归中性系统行不丢）。
+退役判据：若日志层拆分内容/元数据双流，快照 channel 可迁离。
+
+## D-unmapped-235@v1 否决「独立快照表 + REST 上报」（方案 B）
+状态：rejected
+变更：2026-10-25-trajectory-source-model
+原编号：D-006@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户未选 B。
+否决理由：新表+新端点+前端新查询链路，实时/回放各接一套，改动面远大于复用现有日志管道且无对应收益。
+复潮条件：日志表容量/查询性能因快照行出现实测问题时重议。
+
+## D-unmapped-236@v1 否决「纯前端不落库」（方案 C）
+状态：rejected
+变更：2026-10-25-trajectory-source-model
+原编号：D-007@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户未选 C。
+否决理由：刷新即丢、历史会话无快照，不满足 D-001 的历史回放要求。
+复潮条件：无（需求本身要求持久化，除非需求变更）。
+
+## D-unmapped-237@v1 设计定稿——三段式（注入盖戳 / daemon 快照 / 前端行）+ 真码原型
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-008@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：用户确认定稿；原型（轨迹原型扩展三类新行）已登记 prototype-trajectory-source-model.html。
+
+## D-unmapped-238@v1 新注入类归 turn_trigger 体系（非独立 sender 键）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-009@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：我的判断：扩 turn_trigger（team_brief / worker_dispatch / agent_notice 三新 kind）——前端配置表/装配链/轨迹映射全套已就位，零新管道；dsh 的 source.kind 独立轴在本平台等价物即该闭表。
+
+## D-unmapped-239@v1 变更检测在 daemon 侧，只报 initial/change（非每轮落快照）
+状态：implemented
+变更：2026-10-25-trajectory-source-model
+原编号：D-010@v1
+锚点：未记录
+最近确认：024af1a9d8d16d48a68fa1dfe07103c16afd049c
+理由：我的判断：daemon 缓存上次快照做字段级比较，仅 initial 与 change 上报——dsh 同构（agent.ts:635-650 同款条件），省日志量。
+
+## D-unmapped-247@v2 忽略条目按顶层聚合展示，不递归展开（措辞精度修订）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-003@v2
+锚点：未记录
+最近确认：19783ad99
+理由：结论不变（顶层聚合）；normalized_requirement 措辞收敛为「与忽略目录内部文件数无关（--directory 只聚合目录），散落的忽略单文件仍逐条、规模与其线性相关」
+supersedes：D-003@v1
+故障面：同 D-003@v1
+退役判据：同 D-003@v1
+
+## D-unmapped-248@v1 diff 基线一律 HEAD，不区分暂存区；untracked/已删除特例展示
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-004@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：一律与 HEAD（最近一次提交）比，不拆「更改/已暂存更改」两组（平台 agent 场景不走暂存流程，YAGNI）；untracked 文件 diff 展示整文件为新增（全绿）；已删除文件保留在修改集合清单（红色删除线），diff 展示整文件删除（全红）
+故障面：用户本地手动 stage 后清单不体现暂存态，可能误判「还有未暂存改动」
+退役判据：平台引入暂存区工作流（如平台内提交功能）时重议口径
+
+## D-unmapped-249@v1 explorer 树着色不改点击行为，diff 入口仅修改集合视图
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-005@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断（按用户原话字面）：explorer 树点击行为维持现状（右侧内容预览）；「点击看 diff」仅是修改文件集合视图的交互。explorer 树只加状态着色
+故障面：用户若预期「树上点文件直接看 diff」会与实现不符——design 图例中写明
+退役判据：用户反馈想从 explorer 树直达 diff 时，加辅助入口（如右键菜单/图标按钮）
+
+## D-unmapped-250@v1 状态采集沿用 git_log 既有三层链路，daemon 新增两个平名能力
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-006@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：沿用 git_log 模块既有「backend(GitLogService 绑定解析) → ws_hub.send_rpc → daemon execFile git」链路与安全守卫；daemon 侧新增两个平名 RPC 能力——①文件级状态清单（porcelain v2 文件行 + ignored --directory 聚合行 + numstat 增删行数）②工作区单文件 vs HEAD diff（git diff HEAD --unified=3 --no-color -- <path>，untracked 用 no-index 形态或标记位由前端渲染全文新增）。backend 暴露两个新只读端点（WORKSPACE_READ 门控）
+故障面：daemon 旧版本无新平名能力 → backend 需按未知方法映射为 422「daemon 版本过旧」降级（对齐现有 git-log 降级形态）
+退役判据：若后续 daemon 与 backend 合并部署形态变化，再评估链路简化
+
+## D-unmapped-251@v1 落选——方案 B（explorer 契约内嵌状态字段）— rejected
+状态：rejected
+变更：2026-10-25-explorer-git-status
+原编号：D-008@v1
+锚点：未记录
+最近确认：19783ad99
+理由：落选
+否决理由：懒加载树逐层列目录导致重复采集（每层一次 git status）；逐目录语义拼不出全量修改清单，Git 日志页修改集合另开接口形成两处数据源，一致性无保障；ExplorerEntry DTO 变更牵动 gen:types 双份义务
+复潮条件：explorer 树改为一次性全量返回（无逐层懒加载）且修改集合需求取消时，可重议内嵌口径
+
+## D-unmapped-252@v1 落选——方案 C（daemon watch + 实时推送）— rejected
+状态：rejected
+变更：2026-10-25-explorer-git-status
+原编号：D-009@v1
+锚点：未记录
+最近确认：19783ad99
+理由：落选
+否决理由：大仓库 fs 监听开销大且 Windows 文件监听坑多；需新增推送通道与连接状态机；当前场景刷新按钮 + react-query 失效机制已覆盖，YAGNI 严重超范围
+复潮条件：出现多端同改工作区需秒级感知的真实场景（如多人协作审阅同一工作区）时重议
+
+## D-unmapped-253@v1 untracked diff 采集用局部 execFile 读退出码（exit 0/1 均成功）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-010@v1
+锚点：sillyhub-daemon/src/host-fs-handler.ts:1661
+最近确认：19783ad99
+理由：我的判断：untracked 分支不走 runCmd 的 ok 通道，用局部 execFile（对齐 runGitFetch 先例 sillyhub-daemon/src/host-fs-handler.ts:1661）直接读退出码——exit 0/1 均视为成功（1=有差异，常态），≥2 或 killed 才 error；stderr 的 CRLF warning 行不进 error 文案。备选「改 ExecResult 暴露退出码」影响公共件全调用面，不取
+故障面：git 未安装/版本极旧时 no-index 旗标行为差异——退化为 error 通道，前端按 diff 拉取失败降级，不致错数据
+退役判据：ExecResult 未来暴露退出码后，可回归统一 runCmd 通道
+
+## D-unmapped-254@v1 porcelain v2 解析契约——末段 rejoin、u 条目按 modified、祖先蓝点不含 ignored
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-011@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：① `1` 条目前段字段以单空格分隔、path 以制表符与前段分隔（git 官方契约）——按行内首个 `\t` 切出 path（含空格安全；path 含 `\t`/换行时 git 自动 C-quote 包裹）；② `u`（unmerged，合并冲突）条目按 modified 归类（四态不扩冲突态，YAGNI，测试用例覆盖）；③ explorer 祖先目录蓝点口径=子树内存在 added/modified/deleted/untracked 任一，ignored 不算改动
+故障面：冲突文件显示为「修改」蓝而非专门冲突标识——平台场景罕见，图例不提示；用户在别处解决冲突后状态自然消失
+退役判据：平台出现高频合并冲突场景时增补第五态「冲突」
+
+## D-unmapped-255@v1 并行变更遗留红测试的就地对齐（turn-timeline 断言恢复）
+状态：implemented
+变更：2026-10-25-explorer-git-status
+原编号：D-014@v1
+锚点：未记录
+最近确认：19783ad99
+理由：我的判断：该红由并行变更 subagent-card-unify-panel 已提交主仓但漏更新对应测试所致，非本变更文件；为恢复提交门可用，在收口提交 0f3bf815a 中顺带对齐断言（20/20 绿），commit message 留痕
+故障面：顺手修复与变更主体混于同一提交，追溯需读 commit message
+退役判据：无（一次性修复留痕）
+
+## D-unmapped-266@v1 回退安全性前提=单会话单活跃 run 不变式(反例排查)
+状态：implemented
+变更：2026-10-26-turn-phase-orphan-fallback
+原编号：D-001@v1
+锚点：未记录
+最近确认：65081d429e74019db614c9b39035464c74bd4be2
+理由：前提=平台「单会话单活跃 run」硬不变式。反例逐一排查：①跨轮子代理——parent_tool_use_id 归属派生轮，是轮内事件不建轮，不产生 turn_phase；②团队分身——parent_session_id 独立会话树，事件按 agent_session:{id} 频道各自路由；③忙轮守卫——已有活跃轮时后端拒绝新 run（DaemonSessionTurnConflict）或转排队（排队消息非活跃轮，派发建轮才活跃）；④steering 中途注入——沿用活跃 run 不建新轮；⑤自动续跑——前轮终态后才建新轮。实现侧保险：回退只写 currentRunId 指向的轮（现有状态机维护，只指向 pending/running/interrupting），不做模糊匹配。
+
+## D-unmapped-317@v1 落选——估算并入既有 usage_update 通道
+状态：rejected
+变更：2026-10-29-engine-live-perception
+原编号：D-002@v1
+锚点：未记录
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+理由：不采用（用户选定方案二，本条为落选防复潮记录）。
+否决理由：usage 字段语义被估算值污染——预算软切断（liftSessionUsage/aggregateSessionUsage/checkBudgetCutoff）、计费聚合、ctx 环所有既有消费方都需防「估算混入聚合」，漏防一处即钱与切断阈值的事故面；与 2026-08-27「实时/终态口径必须同类」决策正面冲突（轮结束权威值落定必跳变）。
+复潮条件：usage 消费面收敛到单一展示用途且预算/计费全部改走独立聚合源时成本反转。
+
+## D-unmapped-318@v1 落选——纯前端等待态分级（不动 daemon）
+状态：rejected
+变更：2026-10-29-engine-live-perception
+原编号：D-003@v1
+锚点：未记录
+最近确认：de68b356befe540e0c77695de92216fb36c1a5e9
+理由：不采用（用户 P0 裁决 C 要求估算数字按引擎能力补显，纯文案不满足）。
+否决理由：token 数字全程不动只换文案，不满足用户 P0 裁决 C（估算补显），治标不治本。
+复潮条件：daemon 侧改动长期不可行（引擎面冻结）时可作为降级兜底单独启用。

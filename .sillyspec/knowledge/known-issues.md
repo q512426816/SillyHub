@@ -6,51 +6,62 @@ created_at: 2026-06-23 02:00:00
 # 已知坑 (Known Issues)
 
 ## 🟡 sillyhub-daemon 于 2026-06-14 从 Python 重写为 Node.js
+- 状态：观察
 
 `scripts/`、旧文档、部分模块卡片可能仍引用 Python 文件名（`daemon.py` / `agent_detector.py` / `task_runner.py`），实际代码已全部是 TypeScript（`daemon.ts` / `agent-detector.ts` / `task-runner.ts`，ESM/pnpm）。改 daemon 前确认看的是 `.ts` 源码，勿被旧 Python 文档误导。
 
 ## 🔴 CI hook 复合命令可绕过 claude PreToolUse 层
+- 状态：现行
 
 两层 hook：claude `PreToolUse`（`git commit*` 前缀匹配 → 全量 mypy + frontend）+ git `pre-commit`（ruff）。坑：`git add && git commit` 这类**以 `git add` 开头的复合命令**会绕过 claude 层，只跑 ruff。需要全量检查时，应分开执行 `git add` 再 `git commit`，或单独触发。
 
 ## 🟢 daemon 重启 session 恢复已修复（gap-8.3 / commit 40e21d3）
+- 状态：已修复
 
 daemon 重启后 interactive session 丢失致 turn 卡死的根因（`sillyhub-daemon/src/cli.ts` 漏传 persistence/recoveryClient）**已修复**（2026-06-20，commit 40e21d3，变更 `2026-06-19-fix-interactive-daemon-lifecycle` gap-8.3）：`sillyhub-daemon/src/cli.ts:773-776` 与 `:1214` 已装配 `JsonSessionPersistence` + `recoveryClient`（client 即 HubClient，实现 RecoveryCoordinator），backend 加 recovery 端点。有 `cli-session-manager-injection.test.ts` 守护。改 daemon session 逻辑可基于此已恢复前提。
 
 ## 🟡 AgentRunLog 无 metadata 列 / 三层日志 metadata 丢失
+- 状态：观察
 
 AgentRunLog 表无 metadata 列；三层日志（daemon/backend/前端）的 metadata 在 `submit_messages` 阶段会丢失。涉及 agent-run 日志/元数据传递的改动，需注意此约束（见变更 `agent-run-pipeline-fix`）。
 
 ## 🟢 本机可能存在多个 daemon 实例
+- 状态：现行
 
 连本地（daemon-start.bat）与连远程（手动 cmd）两类 daemon 可能并存。停 daemon 时按 `--server` 区分，勿误杀；无自动拉起机制。taskkill 禁用 `/IM` 通杀（会自杀当前 claude 会话），需按 PID 精确杀。
 
 ## 🟡 Docker backend 容器不热重载（挂载非 /app、无 --reload）
+- 状态：观察
 
 `deploy/docker-compose*.yml` 的 backend 容器挂载的是宿主项目目录到 `/host-projects`（便于读文件），**不是**把源码挂进 `/app`，且启动命令无 `--reload`。容器跑的是**镜像内构建时打包的代码**。改后端源码后 `docker compose restart backend` / `up -d --build backend` 不会加载新代码——必须 rebuild 镜像（`docker compose build backend && up -d`）。
 - 验证新端点/新逻辑是否生效：`curl` 实测端点响应（如 405≠401 说明新路由没进镜像），别只靠 tsc/pytest 本机通过。
 - 通用坑：全 Docker 部署 + 容器不挂源码/无 reload 的项目，改后端后 curl 实测端点行为变化是唯一可靠判据。
 
 ## 🟢 frontend healthcheck busybox 误报问题已解决（commit 46591be0）
+- 状态：已修复
 
 frontend 容器**已移除 healthcheck 块**（`deploy/docker-compose.yml` 的 frontend 服务无 healthcheck；commit 46591be0 改用 node fetch 自检），不再有 busybox `wget` 走 `http_proxy` 误报 unhealthy 的问题。
 - 通用经验仍保留：busybox wget + 代理环境组合做健康探针会误报（busybox 不认 `no_proxy`，探测本机端口也被代理拦截）。未来若要给容器加 healthcheck，要么显式 `unset http_proxy https_proxy`，要么用 curl / node fetch 而非 busybox wget。
 
 ## 🟡 daemon pnpm overrides 把 claude-agent-sdk 8 平台二进制硬钉 0.3.181
+- 状态：观察
 
 `sillyhub-daemon/package.json` 的 `pnpm.overrides` 把 `@anthropic-ai/claude-agent-sdk` 及其 8 个平台 optionalDependency（`@anthropic-ai/...-darwin-arm64/x64`、`linux-x64/arm64`、`win32-x64/arm64` 等）版本全部钉死在 `0.3.181`。升级 SDK 前必须同步改这些 overrides，否则 pnpm 装到的实际是旧版二进制（即便 dependencies 写新版）。范围扫描：改 daemon 依赖/升级 agent SDK 时务必检查 `pnpm.overrides` 全平台条目。
 
 ## 🟢 frontend react-query 已正式启用（2026-07 OpenAPI 类型迁移，commit fecaa155 / 29b3c86b）
+- 状态：现行
 
 frontend 已在 `frontend/src/lib/providers.tsx:10` 挂载 `QueryClientProvider`，`use-daemon-runtimes.ts` / `use-agent-runs.ts` / `daemon-audit.ts` / `runtimes/page.tsx` 等多处用 `useQuery`。**新数据请求应优先用 react-query**（与 OpenAPI 生成类型 `api-types.ts` 配套）。旧 `apiFetch` + zustand 仍存在于已写页面，改动既有页面时沿用既有模式避免割裂。
 - 注：`@tanstack/react-query` 在 2026-06-23 前确实仅声明未启用，本条由原"未启用"修订（见变更 `2026-07-01-react-query-migration` / `2026-07-04-frontend-openapi-types`）。
 
 ## 🟡 frontend 与 daemon 各自独立 lockfile + 双 UI 库并存
+- 状态：观察
 
 - frontend 与 daemon **各自独立 lockfile**（`frontend/pnpm-lock.yaml` + `sillyhub-daemon/pnpm-lock.yaml`），无 monorepo workspace 聚合，依赖互不可见。
 - UI 库 **antd v6 与 shadcn 双 UI 库并存**（`frontend/package.json` antd `^6.4.4`），新增组件沿用所在页/模块既有 UI 库风格，别混用引入第三套。
 
 ## 🟡 audit_hooks 只在测试 lifespan 注册，生产审计要业务代码显式写 AuditLog
+- 状态：观察
 
 `backend/app/core/audit_hooks.py` 提供了 SQLAlchemy `after_flush` 事件钩子，但 `register_audit_hooks()` 仅在 `tests/conftest.py` 的测试 lifespan 调用，**生产 `backend/app/main.py` 的 lifespan 没注册**（2026-07-05 核实仍如此）。
 
@@ -59,12 +70,14 @@ frontend 已在 `frontend/src/lib/providers.tsx:10` 挂载 `QueryClientProvider`
 - 排查：`docker compose ... exec -T postgres psql -U platform -d platform -tAc "SELECT action, count(*) FROM audit_logs GROUP BY action ORDER BY action"` 看是否有 `user.*` / `role.*` / `organization.*` 三类。
 
 ## 🟡 全 Docker 部署本地 PG 容器端口未映射 host，host 跑 alembic/pytest 连不上
+- 状态：观察
 
 - 现象：本项目全 Docker 部署（backend + postgres 同 compose 网络），`docker ps` 显示 postgres 容器 `5432/tcp` 但**无 `0.0.0.0:5432->5432` host 映射**；worktree backend 无 `.env`。后果：host 上 `uv run alembic upgrade` / 并发 pytest 连 `localhost:5432` 失败（拒绝连接）。
 - 影响：需 host 连 PG 的验证（alembic online 往返、PostgreSQL 并发证明等）本地受限，只能用 offline SQL + metadata 对比 / SQLite fixture 等效验证，online apply 待 CI/部署补。
 - 通用坑：全 Docker 部署项目，host 上跑需 DB 的命令前，先确认 PG 容器端口映射到 host；否则用 `docker exec` 进容器跑，或 SQLite fixture 等效验证 + 标注"PG 并发证明待 CI 补"。
 
 ## 🟡 ppm 导出 export-excel 路由必须前置于 item_id 路由
+- 状态：观察
 
 FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（或 `/simple-list` 等）若声明在 `/xxx/{item_id}` **之后**，`export-excel` 会被 `{item_id}` 路径参数吞掉当 UUID 解析，返回 `422 uuid_parsing`（不是 404）。
 
@@ -74,6 +87,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 详见 `docs/backend/modules/ppm.md` 注意事项。
 
 ## 🔴 alembic 并行变更撞 revision 多 head：启动 crash-loop
+- 状态：现行
 
 `backend/migrations/versions/` 已 144+ 个 migration（2026-08-18 实测 144，随并行 change 持续增长）。并行变更撞 revision/down_revision 即产生多 head → **应用启动 crash-loop**；SQLite 单测抓不到（PG 才暴露）。
 
@@ -81,17 +95,20 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 关联 conventions「2026-06-15 — Alembic migration 目录与 schema 领先版本号的处理」条目（目录在 `backend/migrations/versions/` + stamp 手段），本条补并行多 head 坑。
 
 ## 🔴 前端测试闸门缺口：gen:types:check 未进 CI，E2E 零落地
+- 状态：现行
 
 - **`gen:types:check`（api-types.ts 重生成 + git diff --exit-code）未进任何 CI workflow**（`.github/workflows/` 全目录 0 命中；frontend-ci 只跑 lint/typecheck/test/build）。后端 schema 改动漏跑 regen 时前端 tsc **照样绿**（对着旧类型编译），失同步只在实际请求时暴露——当前仅靠 CLAUDE.md 规则 21 流程纪律拦截，别指望 CI 兜底；改后端 DTO 后必须自觉 `pnpm gen:types` 并同 change 提交 `api-types.ts` + `backend/openapi.json`。
 - **E2E 零落地**：`@playwright/test ^1.60` + `puppeteer ^24.43` 声明在 devDependencies，但 playwright.config 与 *.spec.ts 全仓 0 命中。登录/扫描/Agent Run SSE/daemon 会话等关键流程无端到端保护，两套自动化依赖是死重——验收时别假设有 E2E 兜底，链路级问题靠手工过流程。
 
 ## 🟡 mcp Python SDK 锁死 v1 线：v2 移除 FastMCP 与平台 mount 冲突
+- 状态：观察
 
 `backend/pyproject.toml` 锁 `mcp>=1.29,<2`（L30-34 注释写明原因）：mcp SDK v2.0.0（2026-07-28）breaking 移除 FastMCP 改用 MCPServer，与 mcp_gateway 的 FastMCP ASGI mount 写法冲突，锁 v1 线取 1.29.x。v1 仅持续收 critical bugfix / security patch；未来升 v2 需重构 mcp_gateway mount 方案。
 
 - 联动：daemon 侧 `@modelcontextprotocol/sdk ^1.29.0` 与 backend 同在 1.x 线；backend 升 2.x 时 daemon 须同步评估（升级任一方必跑 daemon `tests/mcp-server.test.ts` + `tests/mcp-config.test.ts` 验证 MCP 工具契约）。
 
 ## 🟡 Windows Docker bind mount stat 性能断崖：spec_root fs 重循环必炸
+- 状态：观察
 
 本机 Docker 部署的 workspace spec_root 是 Windows bind mount，每次 `stat`/`is_file` ≈ **1.45ms**（比原生 Linux 慢约 3 个数量级）。对 spec 树做大量 stat 的循环会性能断崖——Linux/CI 上测不出，Windows 本机 Docker 才暴露。
 
@@ -99,6 +116,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 规则：容器内遍历 spec/文件树一律 `os.scandir` 单遍 + DirEntry 缓存 stat（每文件 1 次 syscall；实测 12.4s→1.7s），禁止 rglob + is_file + stat 多遍组合。排查用容器内 cProfile 看 `posix.stat` 的 ncalls/tottime。
 
 ## 🟡 worktree 过期租约无自动 GC：expires_at 与索引闲置
+- 状态：观察
 
 `backend/app/modules/worktree/`：expires_at 列与 `ix_worktree_expires` 索引存在，但**没有任何后台任务/调度扫描回收**（旧 `gc_expired_leases` 已不在 service 中）。runtime-session 流程现状靠显式 release；未 release 的 worktree 目录与 askpass 脚本会滞留磁盘累积。
 
@@ -106,12 +124,14 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 依据：`.sillyspec/docs/SillyHub/flows/runtime-session.md`（「现状无自动 GC」）、`.sillyspec/docs/backend/modules/worktree.md`。
 
 ## 🟡 spec_guardian 死代码与 tool_gateway 注释失配：守护门从未在生产生效
+- 状态：观察
 
 - `backend/app/modules/workflow/spec_guardian.py` 的 `run_guard` 全仓仅被 `tests/test_spec_guardian.py` 引用——G3-G7 质量/文档/组件守护门**从未在生产路径生效**，变更验收别指望它把关。
 - `backend/app/modules/tool_gateway/tool_policy.py:175` docstring 写「loaded by the caller (e.g., ToolGatewayService._load_policy)」但全仓无 `def _load_policy` 定义——注释与实现不一致（项目规则 18），策略装配链路现状以代码为准，勿按 docstring 理解。
 - 2026-08-18 全量重扫 grep 实测；清理或接线前先确认调用方是否真的缺失。
 
 ## 🟢 daemon 三个 3000+ 行 god 文件（daemon.ts 4047 / session-manager.ts 3897 / task-runner.ts 3156）
+- 状态：现行
 
 2026-08-18 wc -l 实测：`src/daemon.ts` 4047、`src/interactive/session-manager.ts` 3897、`src/task-runner.ts` 3156。高耦合、跨文件契约靠约定、lease payload 鸭子类型几十处，**无低风险切片路径**。
 
@@ -119,6 +139,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 
 
 ## 会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）
+- 状态：现行
 
 - **现象**（2026-09-15 用户实测会话导出）：full.json 里 `[TOOL_RESULT]` 中文全乱码（如
   "EHSϵ bcm-……"），同会话 MD 摘要里 agent 正文正常——正文走 SDK message 通道，TOOL_RESULT
@@ -142,6 +163,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - **登记于**：ql-20260915-004（2026-09-14-session-export 用户验收反馈 P2-2）。
 
 ## 🟡 后台任务写通道宽限无界（hasBackgroundTaskGrace 无 TTL，R-01 已接受观察项）
+- 状态：观察
 
 - **暴露差**（2026-09-16 风险审查发现）：同类第一放行源 `withinStaleFlipGrace` 有界 60min
   （`STALE_RUN_WRITE_GRACE_MS = 60 * 60_000`，sillyhub-daemon/src/interactive/session-manager/types.ts:452，
@@ -162,6 +184,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
   文档载体方案 A）。
 
 ## 🟢 2026-06-05 — sync_stage_status 找不到 change_key 的 dual-db 问题（已修复）
+- 状态：已修复
 
 - SpecWorkspace（platform-managed）和 workspace root_path 各有独立的 `.sillyspec/.runtime/sillyspec.db`。
 - `_resolve_db_path` 优先用 SpecWorkspace.spec_root，但 Agent worktree 里的 SillySpec CLI 写入的是 workspace root_path 下的 sillyspec.db。
@@ -169,18 +192,21 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 修复：`_resolve_db_path` 增加 fallback，change_key 不在首选 db 时自动切换到 root_path db。
 
 ## 🟢 2026-06-05 — auto_dispatch_next_step 只在 has_pending_step 时触发（已修复）
+- 状态：已修复
 
 - `agent/service.py` 原逻辑：`if sync_result.synced and sync_result.has_pending_step` 才调用 `auto_dispatch_next_step`。
 - brainstorm 完成时所有 steps completed → `has_pending_step=False` → 不调用 → `complete_stage` 永远不执行。
 - 修复：条件改为 `sync_result.synced and (sync_result.has_pending_step or sync_result.stage_completed)`。
 
 ## 🟢 2026-06-05 — complete_stage 不调用 reparse 导致文档不全（已修复）
+- 状态：已修复
 
 - Agent 生成文件后写入磁盘，但 `complete_stage` 只更新 DB 状态（current_stage, human_gate），不同步 `change_documents` 表。
 - 前端看到的文档列表来自 DB，磁盘上的新文件（design.md, requirements.md, tasks.md）不会出现。
 - 修复：`auto_dispatch_next_step` 在调用 `complete_stage` 前先 `reparse` 同步文档。
 
 ## 🟢 2026-06-17 — login_enabled 必须在 get_current_user 检查，不能只在 login 入口（commit d62ec975）
+- 状态：现行
 
 - 仅在 `auth/service.py:login()` 检查 `user.login_enabled` 是不够的：用户已持有有效 JWT，管理员调用 `disable-login` 后，旧 token 在自然过期前仍能访问所有 `/api/*` 端点。
 - 必须在 `backend/app/core/auth_deps.py:get_current_user()` 内补一道 `if not getattr(user, "login_enabled", True): raise AuthUserLoginDisabled(...)`，配合 `users_service._revoke_sessions()` 在 disable-login 时把 sessions 全部标记 revoked_at，才能让 token 立即失效。
@@ -188,6 +214,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - E2E 验证：disable-login 后立刻拿旧 token GET `/api/auth/me`，期望 401；用密码重新登录，期望 401 + `HTTP_401_AUTH_USER_LOGIN_DISABLED`。
 
 ## 🟢 2026-06-19 — alembic.ini 注释含 UTF-8 em-dash 导致 Windows gbk configparser 崩溃（已修复）
+- 状态：已修复
 
 - 现象：Windows 中文 locale 下 `uv run alembic <cmd>` 报 `UnicodeDecodeError: 'gbk' codec can't decode byte 0x94`。根因：`backend/alembic.ini` 注释含 UTF-8 em-dash（`—` = e2 80 94），alembic `compat.read_config_parser` 用 locale 默认编码（Windows zh = gbk/cp936）读 ini 解码失败。
 - `PYTHONUTF8=1` / `python -X utf8 -m alembic` **均无效**（alembic compat 层不走 utf8 mode；直接 `configparser.read()` + `-X utf8` 能读，但 alembic CLI 入口路径不行）。
@@ -195,6 +222,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：Windows 本地跑 alembic 的项目，alembic.ini / 其他 .ini 注释避免 UTF-8 特殊标点（em-dash/智能引号），用 ASCII。
 
 ## 🟢 2026-06-20 — cursor-agent 官方 ps1 版本目录正则不匹配新版目录命名，导致 cursor 完全不可用（已修复）
+- 状态：已修复
 
 - 现象：daemon 注册的 cursor runtime 版本显示「待识别」（实际注册 'unknown'），cursor task 启动即崩（exit 1）。其他 provider 正常。daemon 心跳/在线正常（因为 resolveBinPath 找到 cursor-agent.cmd 就算 available，与版本探测是否成功无关）。
 - 根因：cursor-agent 官方安装在 `%LOCALAPPDATA%\cursor-agent\`，`cursor-agent.cmd` → `cursor-agent.ps1`。ps1 用正则 `^\d{4}\.\d{1,2}\.\d{1,2}-[a-f0-9]+$` 找 `versions/` 下最新版本目录，但新版 cursor 的目录名是 `YYYY.MM.DD-HH-MM-SS-commit`（含时分秒、多段 `-`），`-` 后非纯十六进制 → 不匹配 → ps1 `Write-Error "No version directories found"` + `exit 1`。
@@ -202,6 +230,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：第三方 CLI 的启动包装脚本（.ps1/.cmd）若用正则找自更新版本目录，正则可能跟不上自身新版目录命名格式变化。遇到「CLI `--version` / 启动报奇怪错误且 exit 1、但二进制确实存在」时，先检查其包装脚本的版本查找逻辑是否过时，必要时绕过包装层直接调 version 目录的真实入口。
 
 ## 🟢 2026-06-21 — ETL 迁移函数执行顺序依赖 maps 构建时机，ppm 模块整表成孤儿（已修复）
+- 状态：已修复
 
 - `backend/scripts/migrate_from_ruoyi.py` 的 `migrate_plan_node_module.plan_node_id` 实际指向 `ps_plan_node`（里程碑，非 plan_node 模板），但原 main() 把它排在 `migrate_ps_plan_node`（构建 `maps["ps_plan_node"]`）之前 → `map_fk` 全失败 → `fallback_keep=True` 保留源数字 ID → 被 ALTER varchar→uuid 迁移丢弃为 NULL → 模块成孤儿。
 - 排查线索：对照组 `migrate_ps_plan_node_detail`（排在 ps_plan_node 之后）正常映射，唯独 module 全军覆没；"子表全空"时优先查 FK 列 NULL 比例即可定位，别只盯前端。
@@ -209,6 +238,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：ETL 脚本里各 `migrate_*` 函数依赖前序函数构建的 maps dict，新增/调整迁移函数时务必确认其 `map_fk` 依赖的 map_key 已由排在前面的函数构建。
 
 ## 🟡 2026-06-26 — daemon allowed_roots 只管 list_dir RPC，不管 CC 执行 cwd
+- 状态：观察
 
 > 来源：2026-06-26-daemon-root-path-translation execute（design D-002 superseded）。
 
@@ -216,18 +246,21 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 设计 daemon 侧"放行 CC 访问"类功能时，勿误以为 allowed_roots 管 CC 执行——它只管 daemon 自身的 list_dir RPC（前端浏览目录场景）。CC 能否在项目根执行 + 访问源码，取决于 backend 下发的 root_path 是否为 daemon 可 statSync 的宿主机路径。
 
 ## 🟡 2026-06-30 — install.sh 改动需重建 backend 镜像才下发（baked into image）+ bash heredoc ${VAR} 转义陷阱
+- 状态：观察
 
 - **生效路径**：`sillyhub-daemon/scripts/install.sh` 不是运行时读取，而是 backend 镜像构建时 `COPY scripts/install.sh /app/daemon-dist/install.sh`（backend/Dockerfile:86）baked 进镜像，由公开端点 `/daemon/install.sh` 下发（`app/modules/daemon/dist_router.py`，无 /api 前缀）。改 install.sh 后必须**重建并重新部署 backend 镜像**，新安装的用户才拿到新版；仅改文件不重建，下发的仍是旧镜像里的 install.sh。`config.py` 的 `daemon_dist_dir` 仅在测试用 tmp_path 覆盖，生产是镜像内固定路径。
 - **heredoc 转义陷阱**：bash 无引号 heredoc（`<<EOF`）中，`\${VAR}` 的反斜杠会转义 `$` → 输出字面 `${VAR}` 不展开；要展开须让 `$` 前无反斜杠，或用 `\\` 分隔。install.sh 生成 `.cmd` wrapper 时写 `"${win_bin_dir}\${BUNDLE_NAME}"`，Windows 路径反斜杠紧贴 `${` 触发此陷阱，生成的 .cmd 含字面量 `${BUNDLE_NAME}`。修复：bundle 路径改用 cmd 内置 `%~dp0`（=该 .cmd 自身所在目录，自相对、bash heredoc 不碰 `%`、不依赖运行时 PATH）。
 - **本机已装实例**：install.sh 重建下发只影响**新安装**；本机已生成的 `~/.sillyhub/daemon/bin/sillyhub-daemon.cmd` 需手工修或重装才修复。
 
 ## 🟡 2026-07-01 — Next.js rewrite proxy 对长请求 socket hang up + daemon 分发以 git SHA 为版本号
+- 状态：观察
 
 - **Next.js rewrite proxy 超时**：frontend `next.config.mjs` 用 `rewrites` 把 `/api/:path*` 代理到 backend（Next.js 14.2.5 standalone node server，非 nginx）。backend 处理慢（>~20-30s）时 proxy 端 `socket hang up / ECONNRESET` 返 500 给浏览器，但 backend 仍在后台跑完（业务成功、前端误报）。根治：耗时端点改 SSE 流式（text/event-stream 长连接 + 阶段事件 + 长阻塞段每 5s yield `: keepalive` 注释行保活），前端原生 fetch+ReadableStream 解析（不复用 JSON 的 apiFetch）。参考范式：`agent/router.py:_SSE_HEADERS` + `StreamingResponse(gen, media_type="text/event-stream")`。
 - **daemon 分发以 git SHA 为版本号**：`pnpm bundle` 的 `BUILD_ID={commit-sha}-{timestamp}`（build-bundle.sh 写 src/build-id.ts），backend `/daemon/latest.json` 分发此 version，daemon `preflight` 启动时比较本地 vs 服务器 SHA 决定是否自更新。**未 commit 的 daemon 改动 bundle 后 BUILD_ID 仍是当前 HEAD SHA**——若用户 daemon 已是该 SHA，preflight 判定版本相同不更新，新代码不生效。故 daemon 改动必须**先 commit（新 SHA）→ 再 bundle → 再 rebuild backend**，分发版本才会递增。
 - **apply_sync 黑盒 vs SSE 分阶段**：原 `apply_sync`（写盘+reparse 整体返回 int）无法在 SSE 中途 yield reparse 阶段进度。解法：提取 `_write_spec_root`（写盘+commit clean）供 apply_sync 与 SSE 生成器共用，SSE 顺序调 `_write_spec_root`→`_reparse_phase(scan_docs)`→`_reparse_phase(change)`，每步 yield 事件。两阶段 reparse 各自 try/except 设 dirty 不阻断（D-003，docs/changes 独立数据，部分成功优于全失败）。
 
 ## 🟢 2026-07-13 — backend rebuild apt 连不上 deb.debian.org（base image digest 漂移致 apt 缓存失效裸奔，已修复）
+- 状态：已修复
 
 > 来源：ql-20260713-001-9f3e（install.sh 修复 ql-20260710-003 上线时触发）。与同文件「2026-06-30 — install.sh 改动需重建 backend 镜像才下发」条目同属 daemon 分发链路。
 
@@ -237,6 +270,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：Dockerfile 多阶段里 pip/npm 配了国内镜像但 apt 漏配是常见隐患——平时缓存命中掩盖了 apt 源不可达，一旦 base image digest 漂移或 `--no-cache` 就裸奔 build 失败。新项目 Dockerfile apt 层统一配国内源，与 pip/npm 对齐。
 
 ## 🟢 2026-07-13 — install.sh WSL 下 1c/1d 盘符转换 bug（/e/ vs /mnt/e/）+ CMD bash 默认解析到 WSL（已修复）
+- 状态：已修复
 
 > 来源：ql-20260713-003-b3d7。与同文件「2026-06-30 — install.sh 改动需重建 backend 镜像才下发」条目同属 daemon install.sh 链路。
 
@@ -247,6 +281,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：跨 Git Bash/WSL 的 shell 脚本，Windows 路径转 unix 路径必须区分两种映射（MSYS `/c/` vs WSL `/mnt/c/`），不能硬编码其中一种。WSL 默认 automount 所有 Windows 盘到 `/mnt/<drive>/`；Git Bash (MSYS) 挂到 `/<drive>/`。检测 IS_WSL（`/proc/sys/kernel/osrelease` 含 `microsoft`）后选对应前缀。写 Windows 安装脚本时**别假设 `bash` = Git Bash**——Win10/11 装了 WSL 后，CMD/PowerShell 里 `bash` 默认是 WSL 的 bash.exe。
 
 ## 🟢 2026-07-13 — install.sh WSL 下 $USER ≠ Windows 用户名（拼 /mnt/c/Users/<name> 目录坑，已修复）
+- 状态：已修复
 
 > 来源：ql-20260713-004-7e2a。继同文件「2026-07-13 — install.sh WSL 下 1c/1d 盘符转换 bug（/e/ vs /mnt/e/）+ CMD bash 默认解析到 WSL」条目之后又一个 WSL 兼容坑。
 
@@ -256,6 +291,7 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：WSL 下要拿 Windows 用户目录/用户名，**别用 WSL 的 `$USER`/`$HOME`**（是 Linux 的，常 root），用 `cmd.exe /c "echo %USERPROFILE%"`/`%USERNAME%` 或读注册表。跨 Git Bash/WSL 的脚本里 `$USER` 语义不同：Git Bash `$USER`=Windows 用户名，WSL `$USER`=Linux 用户名——不能假设一致。
 
 ## 🟢 2026-07-29 — SILLYSPEC_MASTER_KEY 非 hex 值致 get_cipher() 裸 ValueError 全模块 500（部署已修复）
+- 状态：已修复
 
 > 来源：ql-20260729-001-b3af（GET /api/llm-providers 500 修复）。
 
@@ -265,10 +301,12 @@ FastAPI 按**路由注册顺序**匹配。字面量路径 `/xxx/export-excel`（
 - 通用坑：① `SILLYSPEC_MASTER_KEY` 格式必须是 `<key_id>:<64位hex>`（如 `v1:ab12...`）或裸 64 位 hex，**不能**填标识串/base64/明文密码；生成命令 `python -c "import secrets; print(f'v1:{secrets.token_hex(32)}')"`（`crypto.py:42` MasterKeyMissing 的 hint 已给）。② `deploy/.env` 被 `.gitignore`，改它不进 `git status`，靠重建容器重读 env 落地（`docker compose up -d` 检测到 backend env 变化会自动 recreate，保险用 `--force-recreate backend`）。③ `_load_master_key` 对「非空但格式非法」抛裸 ValueError 是健壮性缺陷——建议后续把 `bytes.fromhex` 包 try/except 转 `MasterKeyMissing`（带 hint），避免 500 时栈里只有裸 fromhex 难定位。**（2026-09-28 核实：`crypto.py:49` 的 `bytes.fromhex` 仍无 try/except 包裹，该健壮性建议至今未做。）**
 
 ## 🟡 AgentMission.session_id 列非 NULL 不可信：判别口径须查表确认指向真实 AgentSession
+- 状态：观察
 
 session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造不传该字段的测试/路径）意味着"列非 NULL"不等于"绑定会话"——存量/旧链路 mission 会带随机 uuid。判别会话 mission 的正确口径=查表确认 session_id 指向真实存在的 AgentSession（patrol/finalizer 的 _mission_bound_session 同源实现）。来源：2026-08-22-team-session-unify task-01/06（Grill NEW-4 延伸）。
 
 ## 🟡 2026-08-24 — 后台子代理脱离平台 running turn 后权限回调 fail-closed 死锁（已有宽限缓解）
+- 状态：观察
 
 > 来源：2026-08-24-platform-session-feedback-fix Wave 1 执行期（task-01 / task-08 后台子代理）。
 
@@ -279,6 +317,7 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 - **现状更新（2026-09-28 核实）**：后续变更 2026-09-15-background-task-permission-lockout 已为后台任务引入写通道宽限（`sillyhub-daemon/src/interactive/session-manager/permission.ts` 的 `hasBackgroundTaskGrace` 第三放行源），正常后台任务的写锁死面已收窄；宽限自身的无 TTL 风险见本文件「后台任务写通道宽限无界」条目。
 
 ## 🟢 daemon sessions /events 字面量路由被 /sessions/{session_id} 参数路由吞掉（FastAPI 路由顺序，commit 0c7860f7）
+- 状态：现行
 
 > 来源：2026-08-24-sessions-live-updates verify 真实运行时冒烟（commit 0c7860f7 修复）。同族通病见本文件「ppm 导出 export-excel 路由必须前置 item_id」条目。
 
@@ -287,6 +326,7 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 - 规避：新增字面量路径且同前缀存在参数路由时——审查用多行感知 grep（`grep -A1 '@router\.get($'`）；测试补路由表级断言（按注册序找首个方法+regex 匹配，断言 endpoint 是预期函数，不消费 body）；SSE/无限流端点测试勿走 httpx client 消费 body（ASGITransport 收全量 body 才返回，`client.stream()` 也挂死），路由可达性用路由表断言替代。真实运行时冒烟（真 uvicorn + curl）是最后防线——本缺陷单测 5186 全绿仍存在。
 
 ## 🟡 2026-08-26 — antd v6 实测三坑：Image 无 wrapperClassName、Modal 语义 styles.container、枚举式 vi.mock 须随桶导出同步
+- 状态：观察
 
 > 来源：2026-08-26-file-fullscreen-preview execute（task-03/04 实现期实测 + QA 验收抓回归）。
 
@@ -295,45 +335,53 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 - 测试：枚举式 `vi.mock("桶文件", () => ({...}))` 工厂在桶文件新增导出时会让模块作用域引用（如 RENDERER_MAP）直接炸套件（"No X export is defined on the mock"）——桶加导出必须同步补 mock 工厂，且这类断裂是套件级（0 test 收集），vitest 汇总里表现为 1 test file failed 而非用例 failed。
 
 ## wt-commit 的 -- 路径分隔符被 PowerShell 5.1 吞掉——用 --pathspec-from-file
+- 状态：现行
 
 Windows PowerShell 5.1 向原生命令传参时裸 `--` 会被剥掉，`sillyspec wt-commit --change X -m "..." -- path1 path2` 报「缺少提交路径」且加引号无效。规避：路径写入临时文件后 `sillyspec wt-commit --change X -m "..." --pathspec-from-file <file>`（每行一个路径，UTF-8）。Git Bash / PowerShell 7 无此问题。（来源：2026-09-23-md-card-render task-01）
 
 ## 🟡 require_permission 隐式 Path(workspace_id) 依赖：平台级（无 ws 前缀）端点直接 422
+- 状态：观察
 
 `auth_deps.require_permission(Permission.X)` 的 checker 签名含 `workspace_id: Annotated[uuid.UUID, Path(...)]`——路由路径里没有 `{workspace_id}` 时 FastAPI 请求校验直接 422（`loc=["path","workspace_id"]`，报错像路由冲突极具迷惑性；2026-10-14-deploy-release-notes 新端点 GET /api/deploy-records 实测踩中，路由匹配调试零收获）。平台级端点（聚合多 workspace / 无 ws 前缀）应使用 `require_permission_any`（auth_deps.py 注释口径「used by APIs without ws_id」）。判别信号：422 details 里 loc 指向 path 参数名而非业务字段。来源：2026-10-14-deploy-release-notes task-02（router.py 注释留痕）。
 
 - 状态（2026-10-19 归类核实，原【待确认】已裁决）：结构性坑现行有效——平台级新端点一律 `require_permission_any`，判别信号见正文。
 
 ## 🟡 .zcode 部分 skill 文件在 main 是已跟踪文件：git rm --cached 会把分支做成「删除态」
+- 状态：观察
 
 `.zcode` 整体在 .gitignore，但 sillyhub-docker-deploy 等 skill 文件历史上已入库跟踪（gitignore 对已跟踪文件无效；`git ls-tree main -- <path>` 可判）。worktree 里改这类文件后 `git add` 被拒（按 ignore 规则报错，需 -f）；若误跑 `git rm --cached` 再 amend，分支相对 main 变成 375 行全删——merge 会把 skill 文件从 main 抹掉。正确姿势：确认 tracked 后 `git add -f`，diff main..HEAD --stat 应显示 +N 修改而非 N deletions。来源：2026-10-14-deploy-release-notes task-06 收口提交实操。
 
 - 状态（2026-10-19 归类核实，原【待确认】已裁决）：仓库存量状态现行有效——被跟踪的 `.zcode` skill 文件 git 操作按正文判据处理。
 
 ## 🟢 生产小内存服务器（1.6G）容器内跑大模型嵌入不可行——本机嵌入+SSH 隧道直写生产库 + 六连坑（已定案）
+- 状态：现行
 
 2026-10-15-knowledge-search-pgvector 部署实证。**核心结论**：backend 容器 mem_limit 800m（后提 1100m）内跑 fastembed 全量嵌入（6712 chunks）被 cgroup OOM 连续杀（模型 ~350M + 服务本体 515M 合计超容器限额；杀掉的是 cgroup 内最大进程，dmesg 有 "Memory cgroup out of memory" 可查）。**终解** = 本机（20 核）嵌入 + `ssh -L 15432:<PG容器IP>:5432` 隧道直写生产 DB（228.7s 全量建库一次完成），服务器容器只跑查询。**六连坑**（同批量部署会再踩）：① 容器内后台进程用 `docker exec` 不加 `-d` 会随 ssh 会话结束被杀（长任务必须 `docker exec -d` + 容器内日志文件轮询）；② `docker cp` 进容器的脚本随容器重建蒸发（命令链须先 cp 再跑）；③ 模型缓存挂载目录必须容器 uid 可写（chown/chmod——否则 fastembed 静默卡死加载，无报错）；④ PG 容器端口未映射宿主（known-issues 既有），ssh -L 转发目标必须写**容器 IP** 而非 127.0.0.1；⑤ SQLAlchemy `with_variant` 列取不到方言方法（`embedding.cosine_distance` 在 JSON 基类型 InstrumentedAttribute 上不存在）——PG 专有算子走原生 `text()` SQL + `CAST(:qv AS vector)`；⑥ 决策库跨变更重号 + 模板化同标题条目（多个「## D-001@v1 风险与死路（design 槽4 收割）」）使 `(workspace_id, spec_path, anchor, title)` 唯一约束在真实语料下必撞——切块键改行号坐标 `(spec_path, start_line)` 或去 uq。
 
 - 状态（2026-10-19 归类核实）：已定案——本机嵌入 + SSH 隧道直写为既定部署路径（2026-10-15/16 两轮实证），容器内嵌入列为禁止操作。
 
 ## 🟢 平台 spec 清单唯一索引静默损坏（容器反复被杀后遗症）——归档后平台仍显示「进行中」+ spec-sync 恒 422（已修复）
+- 状态：已修复
 
 现象：变更本地已归档并推送，平台变更中心仍显示进行中、不在归档列表；CLI 文件树同步恒 HTTP 422（「同步包无效：源文件缺失的重命名操作必须携带文件内容」），而终态墓碑（status=archived）上行正常。根因：生产 `spec_file_manifest` 的 `ux_spec_manifest_ws_path (workspace_id, path)` 唯一索引**静默损坏**（索引缺项——走索引查不到实际存在的行，谓词相同、禁索引强扫即命中），apply_ops 预取 miss → rename 被判 R-07「源文件缺失」→ 422。坏索引同时放行了重复插入：4 个高频热文件（knowledge/INDEX.md、decisions/backend.md、frontend.md、scan/CONVENTIONS.md）各混入 1 条 v1/v2 幻影行（upsert 漏检变 INSERT）。amcheck 全库扫描再揪出 **17 个额外坏索引**（RBAC/changes/workspaces/scan_docs/change_documents 等唯一索引——「item order invariant violated」「high key invariant violated」），共 18 个；唯一表查重仅 spec_file_manifest 有重复。护栏：① 容器反复被杀/重启风暴后必须对 DB 跑 `CREATE EXTENSION amcheck` + 逐索引 `bt_index_check(oid, true)`（heapallindexed 专查「堆有行、索引缺项」，本例 360 索引扫出 18 坏）；② REINDEX（CONCURRENTLY 亦然）报 "could not create unique index ... duplicated" = 坏索引已放行重复行的信号——先备份→按 max version 保留真身去重→再重建（去重 DELETE 也要禁索引扫描，防走坏索引漏删）；③ 索引损坏的指纹：同一谓词「带索引 0 行 / 禁索引 1 行」且逐条件单独查都命中——遇 SQL 语义矛盾先怀疑索引；④ 平台「归档后仍进行中」排查序：终态墓碑是否上行 → 文件树 spec-sync 是否 200 → DB manifest 是否有 changes/archive/ 行。证据：备份表 `spec_file_manifest_dup_backup_20261016`（8 行）留档服务器；修复后 amcheck checked=360 bad=0；重推同步 26 文件落地（archive 25 行/active 0 行）。
 
 - 状态（2026-10-19 归类核实）：已修复——amcheck 复验 checked=360 bad=0、重推同步落地；本条保留为「归档后仍进行中 + spec-sync 恒 422」的诊断 playbook。
 
 ## 🟢 本地 docker 平台同款索引静默损坏复发——免去重 REINDEX 分叉 + amcheck 必须 JOIN pg_am 过滤 btree + 同步静默断档信号（已修复；遗留：本地墓碑处置待拍板）
+- 状态：已修复
 
 2026-10-16 晨生产条目（上条）收尾后同日上午，本地 docker 平台（127.0.0.1，与生产各自独立 postgres 数据卷）复发同族故障：变更 2026-10-14-turn-anchor-cache-eviction 本地 10-14 05:45 已归档提交，平台变更中心仍显示进行中。四点分叉/新增经验：① **免去重分支**——本地坏索引 btree 12/360 且全部唯一索引查重为 0（9 张唯一表 GROUP BY HAVING 全空），直接 REINDEX 12 个即愈（复验 checked=360 bad=0）；坏索引未放行重复行时可跳过「备份→去重→重建」整段——**先查重再定修复路径**。② **amcheck 扫描必须 JOIN pg_am 限定 btree**——`bt_index_check` 对 GIN 索引（ppm 问题清单的 *_trgm 全文索引等）必然报错、被异常吞掉计成「坏」，本地首扫 29 报中 17 个是 GIN 误报、btree 真坏 12；生产条目的「18 坏」若当时未过滤 btree，同源可能虚高。③ **同步静默断档**是「归档后仍进行中」的第二成因：`platform_sync_tokens.last_used_at` 停在 2026-10-15 02:27 UTC 之后零同步请求（工作转移到生产侧后本地平台断粮）——不是 422 失败路径，是压根没有请求发出；排查序应在生产四步（终态墓碑→spec-sync 200→manifest archive 行）之前先查 last_used_at 是否长期停滞。④ 断档叠加 10-14 批量回填曾以归档前快照为锚，错误 active 状态存活两天无自愈。恢复全链：修索引 → `sillyspec platform sync` 全树重推（spec_file_manifest 10152→10680 行）→ 后端 reparse 自动翻转（changes 表 614 行收敛、目标变更 location=archive）。遗留待拍板：2026-09-08-session-turn-nav 平台删除墓碑（10-12 建）vs 本地 archive 19 文件——恢复走 manifest-heal 清墓碑重推 / 接受删除走 tombstone_cleanup 隔离本机目录，二选一。工具改进线索：spec-sync 残留行实为 exists=false 软删墓碑、follow-server 守卫对使用者不可见，收敛判定目前须翻 DB（建议 sync 回执直接报软删墓碑行数）。
 
 - 状态（2026-10-19 归类核实）：索引损坏与同步断档链已修复（复验 checked=360 bad=0、reparse 翻转落地）；遗留=正文④ 墓碑处置二选一待拍板。
 
 ## 🟡 平台知识搜索「首搜建库地雷」——未建索引工作区的第一次搜索必超时（大语料 OOM 整栈停摆）
+- 状态：观察
 
 2026-10-16 生产实证（第二次容器内嵌入事故）：用户在平台搜 sillyspec 工作区 → 该 ws 无 knowledge_search_state 行 → 懒同步走全量建库 → 容器内嵌入（mem_limit 1100m 也扛不住 6625 chunks）→ backend OOM(137) 被杀 → 整栈随后被手动停掉。**小语料也一样超时**：2 核嵌入速率 ~2.6 chunks/s，几百 chunks 就是数分钟，nginx 掐断连接后 uvicorn 取消请求任务 → 建库事务回滚 → 重试永远从头再来——**未建索引的 ws 搜索永远 504/超时**。运维解（本次实证）：从服务器 tar 拉 ws 语料（knowledge+docs）到本机 → `prod-index-batch.py` 模式（隧道直写生产库，embedder 单次加载循环建库，108 md/7 ws 共 28.7s）批量预建；指纹含 mtime 但 tar 保 mtime + 内容 hash 吸收漂移，建完服务器首查 0.8s 直查零重建。**根治缺口（待代码变更）**：`search_sync`/端点应支持「服务器禁建库」开关（如 KNOWLEDGE_SEARCH_SERVER_BUILD=0 → 无 state 行时跳过建库直接词面降级 + reason=index_not_built），新工作区首搜不再地雷；建库一律外部机器（本机隧道）预建。
 
 - 状态（2026-10-19 部署推进：本地已配实证）：代码根治已合入（2026-10-19-knowledge-search-build-switch）；本地 docker 平台已落地（2026-10-19-knowledge-build-switch-rollout：`deploy/.env` 配 =0 + backend 重建，含 postgres 从 `postgres:16-alpine` 切到 compose 声明的 pgvector 镜像）——两个未建索引 ws（multi-agent-platform / sillyspec）首搜实测 `reason=index_not_built`、全库 state/chunks 零新增（零建库零嵌入）、无超时（热查 2.9-15.1s，Windows Docker VM I/O 抖动主导；生产 Linux 预期更优）。剩余动作=生产服务器 `deploy/.env` 配 =0（随镜像部署带上；`deploy/.env.example` 已文档化）+ 未建索引 ws 走外部机器预建——生产两项落地后本条转 🟢。
 
 ## 🟡 agent 沙箱把 python.exe 子树 IL 降为 Low：python→msys 嵌套必崩、profile 写被驱动白名单拦（含 WSL bash 误解析坑）
+- 状态：观察
 
 2026-10-21 本机（desktop-hj0am09）探针链实证（2026-10-21-precommit-sandbox-entries 归档件；5bbb1a830 / 8fc3178d3 提交留痕互证）：agent 会话进程树内 python.exe 的子树被沙箱驱动把 Mandatory Label 降为 Low（S-1-16-4096；嵌套 token 仍为同用户 qinyi，但**无 CodexSandboxUsers 组**、Administrators deny-only）。三个后果：① python 发起的 msys（Git Bash）进程打不开 Medium 标签的 `\BaseNamedObjects\msys-2.0S5-*` 对象目录 → `NtCreateDirectoryObject ... 0xC0000022` 必崩（bash→bash、node→bash 均正常，唯独 python 子树中招）；② profile 路径写入被拒（`~/.cache/pre-commit`、uv 默认缓存 AppData、pnpm store）——拒绝发生在驱动白名单层而非 DACL，**icacls 授权修复无效，勿再尝试**（嵌套 token 根本不在 CodexSandboxUsers 组，给该组授权是无效动作）；③ **WSL bash 误解析坑**：python 子进程 `spawn('bash', ...)` 按 Windows PATH 解析命中 `C:\Windows\System32\bash.exe`（WSL）而非 Git Bash，本机 WSL 自身 E_ACCESSDENIED 起不来，报错是 GBK/UTF-16 乱码——见到含「WSL/issues」字样的乱码 stderr 即是它，不是 msys 崩溃。处置：工具链入口**去 msys 化**（2026-10-21-precommit-sandbox-entries：pre-commit 三条 pre-commit entry 直连 + uv `--cache-dir .tmp/uv-cache` 重定向）；agent 会话内跑官方 runner 前 `export PRE_COMMIT_HOME="$PWD/.tmp/pre-commit-home"`；确需 bash 用绝对路径 `C:\Program Files\Git\usr\bin\bash.exe`。node 子树不受影响（Medium）——sillyspec CLI 自身的实测/lint 链都经 node 树，所以 CLI 能跑而 hook 链不能跑。

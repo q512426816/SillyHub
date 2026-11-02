@@ -834,3 +834,250 @@ supersedes：D-006@v1
 理由：用户选定方案二（新增独立心跳事件），事件名细化为 turn_heartbeat（防与 hub-client 机器级 heartbeat 同名混淆，命名细化不改变决策语义）。载荷：kind（awaiting_first_token/generating_tool_args/generating_text）+ est_chars/est_tokens + precision（authoritative/estimated）+ source + parent_tool_use_id；不落库只透传、节流 1s、估算系数 3.5 字符/token（三项 agent 代定，用户核阅无异议）。估算值与权威 usage 彻底分道：预算软切断、计费聚合、ctx 环零污染（对齐 2026-08-27「实时/终态口径必须同类」）；前端专道消费，估算补显标「约」+弱化灰、权威值落定即隐。
 故障面：心跳节流器/计数器轮结束未清理导致跨轮残留（R-02）；估算值误入聚合（R-03，类型级排除防护）
 退役判据：引擎侧（Claude SDK/智谱/codex）原生提供流式 usage 增量且覆盖工具参数期时，本心跳桥接层可简化退役
+
+## D-unmapped-036@v1 日志源=应用侧落文件+轮转（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-001@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「落文件+轮转」——logging 配置同时保留 stderr（现状不动，容器日志聚合不受影响）+ 新增轮转文件（5MB×3 备份，RotatingFileHandler 自动清理）；本地开发/Windows/macOS/Docker 行为一致，有历史可查可下载。
+故障面：文件 handler 写失败（磁盘满/权限）不得拖垮进程——emit 异常由 logging 模块内部兜底，启动期建目录失败降级回 stderr-only。
+退役判据：若未来引入集中日志聚合（Loki/ELK），页面日志卡改为查询聚合后端时本机制可退役。
+
+## D-unmapped-037@v1 展示形式=结构化+自动刷新（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-002@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「结构化+自动刷新」——默认最近 200 行，随页面 5s 轮询自动刷新；JSON 日志行解析为「时间/级别/事件/详情」结构化展示，点行展开原始 JSON；行数可切 100/500/1000。
+
+## D-unmapped-038@v1 下载范围=单文件可选历史（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-003@v1
+锚点：backend.log.1/.2/.3
+最近确认：7af8e0e32
+理由：用户亲选「单文件可选历史」——下载区提供当前日志文件与轮转归档（backend.log.1/.2/.3）的选择，逐文件下载（不打包 zip）。
+
+## D-unmapped-039@v1 权限=复用 system_status:read（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-004@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「复用 system_status:read」——日志比性能数字更敏感，但页面本就在系统管理区、受众相同；不新增权限枚举，持 system_status:read 或 platform:admin 即可（端点同挂 require_permission_any）。
+
+## D-unmapped-040@v1 日志落盘实现=单点插入文件写入（用户亲选，方案 A）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-006@v1
+锚点：backend/app/core/logging.py
+最近确认：7af8e0e32
+理由：用户亲选方案 A——在 structlog processor 链 JSONRenderer 之前插入自定义 FileWriter processor（event_dict 先 json.dumps 写轮转文件、再透传 JSONRenderer 输出 stderr）；改动局限 backend/app/core/logging.py 单文件，stderr 输出链路零扰动。
+故障面：轮转瞬间的并发写（单进程单线程 event loop 下 logging 同步调用，无并发面）；文件被外部 truncate 时 write 继续追加。
+退役判据：同 D-001@v1（引入集中日志聚合后退役）。
+
+## D-unmapped-041@v1 页面布局=日志卡满宽居底（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-007@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「满宽居底」——删除业务统计卡后页面剩三卡：服务器性能（左半）、依赖与版本（右半或满宽调整）、服务器日志（满宽，页面最下方）。
+
+## D-unmapped-042@v1 日志条数参数与轮转参数的可配口径（AI 定案，可否决）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-008@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：lines 白名单 {100,200,500,1000}（非白名单值回退默认 200，不报错）；轮转 maxBytes=5MB/backupCount=3 常量于 logging.py 模块级（非 settings 项——避免配置面膨胀，需要时再升 settings）。
+
+## D-unmapped-057@v1 落选——方案 C（进程内卸载 + 拉长轮询 + 缓存）
+状态：rejected
+变更：2026-10-16-backend-mem-polling
+原编号：D-003@v1
+锚点：未记录
+最近确认：439cdc46c
+理由：落选。进程内 del+gc 卸载方案。
+否决理由：onnxruntime/Python allocator 进程内卸载不保证归还 OS（arena 棘轮），非确定性根治；轮询拉长恶化派发延迟。
+复潮条件：无（机制性不可靠，非场景性劣势）。
+
+## D-unmapped-060@v1 sessions 表增 family_id 列建模会话族
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-001@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：sessions 表新增 nullable UUID 列 `family_id`。login 签发时生成新 uuid 作为族根；refresh 轮换/grace 续期签发的新 session 继承被消费 session 的族（`family_id ?? id` 兜底存量 NULL 行——旧行自成一族）。族查询条件 `user_id=? AND revoked_at IS NULL AND (family_id=? OR (family_id IS NULL AND id=?))`，复用既有索引 ix_sessions_user_revoked，不加新索引（每用户 session 行数少）。迁移走 alembic 增量加列（PPM 已上线有生产数据，禁重置；加列 nullable 零停机零强制登出）
+故障面：family_id 写错族会把无关设备牵连进吊销面（与旧全吊销等价），靠 FR-02 测试族隔离性兜底
+退役判据：若未来引入服务端全设备会话管理 UI 且要求误杀面趋零，可评估改为「复用检测仅拒绝不吊销」
+
+## D-unmapped-061@v1 refresh 复用检测从全用户吊销改为族级吊销
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-002@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户已定向（「复用检测只吊销会话族」）：复用检测分支改调新增的 `_revoke_session_family(user_id, family)`，只吊销该 token 所属族系（含其后代——攻击者用窃取 token 轮换出的新 session 同族，同样被灭，安全属性保留）；其他设备/其他登录族不受影响。`revoke_all_user_sessions` 方法保留（改密码场景 service.py:243 注释已说明另有内联实现；admin/settings 端点走 UserService.revoke_all_sessions 不受影响）。AuthRefreshReused 报错文案同步改「该设备登录已注销」（原「所有会话已注销」不再准确）
+故障面：攻击者在 grace 窗内重放仍可得新对（既有 grace 权衡，不变）；grace 窗外重放只灭单族，若攻击者已独立另行登录（异族）不受牵连——可接受（异族本就是合法登录）
+退役判据：出现实际窃取事故且需要全设备熔断时，可配置回退全吊销
+
+## D-unmapped-062@v1 grace 宽限窗默认 60s → 300s
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-003@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：`auth_refresh_grace_seconds` 默认 60 → 300（config 上限 le=600 内）。依据：休眠唤醒/后台标签页节流恢复后旧 token 复用常超 60s；300s 覆盖典型恢复窗口，且族级吊销上线后超窗误杀的爆炸半径已缩到单设备，双保险。攻击者在窗内重放可换新对是既有权衡，内部平台威胁模型可接受
+
+## D-unmapped-063@v1 前端 doRefresh 按状态码分流——5xx 抛错不清会话
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-004@v1
+锚点：frontend/src/lib/token-refresh.ts:86
+最近确认：d43971698
+理由：用户已定向（「对 5xx 不清会话」）：doRefresh 分流——2xx → 返回 token 对；401/403/其余 4xx → 返回 null（上层 clear+redirect，明确失效）；5xx/408/429 → 抛 ApiError（对齐 ql-20260917-005 timeout 先例：抛错路径不清会话、不跳登录，调用方 catch 展示可重试错误）。app-shell.tsx:216 主动续票已有 .catch(() => {}) 兜底；api.ts 401 收口处 await 抛错时原 401 ApiError 被 refresh 错误替代传播（与 timeout 行为一致）
+故障面：5xx 时原 401 错误被替换为 refresh 5xx 错误展示（与 timeout 先例一致，可接受）；瞬时 5xx 期间页面报错但登录态保留，恢复后自愈
+退役判据：后端或代理层能保证 refresh 请求不经受 5xx/网络抖动窗口（如本机直连）时，可收敛为单一 null 语义
+
+## D-unmapped-064@v1 根因一实现方案选 A（会话族吊销 + 宽限窗加大）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-005@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户选 A：sessions 加 family_id 建模会话族，复用检测只吊销该族（窃取凭证换出的后代同族同灭，安全属性保留），宽限窗 60→300s 双保险。理由要点：B 治标（全吊销语义未变，超 600s 上限仍团灭）；C 丢失窃取响应（纯拒绝弱于 BCP 族级吊销标准）
+故障面：family 谓词或族继承写错时，误杀面在「全用户」与「单设备」之间漂移（靠 FR-01/FR-02 测试网兜底）
+退役判据：OAuth BCP 实现升级为服务端 per-token introspection 后可重估
+
+## D-unmapped-065@v1 方案 B（只加大宽限窗，不加族系列）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-006@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：一行配置改动最小，但「全用户吊销」语义未变——休眠/离线超过宽限上限（config le=600 即 10 分钟）仍全设备团灭；且单纯加宽窗口给真实窃取者更长重放窗口，治标不治本
+否决理由：全吊销语义未根除，仅推迟触发；安全与可用性双输
+复潮条件：若后端禁止 schema 变更（如生产库冻结期）且急需止血，可作为临时缓解先上线
+
+## D-unmapped-066@v1 方案 C（复用检测只拒绝不吊销）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-007@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：误杀面归零且零迁移，但丢失对凭证窃取的安全响应——OAuth BCP 对 refresh 轮换复用的标准响应是吊销 token family，纯拒绝使攻击者已换出的新凭证不受影响，安全姿态弱化
+否决理由：安全响应弱于 BCP 族级吊销标准
+复潮条件：平台威胁模型明确接受弱响应（如纯内网无外部暴露）且要求零 schema 变更时
+
+## D-unmapped-067@v1 族吊销必须内部 commit（执行期裁决，纠正 design 笔误）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-008@v1
+锚点：未记录
+最近确认：d43971698
+理由：内部 commit（对齐 revoke_all_user_sessions 既有语义）。依据：复用分支 UPDATE 后立即 raise AuthRefreshReused，而 get_session 依赖对异常路径 session.rollback()（backend/app/core/db.py:163-167）——不先行提交则族吊销被回滚成空操作（安全响应静默丢失）。design.md 对应措辞已同步修正
+
+## D-unmapped-075@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
+状态：rejected
+变更：2026-10-16-session-decision-pill
+原编号：D-006@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：（落选）
+否决理由：跨模块后端改动（daemon 模块 + OpenAPI + 前端/daemon 双端 gen:types 义务）与功能价值不成比例；普通审批在后端内存态重启照丢，聚合收益有限
+复潮条件：决策数据需要刷新强一致（含内存 pending）或移动端/第三方也要消费会话决策聚合时
+
+## D-unmapped-291@v1 治本目标定为增量方案（又快又稳）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-001@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户确认「增量方案：又快又稳」——结构性事件（归档/删除）秒级~1 分钟内可见、普通文档推送 ≤2 分钟、内存峰值大降不再 OOM；若调研后发现增量方案有安全隐患，退回合并窗方案并回来找用户重新拍板
+故障面：增量判定漏路径时部分变更不收敛（需全量兜底通道与对账探针）
+退役判据：变更树规模长期 ≤50 且无并发归档场景时可回退合并窗简化版
+
+## D-unmapped-292@v1 mem_limit 再上调只作方案附录建议，不在本次实施
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-002@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户选「只做治本评估，不动线上」——mem_limit 调整作为治本方案的配套运维建议写入附录供后续单独决策，本变更不动任何线上配置
+
+## D-unmapped-293@v1 治本方案选定方案C（scoped 增量承接归档 + 探针对账兜底）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-004@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：用户选方案C——归档移动从 archive_hit→全量 reparse 改为 scoped=[归档名] 定向重扫（parser 三区按 name 匹配既有能力，backend/app/modules/change/parser.py:143-202 三区 iterdir 均带 scope_set 过滤，遍历成本 ∝ scope 不 ∝ 全树）；全量 reparse 退位为手动端点/异常兜底（不做常态化全量对账，尊重 knowledge decisions 拒C 先例）；配套漂移探针 + bundle gzip 构建串行化/按需化 + 内存水位日志
+故障面：scoped 语义边界外漏路径（同窗既有删除+归档交错）时部分行不收敛——由漂移探针+手动全量兜底
+退役判据：变更树回归百级以下且无并发归档时可选回退合并窗简化版
+
+## D-unmapped-294@v1 方案A（免 reparse 靶向改库）落选
+状态：rejected
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-005@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：落选——归档 ops 直翻行状态绕开 parser 建第二真相写径，与知识库既有架构决策「平台以镜像文件树为唯一权威、经 reparse 收敛」（knowledge/decisions/backend.md 2026-08-29 变更 D-005 家族）正面冲突；ops 流缺失/乱序时行与磁盘漂移且无自愈通道
+否决理由：第二真相写径破坏单一权威架构，漂移无自愈
+复潮条件：平台改为「ops 流为权威、文件树为投影」的整体架构重构时
+
+## D-unmapped-295@v1 方案B（全量合并窗治理）落选
+状态：rejected
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-006@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：落选——时效回落分钟级违反 D-001「又快又稳」用户目标；全量遍历成本仍随变更总数线性增长，治标不治本（470→2000 变更规模时再爆）
+否决理由：违反 D-001 时效目标且峰值随规模线性涨
+复潮条件：scoped 增量方案论证发现不可消解安全隐患（退回保守路线时按 D-001 预案回访用户）
+
+## D-unmapped-296@v1 双通道时效分档（结构性立即 / 普通推送 2 分钟合并窗）
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-007@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——结构性事件（归档/删除）走立即 single-flight 通道（≤60s 收敛），普通文档推送维持既有 120s 合并窗（≤120s 收敛）；single-flight（同 workspace 同时仅一个 reparse）两通道共享不破
+故障面：结构性事件风暴（短窗大量归档）时立即通道产生密集 scoped reparse——成本∝单变更，可承受；保底 single-flight 串行
+
+## D-unmapped-297@v1 漂移探针只告警不自动修复
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-008@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——探针周期抽样核对（DB 行 location vs 磁盘目录形态），发现漂移仅告警日志；修复通道=人工调既有手动 reparse 端点。依据：知识库已否决「全量对账常态化」（Windows stat 断崖+全量 93s 超时史），自动修复即变相常态化
+退役判据：手动兜底频率过高（周级多次）时重议自动化
+
+## D-unmapped-298@v1 bundle gzip 构建加同版本 single-flight
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-009@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：设计确认轮用户确认——同 (workspace, spec_version) 在建期间其余请求等待复用产物，不重复构建（当前可能并发重复打包白耗内存/CPU）
+
+## D-unmapped-299@v1 structural 触发撞在途 reparse 时尾随改「完成回调即时补发」
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-010@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：我的判断（评审核证采纳）：structural 触发遇 in-flight 时不入 120s 定时尾随，改挂「当前 reparse 完成回调」即时补发（完成即重算 scope 执行）；非结构尾随维持 120s 合并窗不变。承诺保持 ≤60s
+故障面：完成回调链异常需兜底（回调丢失时退化为下轮触发兜底，探针可发现）
+
+## D-unmapped-300@v1 bundle 等待者 Future 失败传播 + 降级自建
+状态：implemented
+变更：2026-10-27-archive-reparse-oom-governance
+原编号：D-011@v1
+锚点：未记录
+最近确认：0069bb234ffa70ccfba04426ca885095484926fc
+理由：我的判断（评审核证采纳）：single-flight Future 携带成功/失败双态——构建方异常/断连时 Future 置失败并传播，等待者捕获后降级为自建（各自构建，失败不传染不悬挂）
