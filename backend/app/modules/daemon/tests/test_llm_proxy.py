@@ -530,7 +530,7 @@ class TestLlmProxyScopedToken:
         """令牌 + 他人 usr 模型名 → 403，上游不被触达。"""
         token, _ = self._mint()
         foreign = f"usr-{uuid.uuid4()}-{uuid.uuid4()}"
-        _install_fake_upstream(monkeypatch)
+        captured = _install_fake_upstream(monkeypatch)
 
         resp = await proxy_client.post(
             "/api/daemon/llm-proxy/v1/messages",
@@ -539,6 +539,8 @@ class TestLlmProxyScopedToken:
         )
         assert resp.status_code == 403
         assert resp.json()["detail"] == "model ownership mismatch"
+        # 评审 P3：docstring 声称「上游不被触达」——断言假上游零调用钉死。
+        assert "url" not in captured and "method" not in captured
 
     async def test_token_non_usr_model_forwarded(
         self,

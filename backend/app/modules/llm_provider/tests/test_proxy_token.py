@@ -102,3 +102,10 @@ def test_malformed_body_rejected() -> None:
     )
     assert verify_llm_proxy_token(PROXY_TOKEN_PREFIX + ".") is None
     assert verify_llm_proxy_token(PROXY_TOKEN_PREFIX + "%%%." + "AAAA") is None
+
+
+def test_non_ascii_token_rejected() -> None:
+    """非 ASCII Bearer（UTF-8 CJK / latin-1 均）→ None 不抛（评审 P2 fail-closed）。"""
+    assert verify_llm_proxy_token("shlp_非ASCII载荷.签名") is None
+    assert verify_llm_proxy_token("shlp_payload\xe9.sig") is None
+    assert verify_llm_proxy_token("shlp_ok.\xe9") is None

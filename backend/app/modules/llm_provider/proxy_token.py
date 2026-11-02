@@ -79,7 +79,13 @@ def verify_llm_proxy_token(token: str) -> ProxyTokenGrant | None:
     """验签（代理端调用）：任何不完整/篡改/过期形态一律 None，fail-closed。"""
     if not isinstance(token, str) or not token.startswith(PROXY_TOKEN_PREFIX):
         return None
-    payload_b64, sep, sig = token[len(PROXY_TOKEN_PREFIX) :].partition(".")
+    body = token[len(PROXY_TOKEN_PREFIX) :]
+    if not body.isascii():
+        # 非 ASCII 不可能是合法 base64url——先挡，防 _sign 的 encode("ascii")
+        # UnicodeEncodeError / compare_digest 非 ASCII str TypeError 逃逸成 500
+        # （fail-closed 契约：任何畸形输入一律 None，评审 P2）。
+        return None
+    payload_b64, sep, sig = body.partition(".")
     if not sep or not payload_b64 or not sig:
         return None
     if not hmac.compare_digest(_sign(payload_b64), sig):
