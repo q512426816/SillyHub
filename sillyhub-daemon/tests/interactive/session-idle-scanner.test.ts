@@ -406,3 +406,30 @@ describe('task-07 AC-12 start/stop 生命周期（真实定时器）', () => {
     expect(() => sm.stop()).not.toThrow();
   });
 });
+
+// FR-01（2026-11-02-daemon-resume-gate-fix）配套保护：恢复保留的 lastActiveAt
+// 是真实历史活跃（可能远超 idle 阈值）——空闲时长必须从 max(lastActiveAt,
+// restoredAt) 起算，防 SESSION_IDLE_TIMEOUT_SEC>0 部署把刚恢复的会话立即回收。
+describe('FR-01 restoredAt 空闲起算保护（2026-11-02-daemon-resume-gate-fix）', () => {
+  it('lastActiveAt 历史久远 + restoredAt 新鲜 → 自恢复时刻起算，不立即回收', async () => {
+    const { driver } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager(
+      { driver, ...deps },
+      { idleTimeoutSec: 2, idleScanSec: 1 },
+    );
+    await sm.create(BASE_INPUT);
+    const st = sm.get(BASE_INPUT.sessionId)!;
+    vi.useFakeTimers();
+    // 模拟恢复形态：lastActiveAt=8 天前真实活跃；restoredAt=恢复时刻（当下）。
+    st.lastActiveAt = Date.now() - 8 * 24 * 3600 * 1000;
+    st.restoredAt = Date.now();
+    vi.advanceTimersByTime(1000); // 自 restoredAt 起算 1s < 2s 阈值
+    await sm.scanOnce();
+    expect(deps.onSessionEnd).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2000); // 自 restoredAt 起算 3s > 2s → 正常回收
+    await sm.scanOnce();
+    expect(deps.onSessionEnd).toHaveBeenCalledWith('sess-1', 'ended');
+    vi.useRealTimers();
+  });
+});

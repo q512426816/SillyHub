@@ -237,6 +237,11 @@ export async function restoreAndReconnect(
     status: 'reconnecting',
     currentRunId: undefined, // 崩溃 currentRun 由 backend 收敛，daemon 不持有。
     lastActiveAt: record.lastActiveAt,
+    // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复时刻——保留的 lastActiveAt
+    // 是真实历史活跃（可远超 idle 阈值），idle 回收改从 max(lastActiveAt,
+    // restoredAt) 起算，防 SESSION_IDLE_TIMEOUT_SEC>0 部署把刚恢复的会话立即误杀。
+    // 仅内存态（staleRunResetAt 同款，不进 snapshotPersistable）。
+    restoredAt: Date.now(),
     cwd: record.cwd,
     provider: record.provider,
     pathToClaudeCodeExecutable: record.pathToClaudeCodeExecutable ?? '',

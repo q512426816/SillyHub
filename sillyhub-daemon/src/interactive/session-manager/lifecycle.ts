@@ -110,7 +110,11 @@ export async function scanIdle(mgr: SessionManagerCore): Promise<void> {
     if (!state) continue;
     // 守卫：仅 active/running 回收；ended/failed/reconnecting 跳过。
     if (state.status !== 'active' && state.status !== 'running') continue;
-    const idleSec = (now - state.lastActiveAt) / 1000;
+    // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复保留的 lastActiveAt 是
+    // 真实历史活跃（可远超阈值）——空闲时长从 max(lastActiveAt, restoredAt)
+    // 起算，防恢复会话被立即误杀；restoredAt 缺席（create/旧行为）回落原值。
+    const idleSec =
+      (now - Math.max(state.lastActiveAt, state.restoredAt ?? 0)) / 1000;
     if (idleSec > mgr._idleTimeoutSec) {
       try {
         await onIdleExpire(mgr, state);

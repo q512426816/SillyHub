@@ -9215,6 +9215,63 @@ export class Daemon {
   }
 
   /**
+   * FR-02（2026-11-02-daemon-resume-gate-fix）：SESSION_SWITCH_CONFIG 被丢弃时
+   * 立即回报 run failed——对齐 _reportInjectDropped 手法与语义。
+   *
+   * 背景（本机 2026-11-02 09:08 实证）：daemon 会话闸拒建后 backend 换配置重发
+   * 「继续」，SESSION_SWITCH_CONFIG 到达时目标会话不在 store，原实现仅 warn
+   * （session_switch_config_session_not_found）静默丢弃——backend 侧 run 卡
+   * pending 300 秒才被僵尸轮清扫兜底，用户侧输入框一直转圈。修：丢弃时回报
+   * error_during_execution，backend 秒级收敛。
+   *
+   * 约束：与 INJECT 同款三要素（run_id/lease_id/claim_token）齐才上报。lease_id
+   * 由 backend 切换 payload 下发（control.py 切换分支新增键；INJECT payload
+   * 既有同义键）——旧 backend 缺键 → 要素不全仅 warn 维持现状（降级零回归）。
+   * 上报失败仅 warn，不阻塞 WS 主循环。
+   */
+  private async _reportSwitchDropped(
+    raw: Record<string, unknown>,
+    reason: string,
+  ): Promise<void> {
+    const runId =
+      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    const claimToken =
+      (raw.claim_token as string | undefined) ??
+      (raw.claimToken as string | undefined) ??
+      '';
+    if (!runId || !leaseId || !claimToken) {
+      this._logger.warn('switch_drop_report_skipped_missing_fields', {
+        run_id: runId,
+        has_lease_id: Boolean(leaseId),
+        has_claim_token: Boolean(claimToken),
+        reason,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(leaseId, claimToken, runId, {
+        status: 'error_during_execution',
+        is_error: true,
+        result_summary: `daemon 丢弃切换配置指令：${reason}；本轮失败`,
+      });
+      this._logger.info('switch_drop_reported', {
+        run_id: runId,
+        lease_id: leaseId,
+        reason,
+      });
+    } catch (e) {
+      this._logger.warn('switch_drop_report_failed', {
+        run_id: runId,
+        lease_id: leaseId,
+        reason,
+        error: e,
+      });
+    }
+  }
+
+  /**
    * 2026-10-21-daemon-zombie-turn FR-02：打断 no-op 回报。
    *
    * SESSION_INTERRUPT 的 interrupt() 返回 false（会话在 store 但无 running 轮，
@@ -9297,6 +9354,45 @@ export class Daemon {
    *   - confirmReconnected / markRecoveryFailed 自身失败仅 warn（best-effort：
    *     不回滚本地已恢复状态，backend 180s sweeper 兜底收敛）。
    */
+  /**
+   * FR-01（2026-11-02-daemon-resume-gate-fix）：reopen 恢复的 lastActiveAt 取值。
+   *
+   * 三级：payload 显式值（`last_active_at`/`lastActiveAt`，协议前向兼容位——
+   * backend 本期不下发，未来补发即生效零 daemon 改动）→ 本地 sessions.json
+   * 持久化记录原值（恢复不续命：会话闸 30 分钟活跃窗口与 7 天超龄判定都不被
+   * 恢复行为污染）→ Date.now() 兜底（查无记录的跨机移交/记录超龄清除形态，
+   * 维持旧行为）。load 失败（损坏隔离/权限）静默兜底，不阻断 resume。
+   */
+  private async _resolveResumeLastActiveAt(
+    raw: Record<string, unknown>,
+    sessionId: string,
+  ): Promise<number> {
+    const payloadTs =
+      (raw.last_active_at as number | undefined) ??
+      (raw.lastActiveAt as number | undefined);
+    if (typeof payloadTs === 'number' && Number.isFinite(payloadTs) && payloadTs > 0) {
+      return payloadTs;
+    }
+    if (this._persistence) {
+      try {
+        const local = (await this._persistence.load()).find(
+          (r) => r.sessionId === sessionId,
+        );
+        if (
+          local &&
+          typeof local.lastActiveAt === 'number' &&
+          Number.isFinite(local.lastActiveAt) &&
+          local.lastActiveAt > 0
+        ) {
+          return local.lastActiveAt;
+        }
+      } catch {
+        // 读失败当无记录：兜底 Date.now()（与旧行为一致），不阻断 resume。
+      }
+    }
+    return Date.now();
+  }
+
   private async _routeSessionResume(
     raw: Record<string, unknown>,
   ): Promise<void> {
@@ -9357,10 +9453,17 @@ export class Daemon {
       provider,
       pathToClaudeCodeExecutable: exePath,
       pathToAgentExecutable: exePath,
-      // backend reopen payload 不带 turnCount/lastActiveAt（非恢复必需），
-      // 给合理默认：turnCount=0（新进程无内存计数），lastActiveAt=now。
+      // backend reopen payload 不带 turnCount（非恢复必需）→ 给合理默认 0
+      //（新进程无内存计数）。
       turnCount: 0,
-      lastActiveAt: Date.now(),
+      // FR-01（2026-11-02-daemon-resume-gate-fix）：恢复不续命——lastActiveAt
+      // 三级取值：payload 显式值（协议前向兼容位，backend 本期不下发）→ 本地
+      // sessions.json 持久化记录原值 → Date.now() 兜底。恒写 now 会把断网恢复
+      // 风暴全量 reopen 的会话集体顶成「30 分钟内活跃」，被 create 前置会话闸
+      // 误拒新建（2026-11-02 46≥20 实证 SESSION_LIMIT_REACHED）；boot 恢复路径
+      // （restoreAndReconnect）本就保留 record.lastActiveAt，此处对齐。查无记录
+      //（跨机移交/记录超龄清除）维持 now 兜底：单点 reopen 不足以顶满闸。
+      lastActiveAt: await this._resolveResumeLastActiveAt(raw, sessionId),
       // null 归一缺省（record 类型不收 null；backend 不发 null，防御性归一）。
       ...(rawProviderConfig != null ? { providerConfig: rawProviderConfig } : {}),
     };
@@ -9599,6 +9702,13 @@ export class Daemon {
       this._logger.warn('session_switch_config_session_not_found', {
         session_id: sessionId,
       });
+      // FR-02（2026-11-02-daemon-resume-gate-fix）：丢弃即回报——run 否则卡
+      // pending 300 秒才被僵尸轮清扫兜底（实证事故形态）。三要素不齐（旧
+      // backend payload 无 lease_id）时 _reportSwitchDropped 内部降级仅 warn。
+      await this._reportSwitchDropped(
+        raw,
+        'daemon 侧无该会话（可能创建失败或已被回收），切换轮未执行',
+      );
       return;
     }
     // 切换轮三要素（design §7.2）：runId=切换轮新 AgentRun，claimToken=切换轮
@@ -9659,6 +9769,12 @@ export class Daemon {
         session_id: sessionId,
         error: e,
       });
+      // FR-02（2026-11-02-daemon-resume-gate-fix）：切换未执行即回报——同
+      // not_found 分支语义，run 秒级收敛；三要素不齐降级仅 warn。
+      await this._reportSwitchDropped(
+        raw,
+        `daemon 执行切换指令异常（${e instanceof Error ? e.message : String(e)}），切换轮未执行`,
+      );
     }
   }
 

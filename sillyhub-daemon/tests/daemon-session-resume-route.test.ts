@@ -500,3 +500,167 @@ describe('daemon SESSION_RESUME 供应商凭证透传（ql-20260827-014）', () 
     expect(record.providerConfig).toBeUndefined();
   });
 });
+
+// FR-01（2026-11-02-daemon-resume-gate-fix）：恢复不续命——reopen 记录的
+// lastActiveAt 三级取值（payload 显式值 → 本地 sessions.json 记录原值 →
+// Date.now() 兜底）。恒写 now 会把断网恢复风暴全量 reopen 的会话集体顶成
+// 「30 分钟内活跃」，被 create 前置会话闸误拒新建（2026-11-02 46≥20 实证
+// SESSION_LIMIT_REACHED）；boot 恢复路径（restoreAndReconnect）本就保留
+// record.lastActiveAt，本行为与其对齐。
+describe('daemon SESSION_RESUME 恢复不续命 lastActiveAt（FR-01 / 2026-11-02-daemon-resume-gate-fix）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  function createFakePersistence(records: unknown[]) {
+    return {
+      load: vi.fn(async () => records),
+      save: vi.fn(async () => {}),
+    };
+  }
+
+  function buildDaemonWithPersistence(
+    persistence: ReturnType<typeof createFakePersistence>,
+  ): {
+    daemon: Daemon;
+    sm: SessionManager;
+    client: ReturnType<typeof createMockClient>;
+    persistence: ReturnType<typeof createFakePersistence>;
+  } {
+    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
+    const client = createMockClient();
+    const sm = createMockSessionManager();
+    const daemon = new Daemon(
+      mockConfig,
+      client as never,
+      createMockTaskRunner() as never,
+      { detector, sessionManager: sm, persistence } as never,
+    );
+    return { daemon, sm: sm as SessionManager, client, persistence };
+  }
+
+  it('本地持久化记录存在 → record.lastActiveAt 保留原值（恢复不续命）', async () => {
+    // 2023-11 的真实历史活跃，远早于当下——若实现仍恒写 Date.now() 即红。
+    const preserved = 1700000000000;
+    const persistence = createFakePersistence([
+      {
+        sessionId: 'sess-preserve',
+        leaseId: 'lease-old',
+        agentSessionId: 'agent-sid-preserve',
+        cwd: '/tmp/preserve',
+        provider: 'claude',
+        turnCount: 3,
+        lastActiveAt: preserved,
+      },
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-preserve',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-preserve',
+        cwd: '/tmp/preserve',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.lastActiveAt).toBe(preserved);
+    expect(record.lastActiveAt).toBeLessThan(Date.now() - 60_000);
+  });
+
+  it('payload 显式 last_active_at 优先于本地记录（协议前向兼容位）', async () => {
+    const payloadTs = 1750000000000;
+    const localTs = 1700000000000;
+    const persistence = createFakePersistence([
+      {
+        sessionId: 'sess-payload-ts',
+        leaseId: 'lease-old-ts',
+        agentSessionId: 'agent-sid-ts',
+        cwd: '/tmp/ts',
+        provider: 'claude',
+        turnCount: 1,
+        lastActiveAt: localTs,
+      },
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-payload-ts',
+        lease_id: 'lease-new-ts',
+        agent_session_id: 'agent-sid-ts',
+        cwd: '/tmp/ts',
+        provider: 'claude',
+        last_active_at: payloadTs,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.lastActiveAt).toBe(payloadTs);
+  });
+
+  it('无本地记录且 payload 未带 → 兜底 Date.now()（现状维持）', async () => {
+    const persistence = createFakePersistence([]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    const before = Date.now();
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-no-record',
+        lease_id: 'lease-no-record',
+        agent_session_id: 'agent-sid-nr',
+        cwd: '/tmp/nr',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
+    expect(record.lastActiveAt).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it('persistence.load 抛错 → 兜底 Date.now() 且 resume 不中断', async () => {
+    const persistence = createFakePersistence([]);
+    persistence.load = vi.fn(async () => {
+      throw new Error('corrupt sessions.json');
+    });
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    const before = Date.now();
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-load-boom',
+        lease_id: 'lease-load-boom',
+        agent_session_id: 'agent-sid-lb',
+        cwd: '/tmp/lb',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
+  });
+});

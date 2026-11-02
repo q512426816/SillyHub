@@ -205,6 +205,14 @@ export interface SessionState {
   /** 最后活动时间（D-004 空闲 30min 回收，task-07 实现）。 */
   lastActiveAt: number;
   /**
+   * FR-01（2026-11-02-daemon-resume-gate-fix）：恢复时刻（restoreAndReconnect
+   * 写入，boot 恢复与 reopen 共用）。恢复保留持久化 lastActiveAt 原值（不续命
+   * 会话闸 30 分钟活跃窗口与 7 天超龄判定），idle 回收（SESSION_IDLE_TIMEOUT_SEC>0
+   * 形态）改从 max(lastActiveAt, restoredAt) 起算，防恢复会话被立即误杀。
+   * 仅内存态，不参与持久化语义（同 staleRunResetAt 先例）。
+   */
+  restoredAt?: number;
+  /**
    * 2026-10-23-watchdog-steering-guard FR-02：最后一次轮内事件时间（onMessage
    * 每个 envelope 刷新）。inject 的 >60s stale-running 自愈以此作为「引擎是否
    * 真静默」的基准，而非上次 inject/result 时间（后者会把刚产生过工具事件的
