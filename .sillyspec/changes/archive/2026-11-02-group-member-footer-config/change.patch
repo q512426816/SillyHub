@@ -1,0 +1,2457 @@
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index e55b03d65..887fff636 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -1741,6 +1741,21 @@ class AgentGroupMember(BaseModel, table=True):
+             nullable=True,
+         ),
+     )
++    # ⑤b 具体模型名（2026-11-02-group-member-footer-config）：成员级模型覆盖
++    # （如 "deepseek-v4.1-flash"），影子会话首 run AgentRun.model 直传；NULL=
++    # 未指定，维持 llm_provider 主模型兜底（列口径对齐 AgentRun.model String(128)）。
++    model: str | None = Field(
++        default=None,
++        sa_column=Column(String(128), nullable=True),
++    )
++    # ⑤c 思考等级（2026-11-02-group-member-footer-config）：七档词表值
++    # （off/minimal/low/medium/high/xhigh/max，同源镜像见
++    # daemon/session/service/thinking_level.py VALID_THINKING_LEVELS 注释）；
++    # 影子会话 lease metadata.thinking_level 透传；NULL=引擎默认档位。
++    thinking_level: str | None = Field(
++        default=None,
++        sa_column=Column(String(16), nullable=True),
++    )
+     # 团队能力开关（quick 群成员团队能力）：开启后影子会话懒建 lease stage
+     # 用 'orchestrator'——daemon isMainAgentSession 谓词（cli.ts）命中即注入
+     # dispatch_worker 等 5 主控工具（仅 provider=claude 有效，建群/改配置时
+diff --git a/backend/app/modules/agent/schema.py b/backend/app/modules/agent/schema.py
+index 662fe5457..4d7ca3914 100644
+--- a/backend/app/modules/agent/schema.py
++++ b/backend/app/modules/agent/schema.py
+@@ -372,9 +372,21 @@ class GroupMemberAgentConfig(BaseModel):
+         default=None, description="工作区（cwd 锚）；None=沿用群工作区"
+     )
+     provider: str = Field(min_length=1, max_length=20, description="引擎类型（claude/codex）")
+-    llm_provider_id: uuid.UUID | None = Field(default=None, description="模型（LLM 供应商）")
++    llm_provider_id: uuid.UUID | None = Field(default=None, description="供应商（LLM 供应商）")
++    # 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级（与会话
++    # 底部四选口径对齐）；None=未指定，影子派发维持供应商主模型/引擎默认兜底。
++    model: str | None = Field(
++        default=None,
++        max_length=128,
++        description="具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置",
++    )
++    thinking_level: str | None = Field(
++        default=None,
++        max_length=16,
++        description="思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认",
++    )
+     agent_profile_id: uuid.UUID | None = Field(
+-        default=None, description="智能体方案（AgentProfile）"
++        default=None, description="档案（AgentProfile，人格/工具集/技能）"
+     )
+     team_enabled: bool = Field(
+         default=False,
+@@ -488,6 +500,10 @@ class GroupMemberUpdate(BaseModel):
+     workspace_id: uuid.UUID | None = None
+     provider: str | None = Field(default=None, min_length=1, max_length=20)
+     llm_provider_id: uuid.UUID | None = None
++    # 2026-11-02-group-member-footer-config：模型/思考等级热切换（模型组口径，
++    # 下轮注入生效；None=不改）。
++    model: str | None = Field(default=None, max_length=128)
++    thinking_level: str | None = Field(default=None, max_length=16)
+     agent_profile_id: uuid.UUID | None = None
+     # 团队能力开关（None=不改）；变更走机器组重建分支（stage 随 lease 建时定，
+     # 复用轮改不掉——end 影子 + pending 下次触发重懒建）。
+@@ -513,6 +529,9 @@ class GroupMemberRead(BaseModel):
+     workspace_id: uuid.UUID | None = None
+     provider: str | None = None
+     llm_provider_id: uuid.UUID | None = None
++    # 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级（用户成员恒 None）。
++    model: str | None = None
++    thinking_level: str | None = None
+     agent_profile_id: uuid.UUID | None = None
+     # 团队能力开关（用户成员恒 false）。
+     team_enabled: bool = False
+diff --git a/backend/app/modules/daemon/group/service/crud.py b/backend/app/modules/daemon/group/service/crud.py
+index 23fbc43f7..b67ef73ad 100644
+--- a/backend/app/modules/daemon/group/service/crud.py
++++ b/backend/app/modules/daemon/group/service/crud.py
+@@ -32,6 +32,7 @@ from app.modules.agent.schema import (
+ )
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonInstance, DaemonRuntime
++from app.modules.daemon.session.service.thinking_level import VALID_THINKING_LEVELS
+ from app.modules.workspace.model import PpmProjectWorkspace
+ 
+ from .helpers import (
+@@ -218,6 +219,17 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
+                     "provider": cfg.provider,
+                 },
+             )
++        # 2026-11-02-group-member-footer-config：思考等级词表校验（同源镜像
++        # 词表，非法 400；None=未指定引擎默认）。
++        if cfg.thinking_level is not None and cfg.thinking_level not in (VALID_THINKING_LEVELS):
++            raise GroupChatInvalid(
++                f"agent 成员「{cfg.display_name}」的思考级别非法"
++                f"（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
++                details={
++                    "display_name": cfg.display_name,
++                    "thinking_level": cfg.thinking_level,
++                },
++            )
+ 
+     profile_ids = [m.agent_profile_id for m in payload.agent_members if m.agent_profile_id]
+     profiles: dict[uuid.UUID, AgentProfile] = {}
+@@ -354,6 +366,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
+                 workspace_id=cfg.workspace_id or workspace.id,
+                 provider=cfg.provider,
+                 llm_provider_id=cfg.llm_provider_id,
++                model=cfg.model,  # 成员级具体模型名（None=供应商主模型兜底）
++                thinking_level=cfg.thinking_level,  # 七档词表值（None=引擎默认）
+                 agent_profile_id=cfg.agent_profile_id,
+                 team_enabled=cfg.team_enabled,  # quick 群成员团队能力
+                 shadow_status="none",  # design §8 group.member.added
+@@ -365,6 +379,8 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
+                     provider=cfg.provider,
+                     profile=profile,
+                     llm=llm,
++                    model=cfg.model,
++                    thinking_level=cfg.thinking_level,
+                 ),
+             )
+         )
+diff --git a/backend/app/modules/daemon/group/service/helpers.py b/backend/app/modules/daemon/group/service/helpers.py
+index 74cdcb7ce..10c02aabf 100644
+--- a/backend/app/modules/daemon/group/service/helpers.py
++++ b/backend/app/modules/daemon/group/service/helpers.py
+@@ -523,11 +523,19 @@ def _build_config_snapshot(
+     provider: str,
+     profile: object | None,
+     llm: object | None,
++    model: str | None = None,
++    thinking_level: str | None = None,
+ ) -> dict:
+     """agent 成员六要素冗余快照（machine_name/engine/model/profile_name 等）。
+ 
+     ``profile`` / ``llm`` 参数化 object 防循环 import（调用方就近 import 的
+     AgentProfile/LlmProvider 行）；仅取 name 展示字段。
++
++    2026-11-02-group-member-footer-config：新增 ``model``（成员级具体模型名）
++    与 ``thinking_level`` 两键；**语义修正**——「model」键从此存成员所选真实
++    模型名（None=未指定不落键，影子派发/多模态 gate 走供应商主模型兜底），
++    不再以 LLM 供应商名冒充模型名（供应商名经新增「provider_name」键承载，
++    chips「供应商」行消费）。
+     """
+     machine_name = None
+     if instance is not None:
+@@ -542,7 +550,11 @@ def _build_config_snapshot(
+     if profile is not None:
+         snapshot["profile_name"] = getattr(profile, "name", None)
+     if llm is not None:
+-        snapshot["model"] = getattr(llm, "name", None)
++        snapshot["provider_name"] = getattr(llm, "name", None)
++    if model:
++        snapshot["model"] = model
++    if thinking_level:
++        snapshot["thinking_level"] = thinking_level
+     return snapshot
+ 
+ 
+@@ -589,6 +601,8 @@ async def _rebuild_config_snapshot(db: AsyncSession, member: AgentGroupMember) -
+         provider=member.provider or (member.config_snapshot or {}).get("engine") or "",
+         profile=profile,
+         llm=llm,
++        model=member.model,
++        thinking_level=member.thinking_level,
+     )
+     # workspace 锚变更同步进快照（chips 展示「工作区」维度时免查库）。
+     if member.workspace_id is not None:
+diff --git a/backend/app/modules/daemon/group/service/members.py b/backend/app/modules/daemon/group/service/members.py
+index 6f6508cde..d5b5433c9 100644
+--- a/backend/app/modules/daemon/group/service/members.py
++++ b/backend/app/modules/daemon/group/service/members.py
+@@ -31,6 +31,7 @@ from app.modules.agent.schema import (
+ )
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonInstance, DaemonRuntime
++from app.modules.daemon.session.service.thinking_level import VALID_THINKING_LEVELS
+ 
+ from .helpers import (
+     GROUP_AGENT_MEMBER_LIMIT,
+@@ -273,6 +274,14 @@ async def add_member(
+                 "agent 成员绑定的模型（LLM 供应商）不存在。",
+                 details={"llm_provider_id": str(cfg.llm_provider_id)},
+             )
++    # 2026-11-02-group-member-footer-config：思考等级词表校验（同源镜像词表，
++    # 非法 400；None=未指定引擎默认）。
++    if cfg.thinking_level is not None and cfg.thinking_level not in VALID_THINKING_LEVELS:
++        raise GroupChatInvalid(
++            f"agent 成员「{cfg.display_name}」的思考级别非法"
++            f"（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
++            details={"thinking_level": cfg.thinking_level},
++        )
+     # P1 修复：同上——agent 成员昵称查重含已移除行（防撞全量唯一约束）。
+     active_names, removed_names = await svc._member_name_occupancy(group.id)
+     name = _validate_display_name(cfg.display_name)
+@@ -286,6 +295,8 @@ async def add_member(
+         workspace_id=cfg.workspace_id or group.workspace_id,
+         provider=cfg.provider,
+         llm_provider_id=cfg.llm_provider_id,
++        model=cfg.model,  # 成员级具体模型名（None=供应商主模型兜底）
++        thinking_level=cfg.thinking_level,  # 七档词表值（None=引擎默认）
+         agent_profile_id=cfg.agent_profile_id,
+         team_enabled=cfg.team_enabled,  # quick 群成员团队能力
+         shadow_status="none",
+@@ -297,6 +308,8 @@ async def add_member(
+             provider=cfg.provider,
+             profile=profile,
+             llm=llm,
++            model=cfg.model,
++            thinking_level=cfg.thinking_level,
+         ),
+     )
+     svc._session.add(member)
+@@ -343,6 +356,8 @@ async def update_member(
+         or payload.workspace_id is not None
+         or payload.provider is not None
+         or payload.llm_provider_id is not None
++        or payload.model is not None
++        or payload.thinking_level is not None
+         or payload.agent_profile_id is not None
+         or payload.team_enabled is not None
+     ):
+@@ -369,6 +384,8 @@ async def update_member(
+         "workspace_id": member.workspace_id,
+         "provider": member.provider,
+         "llm_provider_id": member.llm_provider_id,
++        "model": member.model,
++        "thinking_level": member.thinking_level,
+         "agent_profile_id": member.agent_profile_id,
+         "team_enabled": member.team_enabled,
+     }
+@@ -448,6 +465,25 @@ async def update_member(
+                 )
+             member.llm_provider_id = payload.llm_provider_id
+             snapshot_dirty = True
++        # 2026-11-02-group-member-footer-config：模型/思考等级热切换（模型组
++        # 口径，下轮注入生效）。PATCH None=不改（六要素既有约定）；model 空串=
++        # 显式重置「跟随供应商配置」（归一 NULL 存储，与 footer model:"" 语义
++        # 同构）；thinking_level 空串=重置引擎默认，其余值走词表校验。
++        if (
++            payload.thinking_level is not None
++            and payload.thinking_level != ""
++            and payload.thinking_level not in VALID_THINKING_LEVELS
++        ):
++            raise GroupChatInvalid(
++                f"思考级别非法（合法档位：{'/'.join(VALID_THINKING_LEVELS)}）。",
++                details={"thinking_level": payload.thinking_level},
++            )
++        if payload.model is not None and payload.model != member.model:
++            member.model = payload.model or None
++            snapshot_dirty = True
++        if payload.thinking_level is not None and payload.thinking_level != member.thinking_level:
++            member.thinking_level = payload.thinking_level or None
++            snapshot_dirty = True
+         if (
+             payload.agent_profile_id is not None
+             and payload.agent_profile_id != member.agent_profile_id
+@@ -503,6 +539,8 @@ async def update_member(
+         model_changed = (
+             old_config["provider"] != member.provider
+             or old_config["llm_provider_id"] != member.llm_provider_id
++            or old_config["model"] != member.model
++            or old_config["thinking_level"] != member.thinking_level
+             or old_config["agent_profile_id"] != member.agent_profile_id
+         )
+         if machine_changed:
+@@ -580,8 +618,15 @@ async def _hot_switch_shadow_config(
+     switch_llm: str | None = None
+     if old_config["llm_provider_id"] != target_llm_id:
+         switch_llm = str(target_llm_id) if target_llm_id is not None else ""
+-
+-    if switch_profile is None and switch_llm is None:
++    # 2026-11-02-group-member-footer-config：成员模型热切换维度（三态同构；
++    # None→""=重置「跟随供应商配置」，同 footer model:"" 语义）。思考等级
++    # 走影子重建/新建生效（已建影子热切边界见 design 边界节）。
++    target_model = member.model
++    switch_model: str | None = None
++    if old_config["model"] != target_model:
++        switch_model = target_model or ""
++
++    if switch_profile is None and switch_llm is None and switch_model is None:
+         shadow.provider = target_provider or shadow.provider
+         shadow.llm_provider_id = target_llm_id
+         shadow.agent_profile_id = target_profile_id
+@@ -601,6 +646,7 @@ async def _hot_switch_shadow_config(
+             prompt="",
+             agent_profile_id=switch_profile,
+             llm_provider_id=switch_llm,
++            model=switch_model,
+             queue_when_busy=True,
+         )
+     except AppError as exc:
+@@ -616,11 +662,21 @@ async def _hot_switch_shadow_config(
+ 
+     # 切换轮（成功与否）后补齐三列：成功路径 profile/llm 已由切换分支刷新，
+     # 引擎列恒需手动；失败路径全列兜底同步（真相源跟随，rollforward）。
++    # 2026-11-02-group-member-footer-config：model 维度失败路径同步
++    # shadow.config["model"]（成功路径切换分支已写；与 inject「if model:」
++    # 同口径——空值弹键回落供应商主模型）。
+     fresh_shadow = await svc._session.get(AgentSession, shadow_id)
+     if fresh_shadow is not None and fresh_shadow.status not in ("ended", "failed"):
+         fresh_shadow.provider = target_provider or fresh_shadow.provider
+         fresh_shadow.llm_provider_id = target_llm_id
+         fresh_shadow.agent_profile_id = target_profile_id
++        if switch_model is not None:
++            fresh_cfg = dict(fresh_shadow.config or {})
++            if member.model:
++                fresh_cfg["model"] = member.model
++            else:
++                fresh_cfg.pop("model", None)
++            fresh_shadow.config = fresh_cfg
+         svc._session.add(fresh_shadow)
+         await svc._session.commit()
+     return switched
+diff --git a/backend/app/modules/daemon/group/service/shadow.py b/backend/app/modules/daemon/group/service/shadow.py
+index 126ecc579..14e94e425 100644
+--- a/backend/app/modules/daemon/group/service/shadow.py
++++ b/backend/app/modules/daemon/group/service/shadow.py
+@@ -642,6 +642,10 @@ async def _ensure_shadow_session(
+         id=uuid.uuid4(),
+         agent_type="claude_code",
+         provider=provider,
++        # 2026-11-02-group-member-footer-config：成员级具体模型名直传（None=
++        # 未指定，prepare_interactive_dispatch/lease metadata 维持供应商主模型
++        # 兜底，与现状逐字节一致）。
++        model=member.model,
+         status="pending",
+         spec_strategy="interactive",
+         agent_session_id=shadow.id,
+@@ -681,7 +685,12 @@ async def _ensure_shadow_session(
+             user_id=group.created_by,
+             provider=provider,
+             prompt=first_prompt,
+-            model=None,  # 模型走 llm_provider_id → lease metadata（下方）
++            # 2026-11-02-group-member-footer-config：成员级具体模型名（None=
++            # 未指定，placement/lease 维持 llm_provider 主模型兜底，与现状一致）。
++            model=member.model,
++            # 思考等级透传（task-05 FR-03 同参先例——写 lease metadata
++            # .thinking_level；None=不写键，引擎默认档位）。
++            thinking_level=member.thinking_level,
+             workspace_id=group.workspace_id,  # grants 授权作用域=群工作区
+             cwd=cwd,
+             pinned_runtime_id=member.runtime_id,
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index 662c5c216..67c1f3042 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -580,6 +580,9 @@ class SessionService(BackgroundTaskMixin):
+         busy_strategy: Literal["queue", "inject"] | None = None,
+         agent_profile_id: str | None = None,
+         llm_provider_id: str | None = None,
++        # 2026-11-02-group-member-footer-config：会话级模型切换维度透传
++        # （三态语义同 inject_session.model；None=不动零回归）。
++        model: str | None = None,
+         attachment_ids: list[uuid.UUID] | None = None,
+         attachment_owner_user_id: uuid.UUID | None = None,
+         auto_resume_of: uuid.UUID | None = None,
+@@ -596,6 +599,7 @@ class SessionService(BackgroundTaskMixin):
+             busy_strategy=busy_strategy,
+             agent_profile_id=agent_profile_id,
+             llm_provider_id=llm_provider_id,
++            model=model,
+             attachment_ids=attachment_ids,
+             attachment_owner_user_id=attachment_owner_user_id,
+             auto_resume_of=auto_resume_of,
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index 87320811b..48d74e593 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -303,6 +303,10 @@ async def inject_session_as_service(
+     # 当前轮结束边界 reload，下轮生效）。
+     agent_profile_id: str | None = None,
+     llm_provider_id: str | None = None,
++    # 2026-11-02-group-member-footer-config：会话级模型切换维度（语义与用户
++    # 路径 inject_session.model 三态同构——None=不动；空串=显式「跟随供应商
++    # 配置」重置；非空=显式选模型）。群成员模型热切换经本入口携带。
++    model: str | None = None,
+     # 群聊附件（FR-05 补遗：群消息附件支持）：参数名与用户路径 inject_session
+     # 同名同形（list[uuid.UUID] 引用上传端点产出的 SessionAttachment id）。
+     # ``attachment_ids`` 非空豁免空 prompt（D-7 看图说话同口径）；引擎/归属/
+@@ -379,6 +383,9 @@ async def inject_session_as_service(
+         # 既有 service 路径零回归）。
+         agent_profile_id=agent_profile_id,
+         llm_provider_id=llm_provider_id,
++        # 2026-11-02-group-member-footer-config：会话级模型切换维度透传
++        # （缺省 None 零回归）。
++        model=model,
+         # 群聊附件：透传共享核心（缺省 None 零回归——既有 service 调用方
+         # 不携带）。归属基准覆盖见 _inject_into_session 同名参数注释。
+         attachment_ids=list(attachment_ids) if attachment_ids else None,
+diff --git a/backend/app/modules/daemon/tests/test_group_cross_mention.py b/backend/app/modules/daemon/tests/test_group_cross_mention.py
+index dca54b4e2..559d223d9 100644
+--- a/backend/app/modules/daemon/tests/test_group_cross_mention.py
++++ b/backend/app/modules/daemon/tests/test_group_cross_mention.py
+@@ -1201,7 +1201,10 @@ class TestHotSwitch:
+         member = await db_session.get(AgentGroupMember, seeded.member.id)
+         assert member is not None
+         assert member.llm_provider_id == llm.id
+-        assert (member.config_snapshot or {}).get("model") == "GLM-测试"
++        # 2026-11-02-group-member-footer-config 语义修正：快照 model 键存真实
++        # 所选模型名（成员未指定 model → 不落键），供应商名走 provider_name 键。
++        assert (member.config_snapshot or {}).get("provider_name") == "GLM-测试"
++        assert "model" not in (member.config_snapshot or {})
+ 
+     async def test_machine_switch_ends_shadow_and_marks_pending(
+         self,
+diff --git a/backend/app/modules/daemon/tests/test_group_member_model_thinking.py b/backend/app/modules/daemon/tests/test_group_member_model_thinking.py
+new file mode 100644
+index 000000000..78f70ee43
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_group_member_model_thinking.py
+@@ -0,0 +1,225 @@
++"""群成员 model/thinking_level 存储与影子派发透传（2026-11-02-group-member-footer-config）。
++
++FR-03 后端面：
++- 影子创建首 run 携带成员所选具体模型（AgentRun.model 直传）；思考等级经
++  prepare_interactive_dispatch(thinking_level=...) 写 lease metadata（同
++  session create task-05 FR-03 先例）；
++- 未指定（NULL）维持现状兜底（run.model None / thinking_level None），零回归；
++- config_snapshot 组装语义修正：model 键存真实所选模型名（未指定不落键）、
++  新增 provider_name 承载供应商名（不再以供应商名冒充模型名）。
++
++夹具范式镜像 test_group_default_profile.py（_mk_user/_mk_ws/_mk_group_and_member）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun
++from app.modules.auth.model import User
++from app.modules.daemon.group.service.helpers import _build_config_snapshot
++from app.modules.daemon.group.service.shadow import _ensure_shadow_session
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.workspace.model import Workspace
++
++
++async def _mk_user(session: AsyncSession, label: str) -> User:
++    u = User(
++        id=uuid.uuid4(),
++        email=f"gmt-{label}-{uuid.uuid4()}@example.com",
++        password_hash="x",
++        status="active",
++    )
++    session.add(u)
++    await session.flush()
++    return u
++
++
++async def _mk_ws(session: AsyncSession, owner: User) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="成员模型档位工作区",
++        slug=f"gmt-{uuid.uuid4().hex[:8]}",
++        created_by=owner.id,
++        root_path="C:/gmt-root",
++        status="active",
++    )
++    session.add(ws)
++    await session.flush()
++    return ws
++
++
++async def _mk_group_and_member(
++    session: AsyncSession,
++    owner: User,
++    ws: Workspace,
++    *,
++    model: str | None,
++    thinking_level: str | None,
++) -> tuple:
++    from app.modules.agent.model import AgentGroupChat, AgentGroupMember
++
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=owner.id,
++        name="成员模型机器",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    group = AgentGroupChat(
++        id=uuid.uuid4(),
++        session_id=uuid.uuid4(),
++        title="成员模型档位群",
++        workspace_id=ws.id,
++        project_id=None,
++        created_by=owner.id,
++        created_at=datetime.now(UTC),
++    )
++    session.add(group)
++    member = AgentGroupMember(
++        id=uuid.uuid4(),
++        group_id=group.id,
++        member_type="agent",
++        display_name="小模",
++        runtime_id=rt.id,
++        workspace_id=ws.id,
++        provider="claude",
++        llm_provider_id=None,
++        model=model,
++        thinking_level=thinking_level,
++        team_enabled=False,
++        shadow_status="none",
++        invited_by=owner.id,
++        joined_at=datetime.now(UTC),
++    )
++    session.add(member)
++    await session.flush()
++    return group, member
++
++
++def _fake_placement(member_runtime_id: uuid.UUID) -> SimpleNamespace:
++    return SimpleNamespace(
++        notify_interactive_dispatch=AsyncMock(),
++        prepare_interactive_dispatch=AsyncMock(
++            return_value=SimpleNamespace(
++                lease_id=uuid.uuid4(),
++                runtime_id=member_runtime_id,
++                claim_token="tok",
++            )
++        ),
++    )
++
++
++def _patch_env(fake_placement: SimpleNamespace):
++    return (
++        patch(
++            "app.modules.agent.placement.RunPlacementService",
++            return_value=fake_placement,
++        ),
++        patch(
++            "app.modules.daemon.group.service.shadow._publish_group_channel_event",
++            new=AsyncMock(),
++        ),
++    )
++
++
++@pytest.mark.asyncio
++async def test_shadow_member_model_and_thinking_dispatched(db_session):
++    """成员指定 model/thinking_level → 首 run 携模型、派发透传档位（FR-03）。"""
++    owner = await _mk_user(db_session, "m1")
++    ws = await _mk_ws(db_session, owner)
++    group, member = await _mk_group_and_member(
++        db_session, owner, ws, model="deepseek-v4.1-flash", thinking_level="max"
++    )
++    await db_session.commit()
++
++    fake_placement = _fake_placement(member.runtime_id)
++    with _patch_env(fake_placement)[0], _patch_env(fake_placement)[1]:
++        _shadow, first_run_id = await _ensure_shadow_session(
++            SimpleNamespace(_session=db_session, _send_shadow_first_inject=AsyncMock()),
++            group,
++            member,
++            first_prompt="hi",
++            first_turn_metadata={},
++        )
++
++    run = await db_session.get(AgentRun, first_run_id)
++    assert run is not None
++    assert run.model == "deepseek-v4.1-flash"
++    # 思考等级经 prepare_interactive_dispatch 写 lease metadata（task-05 先例）。
++    kwargs = fake_placement.prepare_interactive_dispatch.await_args.kwargs
++    assert kwargs.get("thinking_level") == "max"
++    assert kwargs.get("model") == "deepseek-v4.1-flash"
++
++
++@pytest.mark.asyncio
++async def test_shadow_member_unset_keeps_fallback(db_session):
++    """成员未指定（NULL）→ run.model None、thinking_level None（现状零回归）。"""
++    owner = await _mk_user(db_session, "m2")
++    ws = await _mk_ws(db_session, owner)
++    group, member = await _mk_group_and_member(
++        db_session, owner, ws, model=None, thinking_level=None
++    )
++    await db_session.commit()
++
++    fake_placement = _fake_placement(member.runtime_id)
++    with _patch_env(fake_placement)[0], _patch_env(fake_placement)[1]:
++        _shadow, first_run_id = await _ensure_shadow_session(
++            SimpleNamespace(_session=db_session, _send_shadow_first_inject=AsyncMock()),
++            group,
++            member,
++            first_prompt="hi",
++            first_turn_metadata={},
++        )
++
++    run = await db_session.get(AgentRun, first_run_id)
++    assert run is not None
++    assert run.model is None
++    kwargs = fake_placement.prepare_interactive_dispatch.await_args.kwargs
++    assert kwargs.get("thinking_level") is None
++    assert kwargs.get("model") is None
++
++
++def test_build_config_snapshot_model_semantics():
++    """快照语义修正：model=真实所选模型名（未指定不落键）；供应商名走 provider_name。"""
++    runtime = SimpleNamespace(id=uuid.uuid4(), name="rt-name")
++    instance = SimpleNamespace(display_alias="小码机", hostname="host-1")
++    llm = SimpleNamespace(name="OpenCode Go")
++    profile = SimpleNamespace(name="极速人格")
++
++    # 指定模型：model 键=真实模型名；provider_name 键=供应商名（语义分离）。
++    snap = _build_config_snapshot(
++        runtime=runtime,
++        instance=instance,
++        provider="claude",
++        profile=profile,
++        llm=llm,
++        model="deepseek-v4.1-flash",
++        thinking_level="max",
++    )
++    assert snap["model"] == "deepseek-v4.1-flash"
++    assert snap["thinking_level"] == "max"
++    assert snap["provider_name"] == "OpenCode Go"
++    assert snap["profile_name"] == "极速人格"
++
++    # 未指定：不落 model/thinking_level 键（消费方走兜底），供应商名仍在。
++    snap2 = _build_config_snapshot(
++        runtime=runtime,
++        instance=instance,
++        provider="claude",
++        profile=None,
++        llm=llm,
++        model=None,
++        thinking_level=None,
++    )
++    assert "model" not in snap2
++    assert "thinking_level" not in snap2
++    assert snap2["provider_name"] == "OpenCode Go"
+diff --git a/backend/migrations/versions/20261102140000_group_member_model_thinking.py b/backend/migrations/versions/20261102140000_group_member_model_thinking.py
+new file mode 100644
+index 000000000..0c19ccf84
+--- /dev/null
++++ b/backend/migrations/versions/20261102140000_group_member_model_thinking.py
+@@ -0,0 +1,43 @@
++"""group member model + thinking_level columns
++
++2026-11-02-group-member-footer-config：群 agent 成员六要素补两维——
++
++- ``model``：成员级具体模型名覆盖（如 "deepseek-v4.1-flash"），影子会话首
++  run AgentRun.model 直传；NULL=未指定，维持 llm_provider 主模型兜底
++  （列口径对齐 AgentRun.model String(128)）。
++- ``thinking_level``：思考等级七档词表值（off/minimal/low/medium/high/xhigh/
++  max，同源镜像见 daemon/session/service/thinking_level.py），影子会话
++  lease metadata.thinking_level 透传；NULL=引擎默认档位（String(16) 容
++  "minimal" 最长档）。
++
++存量成员行两列 NULL = 派发行为与现状逐字节一致（零回归兜底）。
++
++Revision ID: 20261102140000
++Revises: 20261030180000
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20261102140000"
++down_revision = "20261030180000"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_group_members",
++        sa.Column("model", sa.String(128), nullable=True),
++    )
++    op.add_column(
++        "agent_group_members",
++        sa.Column("thinking_level", sa.String(16), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("agent_group_members", "thinking_level")
++    op.drop_column("agent_group_members", "model")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 5ef0ce866..5d4b9aeb5 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -51852,6 +51852,28 @@
+             ],
+             "title": "Llm Provider Id"
+           },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model"
++          },
++          "thinking_level": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thinking Level"
++          },
+           "agent_profile_id": {
+             "anyOf": [
+               {
+@@ -52004,7 +52026,33 @@
+               }
+             ],
+             "title": "Llm Provider Id",
+-            "description": "模型（LLM 供应商）"
++            "description": "供应商（LLM 供应商）"
++          },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 128
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model",
++            "description": "具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置"
++          },
++          "thinking_level": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 16
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thinking Level",
++            "description": "思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认"
+           },
+           "agent_profile_id": {
+             "anyOf": [
+@@ -52017,7 +52065,7 @@
+               }
+             ],
+             "title": "Agent Profile Id",
+-            "description": "智能体方案（AgentProfile）"
++            "description": "档案（AgentProfile，人格/工具集/技能）"
+           },
+           "team_enabled": {
+             "type": "boolean",
+@@ -52147,6 +52195,28 @@
+             ],
+             "title": "Llm Provider Id"
+           },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model"
++          },
++          "thinking_level": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thinking Level"
++          },
+           "agent_profile_id": {
+             "anyOf": [
+               {
+@@ -52360,6 +52430,28 @@
+             ],
+             "title": "Llm Provider Id"
+           },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model"
++          },
++          "thinking_level": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thinking Level"
++          },
+           "agent_profile_id": {
+             "anyOf": [
+               {
+@@ -52599,6 +52691,30 @@
+             ],
+             "title": "Llm Provider Id"
+           },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 128
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model"
++          },
++          "thinking_level": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 16
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Thinking Level"
++          },
+           "agent_profile_id": {
+             "anyOf": [
+               {
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 239955591..89bd6eae9 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -130,8 +130,10 @@ class TestMigrationStructure:
+         # 2026-11-01-provider-share-audit-fixes 仅如实化其降级注释——实删
+         # business_member 名下全部 change:read，SQL 与链位零改动）→
+         # 20261030180000（llm_provider_shares 按用户共享供应商——
+-        # 2026-10-30-provider-user-share）。
+-        assert heads[0] == "20261030180000"  # 链尾锚随主线新迁移前移（注释链续写）
++        # 2026-10-30-provider-user-share）→
++        # 20261102140000（agent_group_members 增 model/thinking_level 两列——
++        # 2026-11-02-group-member-footer-config）。
++        assert heads[0] == "20261102140000"  # 链尾锚随主线新迁移前移（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx b/frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx
+new file mode 100644
+index 000000000..53e2319a4
+--- /dev/null
++++ b/frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx
+@@ -0,0 +1,429 @@
++/**
++ * 群成员配置块四选口径测试（2026-11-02-group-member-footer-config）。
++ *
++ * 覆盖（requirements FR-01/FR-02 绑定）：
++ *   1. 添加 Agent 对话框渲染供应商/模型/思考等级/档案四选（aria/id 锚定）；
++ *      模型下拉未选供应商时禁用；思考等级按引擎 caps 渲染且档位含「最高」；
++ *   2. 供应商→模型级联：候选=供应商 models 条目名（含 deepseek-v4.1-flash
++ *      形态的具体模型名）+ 首项「默认（跟随供应商配置）」；提交 payload 携
++ *      model/thinking_level；
++ *   3. 机器下拉 label：runtime 无别名时回落「机器别名 · 引擎名」，不再以
++ *      引擎名单独兜底（「机器: Claude Code」形态消失，FR-02）；
++ *   4. buildMemberUpdatePayload：model/thinkingLevel diff（""=重置送空串、
++ *      未变不送键——后端 PATCH null=不改口径）。
++ *
++ * mock 策略对齐 member-panel.test.tsx（apiFetch 覆写 + 数据源逐一 mock；
++ * THINKING_LEVEL_OPTIONS/provider-caps 走真实导出——词表单源不 mock）。
++ */
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { cleanup, render, screen, fireEvent, waitFor, act } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import { ApiError } from "@/lib/api";
++import {
++  MemberPanel,
++  buildMemberUpdatePayload,
++} from "@/components/group-chat/member-panel";
++import type { GroupChatRead, GroupMemberRead } from "@/lib/daemon";
++import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
++import type { Workspace } from "@/lib/workspaces";
++import type { ProjectMember } from "@/lib/ppm/types";
++import { closestAntdSelect, queryAntdSelectZone, closestAntdSelectOption } from "@/test/dom-queries";
++
++const mocks = vi.hoisted(() => ({
++  apiFetch: vi.fn(),
++  machinesHook: vi.fn(),
++  listWorkspaces: vi.fn(),
++  listProviders: vi.fn(),
++  listProjectMembers: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++  listSimpleProjects: vi.fn(),
++  uploadFile: vi.fn(),
++  sessionPanel: vi.fn(),
++  notify: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
++}));
++
++vi.mock("@/lib/api", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/api")>();
++  return { ...actual, apiFetch: (...args: unknown[]) => (mocks.apiFetch as (...a: unknown[]) => unknown)(...args) };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => mocks.machinesHook(),
++}));
++vi.mock("@/lib/api/llm-providers", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/api/llm-providers")>();
++  return {
++    ...actual,
++    listProviders: (...args: unknown[]) => mocks.listProviders(...args),
++  };
++});
++vi.mock("@/lib/agent-profiles", () => ({
++  useMineAgentProfiles: () => ({
++    profiles: [
++      { id: "ap-1", name: "SillySpec 极速变更", provider: "claude" },
++    ],
++    isLoading: false,
++    isError: false,
++    error: null,
++    refetch: vi.fn(),
++  }),
++}));
++vi.mock("@/lib/workspaces", () => ({
++  listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
++}));
++vi.mock("@/lib/ppm/project", () => ({
++  listProjectMembers: (...args: unknown[]) => mocks.listProjectMembers(...args),
++  listSimpleProjects: (...args: unknown[]) => mocks.listSimpleProjects(...args),
++}));
++vi.mock("@/lib/workspace", () => ({
++  listProjectWorkspaces: (...args: unknown[]) => mocks.listProjectWorkspaces(...args),
++}));
++vi.mock("@/lib/file/api", () => ({
++  uploadFile: (...args: unknown[]) => mocks.uploadFile(...args),
++  getFileDownloadUrl: (id: string) => `/api/file/${id}`,
++  fetchFileBlob: vi.fn(async () => new Blob(["x"], { type: "image/png" })),
++  deleteFile: async () => {},
++  tryReclaimOrphanAvatarFile: () => false,
++}));
++vi.mock("@/lib/errors", () => ({
++  errMessage: (err: unknown) => (err instanceof Error ? err.message : "操作失败"),
++  useNotify: () => mocks.notify,
++}));
++vi.mock("@/components/daemon/session-panel", () => ({
++  SessionPanel: (props: Record<string, unknown>) => {
++    mocks.sessionPanel(props);
++    return <div data-testid="session-panel-mock" />;
++  },
++}));
++
++function openAntdSelect(selectId: string) {
++  const anchor = document.getElementById(selectId);
++  if (!anchor) throw new Error(`element #${selectId} not found`);
++  const root = anchor.classList.contains("ant-select")
++    ? anchor
++    : closestAntdSelect(anchor);
++  if (!root) throw new Error(`.ant-select for #${selectId} not found`);
++  const clickZone = queryAntdSelectZone(root);
++  if (!clickZone) throw new Error(`select click zone for #${selectId} not found`);
++  fireEvent.mouseDown(clickZone);
++}
++
++async function chooseAntdOptionByText(selectId: string, optionText: string) {
++  openAntdSelect(selectId);
++  const option = await waitFor(() => {
++    const hit = [...document.querySelectorAll(".ant-select-item-option-content")].find(
++      (el) => el.textContent?.trim() === optionText,
++    );
++    if (!hit) throw new Error(`option "${optionText}" not found`);
++    return hit as HTMLElement;
++  });
++  const optionRow = closestAntdSelectOption(option) as HTMLElement;
++  fireEvent.mouseDown(optionRow);
++  fireEvent.click(optionRow);
++  await act(async () => {
++    await Promise.resolve();
++  });
++}
++
++function makeRuntime(overrides: Partial<DaemonRuntimeRead> = {}): DaemonRuntimeRead {
++  return {
++    id: "rt-1",
++    display_alias: null,
++    name: null,
++    provider: "claude",
++    version: null,
++    os: null,
++    arch: null,
++    status: "online",
++    last_heartbeat_at: null,
++    capabilities: null,
++    allowed_roots: [],
++    created_at: "2026-08-01T00:00:00Z",
++    updated_at: "2026-08-01T00:00:00Z",
++    ...overrides,
++  } as DaemonRuntimeRead;
++}
++
++function makeMachine(overrides: Partial<DaemonMachineRead> = {}): DaemonMachineRead {
++  return {
++    id: "m-1",
++    hostname: "machine-1",
++    display_alias: "本机-Mac",
++    os: "macos",
++    arch: "arm64",
++    status: "online",
++    last_heartbeat_at: "2026-08-15T08:00:00Z",
++    version: "1.0.0",
++    build_id: null,
++    started_at: null,
++    created_at: "2026-08-01T00:00:00Z",
++    runtime_count: 1,
++    online_runtime_count: 1,
++    runtimes: [makeRuntime()],
++    ...overrides,
++  } as DaemonMachineRead;
++}
++
++function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
++  return {
++    id: "ws-1",
++    name: "主工作区",
++    slug: "main",
++    root_path: "C:/main",
++    status: "active",
++    ...overrides,
++  } as Workspace;
++}
++
++function agentMember(overrides: Partial<GroupMemberRead> = {}): GroupMemberRead {
++  return {
++    id: "mem-1",
++    member_type: "agent",
++    display_name: "小码",
++    user_id: null,
++    runtime_id: "rt-1",
++    workspace_id: null,
++    provider: "claude",
++    llm_provider_id: null,
++    agent_profile_id: null,
++    config_snapshot: { machine_name: "本机-Mac", engine: "claude", runtime_id: "rt-1" },
++    invited_by: "u-me",
++    joined_at: "2026-09-01T00:00:00Z",
++    removed_at: null,
++    shadow_session_id: null,
++    shadow_status: "active",
++    team_enabled: false,
++    ...overrides,
++  } as GroupMemberRead;
++}
++
++function makeGroup(overrides: Partial<GroupChatRead> = {}): GroupChatRead {
++  return {
++    id: "g-1",
++    session_id: "s-g-1",
++    workspace_id: "ws-1",
++    project_id: "pj-1",
++    title: "四选口径群",
++    created_by: "u-me",
++    agent_cross_mention: true,
++    cross_mention_depth: 2,
++    context_window: 20,
++    consensus_mode: false,
++    consensus_timeout_seconds: 600,
++    cross_mention_mode: "private",
++    created_at: "2026-09-01T00:00:00Z",
++    ended_at: null,
++    deleted_at: null,
++    members: [
++      agentMember(),
++      {
++        id: "mem-owner",
++        member_type: "user",
++        display_name: "鲸落",
++        user_id: "u-me",
++        runtime_id: null,
++        workspace_id: null,
++        provider: null,
++        llm_provider_id: null,
++        agent_profile_id: null,
++        config_snapshot: null,
++        invited_by: "u-me",
++        joined_at: "2026-09-01T00:00:00Z",
++        removed_at: null,
++        shadow_session_id: null,
++        shadow_status: "none",
++        team_enabled: false,
++      } as GroupMemberRead,
++    ],
++    ...overrides,
++  } as GroupChatRead;
++}
++
++function renderPanel(ui: React.ReactElement): ReturnType<typeof render> {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false }, mutations: { retry: false } },
++  });
++  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  const machines = [makeMachine()];
++  mocks.machinesHook.mockReturnValue({
++    items: machines,
++    sharedToMe: [],
++    machineCandidates: machines,
++    total: machines.length,
++    sessions: [],
++    isLoading: false,
++    isFetching: false,
++    isError: false,
++    error: null,
++    refetch: vi.fn(),
++  });
++  mocks.listWorkspaces.mockResolvedValue({
++    items: [makeWorkspace()],
++    total: 1,
++    limit: 100,
++    offset: 0,
++  });
++  // 供应商带具体模型条目（FR-01 级联候选断言面；deepseek-v4.1-flash=用户实证形态）。
++  mocks.listProviders.mockResolvedValue([
++    {
++      id: "lp-1",
++      name: "OpenCode Go",
++      models: [
++        { name: "glm-4.7", roles: ["sonnet"] },
++        { name: "deepseek-v4.1-flash", roles: [] },
++      ],
++    },
++  ]);
++  mocks.listProjectMembers.mockResolvedValue([
++    { id: "pm-u-me", pm_project_id: "pj-1", user_id: "u-me", user_name: "我自己", username: null, depart_id: null, phone: null, role_id: null, role_name: null, depart_name: null, create_name: null, created_by: null, updated_by: null, created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" } as ProjectMember,
++  ]);
++  mocks.listProjectWorkspaces.mockResolvedValue([{ workspace_id: "ws-1", name: "主工作区" }]);
++  mocks.listSimpleProjects.mockResolvedValue([]);
++  mocks.apiFetch.mockResolvedValue(agentMember());
++});
++
++afterEach(() => {
++  cleanup();
++});
++
++async function openAddAgentDialog() {
++  renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
++  fireEvent.click(screen.getByTestId("member-panel-add-agent"));
++  await screen.findByText("添加 Agent 成员");
++}
++
++describe("成员配置块四选渲染与级联（FR-01）", () => {
++  it("渲染供应商/模型/思考等级/档案四选；模型未选供应商时禁用；思考档位含「最高」", async () => {
++    await openAddAgentDialog();
++
++    const providerSelect = document.getElementById("member-config-provider");
++    const modelSelect = document.getElementById("member-config-model");
++    const thinkingSelect = document.getElementById("member-config-thinking");
++    const profileSelect = document.getElementById("member-config-profile");
++    expect(providerSelect).toBeTruthy();
++    expect(modelSelect).toBeTruthy();
++    expect(thinkingSelect).toBeTruthy();
++    expect(profileSelect).toBeTruthy();
++
++    // 模型未选供应商（llmProviderId=""）→ 禁用（级联前置）。
++    expect(modelSelect!.closest(".ant-select")?.classList.contains("ant-select-disabled")).toBe(
++      true,
++    );
++
++    // 思考等级（claude caps.thinking_level=true）档位含「最高」（七档词表镜像）。
++    openAntdSelect("member-config-thinking");
++    const maxOpt = await waitFor(() => {
++      const hit = [...document.querySelectorAll(".ant-select-item-option-content")].find(
++        (el) => el.textContent?.trim() === "最高",
++      );
++      if (!hit) throw new Error("option 最高 not found");
++      return hit;
++    });
++    expect(maxOpt).toBeTruthy();
++  });
++
++  it("供应商→模型级联：候选含具体模型名（deepseek-v4.1-flash）+ 首项默认；提交 payload 携 model/thinking_level", async () => {
++    await openAddAgentDialog();
++
++    fireEvent.change(screen.getByLabelText("Agent 成员群昵称"), {
++      target: { value: "小新" },
++    });
++    await chooseAntdOptionByText("mp-add-agent-runtime", "本机-Mac · Claude Code");
++    await chooseAntdOptionByText("mp-add-agent-workspace", "主工作区");
++
++    // 选供应商 → 模型下拉解禁；候选=sonnet 主模型置顶 + 具体模型名 + 首项默认。
++    await chooseAntdOptionByText("member-config-provider", "OpenCode Go");
++    await waitFor(() =>
++      expect(
++        document
++          .getElementById("member-config-model")!
++          .closest(".ant-select")!
++          .classList.contains("ant-select-disabled"),
++      ).toBe(false),
++    );
++    openAntdSelect("member-config-model");
++    const modelOpt = await waitFor(() => {
++      const hit = [...document.querySelectorAll(".ant-select-item-option-content")].find(
++        (el) => el.textContent?.trim() === "deepseek-v4.1-flash",
++      );
++      if (!hit) throw new Error("option deepseek-v4.1-flash not found");
++      return hit;
++    });
++    expect(modelOpt).toBeTruthy();
++
++    await chooseAntdOptionByText("member-config-model", "deepseek-v4.1-flash");
++    await chooseAntdOptionByText("member-config-thinking", "最高");
++    await chooseAntdOptionByText("member-config-profile", "SillySpec 极速变更");
++
++    const submit = screen.getByRole("button", { name: "添 加" });
++    await waitFor(() => expect(submit).toBeEnabled());
++    fireEvent.click(submit);
++
++    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
++    const json = mocks.apiFetch.mock.calls[0]![1] as { json: { agent: Record<string, unknown> } };
++    expect(json.json.agent).toMatchObject({
++      provider: "claude",
++      llm_provider_id: "lp-1",
++      model: "deepseek-v4.1-flash",
++      thinking_level: "max",
++      agent_profile_id: "ap-1",
++    });
++  });
++});
++
++describe("机器下拉 label 兜底（FR-02）", () => {
++  it("runtime 无别名 → label=「机器别名 · 引擎名」，不再引擎名单独兜底", async () => {
++    await openAddAgentDialog();
++
++    openAntdSelect("mp-add-agent-runtime");
++    const bare = [...document.querySelectorAll(".ant-select-item-option-content")].find(
++      (el) => el.textContent?.trim() === "Claude Code",
++    );
++    expect(bare).toBeUndefined(); // 「机器: Claude Code」形态消失
++    const hit = [...document.querySelectorAll(".ant-select-item-option-content")].find(
++      (el) => el.textContent?.trim() === "本机-Mac · Claude Code",
++    );
++    expect(hit).toBeTruthy();
++  });
++});
++
++describe("buildMemberUpdatePayload 模型/档位 diff（FR-01 提交面）", () => {
++  const group = makeGroup();
++  const member = agentMember();
++
++  it("未变不送键（PATCH null=不改口径零噪声）", () => {
++    const payload = buildMemberUpdatePayload(member, group, {
++      provider: "claude",
++      llmProviderId: "",
++      model: "",
++      thinkingLevel: "",
++      agentProfileId: "ap-1",
++      runtimeId: "rt-1",
++      workspaceId: "",
++    });
++    expect(payload.model).toBeUndefined();
++    expect(payload.thinking_level).toBeUndefined();
++  });
++
++  it("变更送新值；清空送空串（后端空串=显式重置语义）", () => {
++    const payload = buildMemberUpdatePayload(
++      agentMember({ model: "deepseek-v4.1-flash", thinking_level: "max" }),
++      group,
++      {
++        provider: "claude",
++        llmProviderId: "",
++        model: "",
++        thinkingLevel: "high",
++        agentProfileId: "",
++        runtimeId: "rt-1",
++        workspaceId: "",
++      },
++    );
++    expect(payload.model).toBe(""); // 清空=重置「跟随供应商配置」
++    expect(payload.thinking_level).toBe("high");
++  });
++});
+diff --git a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+index efd38bcfe..298b2fa24 100644
+--- a/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/member-panel.test.tsx
+@@ -628,7 +628,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
+ 
+     await openSwitchModal("agent-member-card-mem-1");
+     // 模型：不指定 → GLM 供应商（小码 llm_provider_id=null）。
+-    await chooseAntdOptionByText("mp-switch-model", "GLM 供应商");
++    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
+     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
+ 
+     await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+@@ -647,7 +647,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
+ 
+     await openSwitchModal("agent-member-card-mem-1");
+     // 机器：rt-1（Claude Code）→ rt-2（Codex）。
+-    await chooseAntdOptionByText("mp-switch-runtime", "Codex");
++    await chooseAntdOptionByText("mp-switch-runtime", "本机-Mac · Codex");
+     // 即时警示条出现（原型 callout 语义）。
+     expect(
+       await screen.findByTestId("mp-switch-memory-warn"),
+@@ -672,7 +672,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
+     const confirmSpy = spyConfirmCancel();
+ 
+     await openSwitchModal("agent-member-card-mem-1");
+-    await chooseAntdOptionByText("mp-switch-runtime", "Codex");
++    await chooseAntdOptionByText("mp-switch-runtime", "本机-Mac · Codex");
+     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
+ 
+     expect(confirmSpy).toHaveBeenCalledTimes(1);
+@@ -688,7 +688,7 @@ describe("MemberPanel 热切换弹窗（task-09 / FR-14）", () => {
+     const confirmSpy = spyConfirmOk();
+ 
+     await openSwitchModal("agent-member-card-mem-1");
+-    await chooseAntdOptionByText("mp-switch-model", "GLM 供应商");
++    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
+     fireEvent.click(screen.getByRole("button", { name: "应用（下轮生效）" }));
+ 
+     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+@@ -864,11 +864,11 @@ describe("MemberPanel 添加 Agent 对话框（quick 内建入口，六要素表
+     fireEvent.change(screen.getByLabelText("Agent 成员群昵称"), {
+       target: { value: "小新" },
+     });
+-    await chooseAntdOptionByText("mp-add-agent-runtime", "Claude Code");
++    await chooseAntdOptionByText("mp-add-agent-runtime", "本机-Mac · Claude Code");
+     await chooseAntdOptionByText("mp-add-agent-workspace", "主工作区");
+-    // 模型（llm 供应商）+ 方案可选填。
+-    await chooseAntdOptionByText("mp-add-agent-model", "GLM 供应商");
+-    await chooseAntdOptionByText("mp-add-agent-profile", "资深前端工程师");
++    // 四选（供应商/模型/思考等级/档案）：供应商+档案可选填（模型未选=跟随配置）。
++    await chooseAntdOptionByText("member-config-provider", "GLM 供应商");
++    await chooseAntdOptionByText("member-config-profile", "资深前端工程师");
+     await waitFor(() => expect(submit).toBeEnabled());
+     fireEvent.click(submit);
+ 
+@@ -884,6 +884,8 @@ describe("MemberPanel 添加 Agent 对话框（quick 内建入口，六要素表
+             workspace_id: "ws-1",
+             provider: "claude",
+             llm_provider_id: "lp-1",
++            model: null,
++            thinking_level: null,
+             agent_profile_id: "ap-1",
+             team_enabled: false,
+           },
+diff --git a/frontend/src/components/group-chat/create-group-wizard.tsx b/frontend/src/components/group-chat/create-group-wizard.tsx
+index dd2bd19ac..7078dc6b8 100644
+--- a/frontend/src/components/group-chat/create-group-wizard.tsx
++++ b/frontend/src/components/group-chat/create-group-wizard.tsx
+@@ -51,8 +51,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Button, Input, InputNumber, Modal, Select, Switch, Tooltip } from "antd";
+ import { Bot, Plus, Trash2 } from "lucide-react";
+ 
+-import { useMineAgentProfiles } from "@/lib/agent-profiles";
+-import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
++import { MemberConfigFields } from "@/components/group-chat/member-config-fields";
+ import { errMessage, useNotify } from "@/lib/errors";
+ import { listSimpleProjects, listProjectMembers } from "@/lib/ppm/project";
+ import type { ProjectMember } from "@/lib/ppm/types";
+@@ -135,6 +134,10 @@ export interface AgentMemberCardState {
+   provider: string;
+   /** 空串 = 不指定（本机/供应商默认）。 */
+   llmProviderId: string;
++  /** 2026-11-02-group-member-footer-config：具体模型名（空串=跟随供应商配置）。 */
++  model: string;
++  /** 思考等级七档词表值（空串=引擎默认）。 */
++  thinkingLevel: string;
+   /** 空串 = 不指定（走默认档案兜底链）。 */
+   agentProfileId: string;
+   /** 团队能力（可派分身并行干活；仅 Claude 引擎——开成员级主控 5 工具注入）。 */
+@@ -151,6 +154,8 @@ function newAgentCard(): AgentMemberCardState {
+     workspaceId: "",
+     provider: "claude",
+     llmProviderId: "",
++    model: "",
++    thinkingLevel: "",
+     agentProfileId: "",
+     teamEnabled: false,
+   };
+@@ -291,9 +296,13 @@ export function CreateGroupWizard({
+         label: machineOnline ? alias : `${alias}（离线）`,
+         options: runtimes.map((r) => ({
+           value: r.id,
++          // 2026-11-02-group-member-footer-config（FR-02）：别名优先，缺失
++          // 回落「机器别名 · 引擎名」——不再引擎名单独兜底。
+           label:
+             r.display_alias?.trim() ||
+-            PROVIDER_META[r.provider ?? ""]?.label ||
++            [alias, PROVIDER_META[r.provider ?? ""]?.label]
++              .filter(Boolean)
++              .join(" · ") ||
+             r.id,
+           disabled: !machineOnline || r.status !== "online",
+         })),
+@@ -302,30 +311,8 @@ export function CreateGroupWizard({
+     return groups;
+   }, [machineCandidates]);
+ 
+-  // 模型（llm_provider 下拉）：listProviders（sessions-portal providersQ 同源）。
+-  const providersQ = useQuery({
+-    queryKey: ["llmProviders", "create-group-wizard"],
+-    queryFn: listProviders,
+-    staleTime: 30_000,
+-    enabled: open,
+-  });
+-  const providerOptions = useMemo(() => {
+-    const base = (providersQ.data ?? []).map((p) => ({
+-      value: p.id,
+-      label: p.name,
+-    }));
+-    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化。
+-    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+-    return base;
+-  }, [providersQ.data]);
+-
+-  // 智能体方案（AgentProfile 下拉）：useMineAgentProfiles（跨工作区可见，
+-  // session-config-bar 档案下拉同源）。
+-  const { profiles } = useMineAgentProfiles();
+-  const profileOptions = useMemo(
+-    () => profiles.map((p) => ({ value: p.id, label: p.name })),
+-    [profiles],
+-  );
++  // 2026-11-02-group-member-footer-config：供应商/模型/思考等级/档案四选
++  // 数据源下沉 MemberConfigFields（组件内自取，跨表面 react-query 缓存共享）。
+ 
+   /* ── 校验 ── */
+ 
+@@ -448,6 +435,9 @@ export function CreateGroupWizard({
+               workspace_id: c.workspaceId || null,
+               provider: c.provider,
+               llm_provider_id: c.llmProviderId || null,
++              // 2026-11-02-group-member-footer-config：模型/思考等级随四选提交。
++              model: c.model || null,
++              thinking_level: c.thinkingLevel || null,
+               agent_profile_id: c.agentProfileId || null,
+               // 团队能力开关（quick 群成员团队能力；生成版类型必填显式传）。
+               team_enabled: c.teamEnabled,
+@@ -911,64 +901,36 @@ export function CreateGroupWizard({
+                         className="w-full"
+                         value={card.provider}
+                         onChange={(v) => {
+-                          // 引擎切换重置模型选择（供应商仅 claude 引擎语义，
+-                          // session-config-bar providerLocked 同源）；团队能力
+-                          // 仅 Claude 引擎（daemon 主控 5 工具注入谓词）——切
+-                          // codex 联动关闭，防 payload 撞后端 400 门控。
++                          // 引擎切换级联重置模型组（供应商/模型/思考等级归
++                          // 默认，claude 引擎语义，session-config-bar
++                          // providerLocked 同源）；团队能力仅 Claude 引擎
++                          //（daemon 主控 5 工具注入谓词）——切 codex 联动
++                          // 关闭，防 payload 撞后端 400 门控。
+                           updateCard(card.id, {
+                             provider: v,
+                             llmProviderId: "",
++                            model: "",
++                            thinkingLevel: "",
+                             teamEnabled: v === "claude" ? card.teamEnabled : false,
+                           });
+                         }}
+                         options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
+                       />
+                     </div>
+-                    <div className="col-span-2 flex flex-col gap-1">
+-                      <span className="text-[11px] font-medium text-muted-foreground">
+-                        模型（LLM 供应商）
+-                      </span>
+-                      <Select
+-                        id={`cgw-model-${idx}`}
+-                        aria-label={`Agent 成员 ${idx + 1} 模型`}
+-                        className="w-full"
+-                        placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
+-                        allowClear
+-                        value={card.llmProviderId || undefined}
+-                        onChange={(v) =>
+-                          updateCard(card.id, { llmProviderId: v ?? "" })
+-                        }
+-                        disabled={card.provider !== "claude"}
+-                        options={providerOptions}
+-                      />
+-                      {card.provider !== "claude" && (
+-                        <span className="text-[11px] text-muted-foreground">
+-                          Codex 引擎使用其本机模型配置，无需选择供应商
+-                        </span>
+-                      )}
+-                    </div>
+-                    <div className="col-span-2 flex flex-col gap-1">
+-                      <span className="text-[11px] font-medium text-muted-foreground">
+-                        智能体方案（人格 / 工具集 / 技能）
+-                      </span>
+-                      <Select
+-                        id={`cgw-profile-${idx}`}
+-                        aria-label={`Agent 成员 ${idx + 1} 智能体方案`}
+-                        className="w-full"
+-                        placeholder="不指定，用默认"
+-                        allowClear
+-                        showSearch
+-                        optionFilterProp="label"
+-                        value={card.agentProfileId || undefined}
+-                        onChange={(v) =>
+-                          updateCard(card.id, { agentProfileId: v ?? "" })
+-                        }
+-                        options={[
+-                          { value: "", label: "不指定，用默认" },
+-                          ...profileOptions,
+-                        ]}
+-                      />
+-                    </div>
++                    {/* 2026-11-02-group-member-footer-config：四选口径（供应商/
++                        模型级联/思考等级/档案）共享子组件——原「模型（LLM 供应
++                        商）」「智能体方案」两块被其取代。 */}
++                    <MemberConfigFields
++                      engine={card.provider}
++                      idPrefix={`cgw-member-${idx}`}
++                      value={{
++                        llmProviderId: card.llmProviderId,
++                        model: card.model,
++                        thinkingLevel: card.thinkingLevel,
++                        agentProfileId: card.agentProfileId,
++                      }}
++                      onChange={(next) => updateCard(card.id, next)}
++                    />
+                     {/* 团队能力开关（quick 群成员团队能力）：仅 Claude 引擎可开
+                         （daemon 主控 5 工具注入谓词；codex 禁用 + tooltip 提示） */}
+                     <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">
+diff --git a/frontend/src/components/group-chat/member-config-fields.tsx b/frontend/src/components/group-chat/member-config-fields.tsx
+new file mode 100644
+index 000000000..e2eac6c6b
+--- /dev/null
++++ b/frontend/src/components/group-chat/member-config-fields.tsx
+@@ -0,0 +1,234 @@
++// frontend/src/components/group-chat/member-config-fields.tsx
++// 2026-11-02-group-member-footer-config：群成员配置块四选共享子组件——
++// 供应商 / 模型（级联）/ 思考等级 / 档案，口径与会话底部配置条
++//（sessions/session-config-bar.tsx）同源：
++//   - 模型候选 = 所选供应商 models 条目名（sonnet 角色主模型置顶）去重保序
++//     + 首项「默认（跟随供应商配置）」（镜像 session-config-bar modelCandidates，
++//     不做上游 /v1/models 实时拉取，D-002 同口径）；
++//   - 思考等级 = THINKING_LEVEL_OPTIONS 七档镜像（唯一维护源
++//     sillyhub-daemon/src/interactive/thinking-levels.ts，两侧注释互指），
++//     按引擎 caps.thinking_level 门控；
++//   - 档案 = useMineAgentProfiles（AgentProfile 下拉，原「智能体方案」更名）。
++// 三个消费表面：添加 Agent 对话框 / 建群向导第三步成员卡 / 切换配置弹窗
++//（member-panel.tsx ×2 + create-group-wizard.tsx）。
++
++import { useMemo } from "react";
++import { useQuery } from "@tanstack/react-query";
++import { Select } from "antd";
++
++import { THINKING_LEVEL_OPTIONS, thinkingLevelLabel } from "@/components/sessions/session-config-bar";
++import { useMineAgentProfiles } from "@/lib/agent-profiles";
++import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
++import { getProviderCaps } from "@/lib/provider-caps";
++
++// 档位中文标签展示同源再导出（成员卡片「思考等级」行消费）。
++export { thinkingLevelLabel };
++
++/** 成员四选值（""=各维默认态：供应商=本机默认、模型=跟随供应商配置、
++ * 思考等级=引擎默认、档案=不指定）。 */
++export interface MemberConfigValue {
++  llmProviderId: string;
++  model: string;
++  thinkingLevel: string;
++  agentProfileId: string;
++}
++
++export const MEMBER_MODEL_DEFAULT_VALUE = "";
++export const MEMBER_THINKING_DEFAULT_VALUE = "";
++
++const MEMBER_MODEL_DEFAULT_LABEL = "默认（跟随供应商配置）";
++const MEMBER_THINKING_DEFAULT_LABEL = "引擎默认";
++
++interface MemberConfigFieldsProps {
++  /** 成员引擎（claude/codex/pi）：供应商/模型/思考等级的可用性门控来源。 */
++  engine: string;
++  value: MemberConfigValue;
++  /** 任一维变更上抛（级联重置模型已在此组件内处理：换供应商 → model 归 ""）。 */
++  onChange: (next: MemberConfigValue) => void;
++  /** 切换弹窗回显兜底：成员现绑供应商/方案 id 不在候选列表时补「当前」项。 */
++  memberLlmProviderId?: string | null;
++  memberAgentProfileId?: string | null;
++  /** Select id 前缀（同屏多实例防 id 冲突——向导多卡片传 `cgw-member-${idx}`）。 */
++  idPrefix?: string;
++}
++
++export function MemberConfigFields({
++  engine,
++  value,
++  onChange,
++  memberLlmProviderId,
++  memberAgentProfileId,
++  idPrefix = "member-config",
++}: MemberConfigFieldsProps) {
++  const providersQ = useQuery({
++    queryKey: ["llmProviders", "member-config-fields"],
++    queryFn: listProviders,
++    staleTime: 30_000,
++  });
++  const { profiles } = useMineAgentProfiles();
++
++  const providers = providersQ.data ?? [];
++  const selectedProvider = useMemo(
++    () => providers.find((p) => p.id === value.llmProviderId) ?? null,
++    [providers, value.llmProviderId],
++  );
++
++  // 供应商下拉（codex 等「本机模型配置」引擎禁用，与既有三表面降级语义一致）。
++  const providerOptions = useMemo(() => {
++    const opts = providers.map((p) => ({ value: p.id, label: p.name }));
++    if (
++      memberLlmProviderId &&
++      !opts.some((o) => o.value === memberLlmProviderId)
++    ) {
++      opts.unshift({
++        value: memberLlmProviderId,
++        label: `${memberLlmProviderId.slice(0, 8)}（当前）`,
++      });
++    }
++    opts.unshift({ value: "", label: noProviderLabel(providers) });
++    return opts;
++  }, [providers, memberLlmProviderId]);
++
++  // 模型候选（镜像 session-config-bar modelCandidates：供应商 models 条目名、
++  // sonnet 角色主模型置顶、去重保序；首项「默认」固定在选项渲染处）。
++  const modelCandidates = useMemo(() => {
++    if (!selectedProvider) return [] as string[];
++    const entries = selectedProvider.models ?? [];
++    const primaryIdx = entries.findIndex((m) => m.roles?.includes("sonnet"));
++    const ordered =
++      primaryIdx > 0
++        ? [entries[primaryIdx], ...entries.filter((_, i) => i !== primaryIdx)]
++        : entries;
++    const seen = new Set<string>();
++    const models: string[] = [];
++    for (const m of ordered) {
++      const name = m?.name;
++      if (!name || seen.has(name)) continue;
++      seen.add(name);
++      models.push(name);
++    }
++    return models;
++  }, [selectedProvider]);
++
++  const modelOptions = useMemo(() => {
++    const base = value.model && !modelCandidates.includes(value.model)
++      ? [...modelCandidates, value.model]
++      : modelCandidates;
++    return [{ value: MEMBER_MODEL_DEFAULT_VALUE, label: MEMBER_MODEL_DEFAULT_LABEL }, ...base.map((m) => ({ value: m, label: m }))];
++  }, [modelCandidates, value.model]);
++
++  // 思考等级：caps 门控（cursor/未知引擎不渲染下拉，仅提示文案——照 footer 口径）。
++  const thinkingEnabled = getProviderCaps(engine).thinking_level;
++  const thinkingOptions = useMemo(
++    () => [
++      { value: MEMBER_THINKING_DEFAULT_VALUE, label: MEMBER_THINKING_DEFAULT_LABEL },
++      ...THINKING_LEVEL_OPTIONS.map((o) => ({ ...o })),
++    ],
++    [],
++  );
++
++  // 档案下拉（AgentProfile；现绑定不在列表时补「当前」兜底项）。
++  const profileOptions = useMemo(() => {
++    const opts = profiles.map((p) => ({ value: p.id, label: p.name }));
++    if (
++      memberAgentProfileId &&
++      !opts.some((o) => o.value === memberAgentProfileId)
++    ) {
++      opts.unshift({
++        value: memberAgentProfileId,
++        label: `${memberAgentProfileId.slice(0, 8)}（当前）`,
++      });
++    }
++    opts.unshift({ value: "", label: "不指定，用默认" });
++    return opts;
++  }, [profiles, memberAgentProfileId]);
++
++  const engineDisabled = engine !== "claude";
++
++  return (
++    <>
++      <div className="flex flex-col gap-1">
++        <span className="text-[11px] font-medium text-muted-foreground">供应商</span>
++        <Select
++          id={`${idPrefix}-provider`}
++          aria-label="成员供应商"
++          className="w-full"
++          placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
++          allowClear
++          value={value.llmProviderId || undefined}
++          onChange={(v) =>
++            // 换供应商级联重置模型（footer 同口径：模型候选跟随供应商）。
++            onChange({ ...value, llmProviderId: v ?? "", model: "" })
++          }
++          disabled={engineDisabled}
++          options={providerOptions}
++        />
++        {engineDisabled && (
++          <span className="text-[11px] text-muted-foreground">
++            Codex 引擎使用其本机模型配置，无需选择供应商
++          </span>
++        )}
++      </div>
++      <div className="flex flex-col gap-1">
++        <span className="text-[11px] font-medium text-muted-foreground">模型</span>
++        <Select
++          id={`${idPrefix}-model`}
++          aria-label="成员模型"
++          className="w-full"
++          placeholder={MEMBER_MODEL_DEFAULT_LABEL}
++          value={value.model || MEMBER_MODEL_DEFAULT_VALUE}
++          onChange={(v) => onChange({ ...value, model: v ?? "" })}
++          disabled={engineDisabled || !value.llmProviderId}
++          options={modelOptions}
++        />
++        {!value.llmProviderId && !engineDisabled && (
++          <span className="text-[11px] text-muted-foreground">
++            先选供应商后可选具体模型；不选=跟随供应商配置
++          </span>
++        )}
++      </div>
++      <div className="flex flex-col gap-1">
++        <span className="text-[11px] font-medium text-muted-foreground">思考等级</span>
++        {thinkingEnabled ? (
++          <Select
++            id={`${idPrefix}-thinking`}
++            aria-label="成员思考等级"
++            className="w-full"
++            placeholder={MEMBER_THINKING_DEFAULT_LABEL}
++            value={value.thinkingLevel || MEMBER_THINKING_DEFAULT_VALUE}
++            onChange={(v) => onChange({ ...value, thinkingLevel: v ?? "" })}
++            options={thinkingOptions}
++          />
++        ) : (
++          <Select
++            id={`${idPrefix}-thinking`}
++            aria-label="成员思考等级"
++            className="w-full"
++            value={MEMBER_THINKING_DEFAULT_VALUE}
++            disabled
++            options={[
++              { value: MEMBER_THINKING_DEFAULT_VALUE, label: "当前引擎不支持思考等级" },
++            ]}
++          />
++        )}
++      </div>
++      <div className="flex flex-col gap-1">
++        <span className="text-[11px] font-medium text-muted-foreground">
++          档案（人格 / 工具集 / 技能）
++        </span>
++        <Select
++          id={`${idPrefix}-profile`}
++          aria-label="成员档案"
++          className="w-full"
++          placeholder="不指定，用默认"
++          allowClear
++          showSearch
++          optionFilterProp="label"
++          value={value.agentProfileId || undefined}
++          onChange={(v) => onChange({ ...value, agentProfileId: v ?? "" })}
++          options={profileOptions}
++        />
++      </div>
++    </>
++  );
++}
+diff --git a/frontend/src/components/group-chat/member-panel.tsx b/frontend/src/components/group-chat/member-panel.tsx
+index 52025cd15..13c0fc9ac 100644
+--- a/frontend/src/components/group-chat/member-panel.tsx
++++ b/frontend/src/components/group-chat/member-panel.tsx
+@@ -19,8 +19,9 @@
+  *   - 群设置区（quick 群 P2）：输入草稿预览开关（群主可见；本地态 +
+  *     PATCH settings_json.typing_preview——群读体未透出 settings_json，
+  *     无服务端回显真值）；
+- *   - Agent 成员区：六要素卡片（昵称/机器/工作区/引擎/模型/方案——config_snapshot
+- *     JSON 自取键容错）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
++ *   - Agent 成员区：成员配置卡片（昵称/机器/工作区/引擎/供应商/模型/思考等级/
++ *     档案——config_snapshot JSON 自取键容错；2026-11-02-group-member-footer-config
++ *     四选口径）+ 团队能力开关（quick 群成员团队能力：PATCH team_enabled，
+  *     热切换走重建分支——确认弹窗照机器组惯例；仅 Claude 可开）+ shadow_status
+  *     徽标（active 在线 / pending 待建 / none 未建 / ended 已结束 / failed 异常）
+  *     +「运行中」动态徽标（runningMemberIds 命中——群详情 shadow_running ∪
+@@ -35,13 +36,14 @@
+  *   - 分区头「+ 邀请用户」「+ 添加 Agent」入口（群聊体验对齐 quick 内建：
+  *     群主可见）——邀请 = 项目人员多选（listProjectMembers 排除已在群）逐个
+  *     POST members（user 体含 display_name 默认用户名）；添加 Agent = 单张
+- *     六要素表单（昵称/机器/工作区=项目关联/引擎/模型/方案/团队能力/头像——
+- *     照建群向导第三步单卡字段）POST members（agent 体）。
++ *     成员配置表单（昵称/机器/工作区=项目关联/引擎/供应商/模型/思考等级/档案/
++ *     团队能力/头像——照建群向导第三步单卡字段）POST members（agent 体）。
+  *
+- * 热切换弹窗（对照原型 switchModal）：引擎/模型/方案/机器/工作区五下拉（数据源
+- * 同 task-07 向导：useDaemonMachines / listProviders / useMineAgentProfiles /
+- * listWorkspaces），提交 updateGroupMember（仅送变更字段——后端 PATCH None=不改
+- * 口径）；**机器或工作区变更时 Modal.confirm 二次确认提示「将重置该成员的
++ * 热切换弹窗（对照原型 switchModal）：引擎 + 四选（供应商/模型级联/思考等级/
++ * 档案，MemberConfigFields 共享子组件）+ 机器/工作区下拉（机器数据源
++ * useDaemonMachines；四选数据源组件内自取），提交 updateGroupMember（仅送
++ * 变更字段——后端 PATCH None=不改口径；model/thinking_level 空串=显式重置）；
++ * **机器或工作区变更时 Modal.confirm 二次确认提示「将重置该成员的
+  * 独立记忆」**（design §4.5）。群主权限后端强校验（update_member
+  * _require_group_owner），前端按钮按 isOwner 门控。
+  */
+@@ -53,9 +55,12 @@ import { Plus, Square, UserMinus } from "lucide-react";
+ 
+ import { SessionPanel } from "@/components/daemon/session-panel";
+ import { validateMemberDisplayName } from "@/components/group-chat/create-group-wizard";
+-import { useMineAgentProfiles } from "@/lib/agent-profiles";
++import {
++  MemberConfigFields,
++  thinkingLevelLabel,
++} from "@/components/group-chat/member-config-fields";
+ import { ApiError } from "@/lib/api";
+-import { listProviders, noProviderLabel } from "@/lib/api/llm-providers";
++import { listProviders } from "@/lib/api/llm-providers";
+ import { errMessage, useNotify } from "@/lib/errors";
+ import { listProjectMembers } from "@/lib/ppm/project";
+ import { listProjectWorkspaces } from "@/lib/workspace";
+@@ -134,6 +139,10 @@ export function buildMemberUpdatePayload(
+   next: {
+     provider: string;
+     llmProviderId: string;
++    /** 成员级具体模型名（""=跟随供应商配置；后端 PATCH ""=显式重置语义）。 */
++    model: string;
++    /** 思考等级七档词表值（""=引擎默认；后端 PATCH ""=显式重置语义）。 */
++    thinkingLevel: string;
+     agentProfileId: string;
+     runtimeId: string;
+     workspaceId: string;
+@@ -144,6 +153,14 @@ export function buildMemberUpdatePayload(
+   if (next.llmProviderId !== (member.llm_provider_id ?? "")) {
+     payload.llm_provider_id = next.llmProviderId || null;
+   }
++  // 2026-11-02-group-member-footer-config：模型/思考等级 diff（""=重置，
++  // 送空串而非 null——后端 PATCH null=不改、空串=显式重置语义）。
++  if (next.model !== (member.model ?? "")) {
++    payload.model = next.model;
++  }
++  if (next.thinkingLevel !== (member.thinking_level ?? "")) {
++    payload.thinking_level = next.thinkingLevel;
++  }
+   if (next.agentProfileId !== (member.agent_profile_id ?? "")) {
+     payload.agent_profile_id = next.agentProfileId || null;
+   }
+@@ -796,11 +813,23 @@ export function MemberPanel({
+                   member.provider ??
+                   "—"}
+               </dd>
++              {/* 2026-11-02-group-member-footer-config：四选展示——供应商
++                  （provider_name）/ 模型（真实模型名）/ 思考等级 / 档案。 */}
++              <dt className="text-muted-foreground/70">供应商</dt>
++              <dd className="truncate font-medium text-muted-foreground">
++                {snapshotString(member, "provider_name") ?? "未指定（本机默认）"}
++              </dd>
+               <dt className="text-muted-foreground/70">模型</dt>
+               <dd className="truncate font-medium text-muted-foreground">
+-                {snapshotString(member, "model") ?? "未指定（本机默认）"}
++                {snapshotString(member, "model") ?? "未指定（跟随供应商配置）"}
++              </dd>
++              <dt className="text-muted-foreground/70">思考等级</dt>
++              <dd className="truncate font-medium text-muted-foreground">
++                {snapshotString(member, "thinking_level")
++                  ? thinkingLevelLabel(snapshotString(member, "thinking_level")!)
++                  : "引擎默认"}
+               </dd>
+-              <dt className="text-muted-foreground/70">方案</dt>
++              <dt className="text-muted-foreground/70">档案</dt>
+               <dd className="truncate font-medium text-muted-foreground">
+                 {snapshotString(member, "profile_name") ?? "默认"}
+               </dd>
+@@ -1085,6 +1114,12 @@ function AgentConfigSwitchModal({
+   const [llmProviderId, setLlmProviderId] = useState(
+     member.llm_provider_id ?? "",
+   );
++  // 2026-11-02-group-member-footer-config：成员级具体模型名与思考等级
++  //（""=各维默认态；初始值=成员行现值）。
++  const [model, setModel] = useState(member.model ?? "");
++  const [thinkingLevel, setThinkingLevel] = useState(
++    member.thinking_level ?? "",
++  );
+   const [agentProfileId, setAgentProfileId] = useState(
+     member.agent_profile_id ?? "",
+   );
+@@ -1093,16 +1128,10 @@ function AgentConfigSwitchModal({
+     member.workspace_id ?? group.workspace_id,
+   );
+ 
+-  // 数据源同 task-07 向导：机器（useDaemonMachines 融合候选）/ 模型
+-  // （listProviders）/ 方案（useMineAgentProfiles）；工作区选项经 props 复用
+-  // 面板查询。弹窗条件挂载 → 仅打开时发起查询。
++  // 数据源同 task-07 向导：机器（useDaemonMachines 融合候选）；供应商/模型/
++  // 思考等级/档案四选数据源已下沉 MemberConfigFields（组件内自取）。弹窗
++  // 条件挂载 → 仅打开时发起查询。
+   const { machineCandidates } = useDaemonMachines({ limit: 100 });
+-  const providersQ = useQuery({
+-    queryKey: ["llmProviders", "member-panel-switch"],
+-    queryFn: listProviders,
+-    staleTime: 30_000,
+-  });
+-  const { profiles } = useMineAgentProfiles();
+ 
+   const runtimeOptions = useMemo(() => {
+     const groups: {
+@@ -1124,9 +1153,14 @@ function AgentConfigSwitchModal({
+         label: machineOnline ? alias : `${alias}（离线）`,
+         options: runtimes.map((r) => ({
+           value: r.id,
++          // 2026-11-02-group-member-footer-config（FR-02）：label=runtime 别名
++          // 优先，缺失回落「机器别名 · 引擎名」——不再以引擎名单独兜底
++          //（「机器: Claude Code」形态消失，机器身份可辨识）。
+           label:
+             r.display_alias?.trim() ||
+-            PROVIDER_META[r.provider ?? ""]?.label ||
++            [alias, PROVIDER_META[r.provider ?? ""]?.label]
++              .filter(Boolean)
++              .join(" · ") ||
+             r.id,
+           disabled: !machineOnline || r.status !== "online",
+         })),
+@@ -1147,49 +1181,28 @@ function AgentConfigSwitchModal({
+     return groups;
+   }, [machineCandidates, member]);
+ 
+-  const providerOptions = useMemo(() => {
+-    const opts = (providersQ.data ?? []).map((p) => ({
+-      value: p.id,
+-      label: p.name,
+-    }));
+-    // 已设模型不在列表（供应商被删）时补回退项；未设模型提供「不指定」。
+-    if (member.llm_provider_id && !opts.some((o) => o.value === member.llm_provider_id)) {
+-      opts.unshift({
+-        value: member.llm_provider_id,
+-        label: `${member.llm_provider_id.slice(0, 8)}（当前）`,
+-      });
+-    }
+-    if (!member.llm_provider_id) {
+-      // 2026-10-21-provider-default-ui-hint：兜底文案按用户默认供应商动态化。
+-      opts.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+-    }
+-    return opts;
+-  }, [providersQ.data, member]);
+-
+-  const profileOptions = useMemo(() => {
+-    const opts = profiles.map((p) => ({ value: p.id, label: p.name }));
+-    if (member.agent_profile_id && !opts.some((o) => o.value === member.agent_profile_id)) {
+-      opts.unshift({
+-        value: member.agent_profile_id,
+-        label: `${member.agent_profile_id.slice(0, 8)}（当前）`,
+-      });
+-    }
+-    if (!member.agent_profile_id) {
+-      opts.unshift({ value: "", label: "不指定，用默认" });
+-    }
+-    return opts;
+-  }, [profiles, member]);
+-
+   const payload = useMemo(
+     () =>
+       buildMemberUpdatePayload(member, group, {
+         provider,
+         llmProviderId,
++        model,
++        thinkingLevel,
+         agentProfileId,
+         runtimeId,
+         workspaceId,
+       }),
+-    [member, group, provider, llmProviderId, agentProfileId, runtimeId, workspaceId],
++    [
++      member,
++      group,
++      provider,
++      llmProviderId,
++      model,
++      thinkingLevel,
++      agentProfileId,
++      runtimeId,
++      workspaceId,
++    ],
+   );
+   const dirty = Object.keys(payload).length > 0;
+   // 机器或工作区变更 → 重建影子会话重置记忆（design §4.5）：弹窗内即时警示 +
+@@ -1239,53 +1252,37 @@ function AgentConfigSwitchModal({
+           其他成员。
+         </p>
+         <div className="flex flex-col gap-1">
+-          <span className="text-xs font-medium text-muted-foreground">
+-            引擎供应商
+-          </span>
++          <span className="text-xs font-medium text-muted-foreground">引擎</span>
+           <Select
+             id="mp-switch-engine"
+-            aria-label="引擎供应商"
++            aria-label="引擎"
+             className="w-full"
+             value={provider}
+-            onChange={setProvider}
++            onChange={(v) => {
++              // 引擎切换级联重置模型组（供应商/模型/思考等级归默认，claude 语义）。
++              setProvider(v);
++              setLlmProviderId("");
++              setModel("");
++              setThinkingLevel("");
++            }}
+             options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
+           />
+         </div>
+-        <div className="flex flex-col gap-1">
+-          <span className="text-xs font-medium text-muted-foreground">
+-            模型（LLM 供应商）
+-          </span>
+-          <Select
+-            id="mp-switch-model"
+-            aria-label="模型（LLM 供应商）"
+-            className="w-full"
+-            value={llmProviderId}
+-            onChange={(v) => setLlmProviderId(v ?? "")}
+-            disabled={provider !== "claude"}
+-            options={providerOptions}
+-          />
+-          {provider !== "claude" && (
+-            <span className="text-[11px] text-muted-foreground">
+-              Codex 引擎使用其本机模型配置，无需选择供应商
+-            </span>
+-          )}
+-        </div>
+-        <div className="flex flex-col gap-1">
+-          <span className="text-xs font-medium text-muted-foreground">
+-            智能体方案（人格 / 工具集 / 技能）
+-          </span>
+-          <Select
+-            id="mp-switch-profile"
+-            aria-label="智能体方案（人格 / 工具集 / 技能）"
+-            className="w-full"
+-            allowClear
+-            showSearch
+-            optionFilterProp="label"
+-            value={agentProfileId || undefined}
+-            onChange={(v) => setAgentProfileId(v ?? "")}
+-            options={profileOptions}
+-          />
+-        </div>
++        {/* 2026-11-02-group-member-footer-config：四选口径（供应商/模型级联/
++            思考等级/档案）共享子组件——原「模型（LLM 供应商）」「智能体方案」
++            两块被其取代，模型候选级联与档位门控同 session-config-bar 口径。 */}
++        <MemberConfigFields
++          engine={provider}
++          value={{ llmProviderId, model, thinkingLevel, agentProfileId }}
++          onChange={(next) => {
++            setLlmProviderId(next.llmProviderId);
++            setModel(next.model);
++            setThinkingLevel(next.thinkingLevel);
++            setAgentProfileId(next.agentProfileId);
++          }}
++          memberLlmProviderId={member.llm_provider_id}
++          memberAgentProfileId={member.agent_profile_id}
++        />
+         <div className="flex flex-col gap-1">
+           <span className="text-xs font-medium text-muted-foreground">机器</span>
+           <Select
+@@ -1532,20 +1529,17 @@ function AddAgentMemberModal({
+   const [workspaceId, setWorkspaceId] = useState("");
+   const [provider, setProvider] = useState("claude");
+   const [llmProviderId, setLlmProviderId] = useState("");
++  // 2026-11-02-group-member-footer-config：具体模型名与思考等级（""=默认态）。
++  const [model, setModel] = useState("");
++  const [thinkingLevel, setThinkingLevel] = useState("");
+   const [agentProfileId, setAgentProfileId] = useState("");
+   const [teamEnabled, setTeamEnabled] = useState(false);
+   const [submitAttempted, setSubmitAttempted] = useState(false);
+ 
+-  // 数据源同向导第三步：机器（useDaemonMachines 融合候选）/ 模型
+-  // （listProviders）/ 方案（useMineAgentProfiles）/ 工作区=项目关联
+-  // （listProjectWorkspaces——agent 工作区须在项目关联集内必选）。
++  // 数据源同向导第三步：机器（useDaemonMachines 融合候选）/ 工作区=项目关联
++  //（listProjectWorkspaces——agent 工作区须在项目关联集内必选）；供应商/模型/
++  // 思考等级/档案四选数据源下沉 MemberConfigFields（组件内自取）。
+   const { machineCandidates } = useDaemonMachines({ limit: 100 });
+-  const providersQ = useQuery({
+-    queryKey: ["llmProviders", "member-panel-add-agent"],
+-    queryFn: listProviders,
+-    staleTime: 30_000,
+-  });
+-  const { profiles } = useMineAgentProfiles();
+   const projectWorkspacesQ = useQuery({
+     queryKey: ["projectWorkspaces", "member-panel-add-agent", group.project_id],
+     queryFn: () => listProjectWorkspaces(group.project_id!),
+@@ -1569,9 +1563,12 @@ function AddAgentMemberModal({
+         label: machineOnline ? alias : `${alias}（离线）`,
+         options: runtimes.map((r) => ({
+           value: r.id,
++          // FR-02：别名优先，缺失回落「机器别名 · 引擎名」，不再引擎名单独兜底。
+           label:
+             r.display_alias?.trim() ||
+-            PROVIDER_META[r.provider ?? ""]?.label ||
++            [alias, PROVIDER_META[r.provider ?? ""]?.label]
++              .filter(Boolean)
++              .join(" · ") ||
+             r.id,
+           disabled: !machineOnline || r.status !== "online",
+         })),
+@@ -1588,20 +1585,6 @@ function AddAgentMemberModal({
+       })),
+     [projectWorkspacesQ.data],
+   );
+-  const providerOptions = useMemo(() => {
+-    const base = (providersQ.data ?? []).map((p) => ({
+-      value: p.id,
+-      label: p.name,
+-    }));
+-    // 2026-10-21-provider-default-ui-hint：兜底项文案按用户默认供应商动态化
+-    //（评审 R1：与 wizard 同款，防「不指定」显式项丢失）。
+-    base.unshift({ value: "", label: noProviderLabel(providersQ.data) });
+-    return base;
+-  }, [providersQ.data]);
+-  const profileOptions = useMemo(
+-    () => profiles.map((p) => ({ value: p.id, label: p.name })),
+-    [profiles],
+-  );
+ 
+   const nameError = validateMemberDisplayName(displayName, existingNames);
+   const runtimeMissing = runtimeId == null;
+@@ -1618,6 +1601,10 @@ function AddAgentMemberModal({
+       workspace_id: workspaceId || null,
+       provider,
+       llm_provider_id: llmProviderId || null,
++      // 2026-11-02-group-member-footer-config：模型/思考等级随四选提交
++      //（""→null=未指定走兜底）。
++      model: model || null,
++      thinking_level: thinkingLevel || null,
+       agent_profile_id: agentProfileId || null,
+       team_enabled: provider === "claude" ? teamEnabled : false,
+     });
+@@ -1649,8 +1636,8 @@ function AddAgentMemberModal({
+     >
+       <div className="flex flex-col gap-3">
+         <p className="rounded-md bg-info/10 px-2.5 py-1.5 text-xs leading-5 text-info">
+-          配置六要素：机器 / 工作区 / 引擎 / 模型 / 智能体方案 / 群昵称
+-          （群内唯一，作为 @提及词）。
++          配置块：机器 / 工作区 / 引擎 / 供应商 / 模型 / 思考等级 / 档案 /
++          群昵称（群内唯一，作为 @提及词）。
+         </p>
+         {/* 成员头像（可选，quick 群成员头像自定义） */}
+         <div className="flex items-center gap-2 border-b border-border pb-2.5">
+@@ -1717,52 +1704,29 @@ function AddAgentMemberModal({
+               className="w-full"
+               value={provider}
+               onChange={(v) => {
+-                // 引擎切换重置模型（供应商仅 claude 语义）；团队能力仅 Claude。
++                // 引擎切换级联重置模型组（供应商/模型/思考等级归默认）；团队能力仅 Claude。
+                 setProvider(v);
+                 setLlmProviderId("");
++                setModel("");
++                setThinkingLevel("");
+                 if (v !== "claude") setTeamEnabled(false);
+               }}
+               options={ENGINE_OPTIONS.map((o) => ({ ...o }))}
+             />
+           </div>
+-          <div className="col-span-2 flex flex-col gap-1">
+-            <span className="text-[11px] font-medium text-muted-foreground">
+-              模型（LLM 供应商）
+-            </span>
+-            <Select
+-              id="mp-add-agent-model"
+-              aria-label="Agent 成员模型"
+-              className="w-full"
+-              placeholder={providerOptions[0]?.label ?? "不指定（本机默认）"}
+-              allowClear
+-              value={llmProviderId || undefined}
+-              onChange={(v) => setLlmProviderId(v ?? "")}
+-              disabled={provider !== "claude"}
+-              options={providerOptions}
+-            />
+-            {provider !== "claude" && (
+-              <span className="text-[11px] text-muted-foreground">
+-                Codex 引擎使用其本机模型配置，无需选择供应商
+-              </span>
+-            )}
+-          </div>
+-          <div className="col-span-2 flex flex-col gap-1">
+-            <span className="text-[11px] font-medium text-muted-foreground">
+-              智能体方案（人格 / 工具集 / 技能）
+-            </span>
+-            <Select
+-              id="mp-add-agent-profile"
+-              aria-label="Agent 成员智能体方案"
+-              className="w-full"
+-              placeholder="不指定，用默认"
+-              allowClear
+-              showSearch
+-              optionFilterProp="label"
+-              value={agentProfileId || undefined}
+-              onChange={(v) => setAgentProfileId(v ?? "")}
+-              options={[{ value: "", label: "不指定，用默认" }, ...profileOptions]}
+-            />
+-          </div>
++          {/* 2026-11-02-group-member-footer-config：四选口径（供应商/模型级联/
++              思考等级/档案）共享子组件——原「模型（LLM 供应商）」「智能体方案」
++              两块被其取代，级联/档位门控同 session-config-bar 口径。 */}
++          <MemberConfigFields
++            engine={provider}
++            value={{ llmProviderId, model, thinkingLevel, agentProfileId }}
++            onChange={(next) => {
++              setLlmProviderId(next.llmProviderId);
++              setModel(next.model);
++              setThinkingLevel(next.thinkingLevel);
++              setAgentProfileId(next.agentProfileId);
++            }}
++          />
+           {/* 团队能力开关：仅 Claude 引擎可开（向导第三步同口径）。 */}
+           <div className="col-span-2 flex items-center gap-2 border-t border-border pt-2">
+             <Tooltip
+diff --git a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+index 1306bdaf9..9dcd4c413 100644
+--- a/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
++++ b/frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx
+@@ -645,7 +645,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+       target: { value: "小码" },
+     });
+     // 机器下拉按机器分组（machine-1 · Claude Code）
+-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
++    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
+     // 工作区=项目关联工作区必选（不再有「沿用群工作区」选项）。
+     expect(
+       closestAntdSelect(screen.getByLabelText("Agent 成员 1 工作区")),
+@@ -705,7 +705,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+       target: { value: "小码" },
+     });
+-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
++    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
+     const create = screen.getByRole("button", { name: "创建群聊" });
+     expect(create).toBeDisabled();
+     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+@@ -727,7 +727,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
+     );
+     await chooseAntdOptionByText("cgw-engine-0", "Codex");
+     await waitFor(() =>
+-      expect(antdSelectRoot("cgw-model-0")).toHaveClass(
++      expect(antdSelectRoot("cgw-member-0-model")).toHaveClass(
+         "ant-select-disabled",
+       ),
+     );
+@@ -787,7 +787,7 @@ describe("CreateGroupWizard 头像上传（quick 成员头像自定义）", () =
+     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+       target: { value: "小码" },
+     });
+-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
++    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
+     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+     await fireUpload("Agent 成员 1 头像（选择图片）");
+ 
+@@ -931,7 +931,7 @@ describe("CreateGroupWizard 团队能力开关（quick 群成员团队能力）"
+     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+       target: { value: "小码" },
+     });
+-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
++    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
+     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+   }
+ 
+@@ -1031,7 +1031,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
+     fireEvent.change(screen.getByLabelText("Agent 成员 1 群昵称"), {
+       target: { value: "小码" },
+     });
+-    await chooseAntdOptionByText("cgw-runtime-0", "Claude Code");
++    await chooseAntdOptionByText("cgw-runtime-0", "machine-1 · Claude Code");
+     await chooseAntdOptionByText("cgw-card-ws-0", "主工作区");
+   }
+ 
+@@ -1044,7 +1044,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
+     expect(warn.className).toContain("text-warning");
+ 
+     // 选中 GLM 供应商 → 警示条消失（已选不显示）。
+-    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
++    await chooseAntdOptionByText("cgw-member-0-provider", "GLM 供应商");
+     await waitFor(() =>
+       expect(screen.queryByTestId("agent-model-warning")).toBeNull(),
+     );
+@@ -1093,7 +1093,7 @@ describe("CreateGroupWizard 模型预检（quick 群 P1 llm_provider 预检）",
+   it("建群成功响应无 warnings → 不弹 warning（成功提示照常）", async () => {
+     await setupCardForModel();
+     // 模型已选 → 卡片警示条不显示。
+-    await chooseAntdOptionByText("cgw-model-0", "GLM 供应商");
++    await chooseAntdOptionByText("cgw-member-0-provider", "GLM 供应商");
+ 
+     fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+     await waitFor(() => expect(mocks.notify.success).toHaveBeenCalledTimes(1));
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 77f35b541..d41467b57 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -19139,6 +19139,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19203,12 +19207,22 @@ export interface components {
+             provider: string;
+             /**
+              * Llm Provider Id
+-             * @description 模型（LLM 供应商）
++             * @description 供应商（LLM 供应商）
+              */
+             llm_provider_id?: string | null;
++            /**
++             * Model
++             * @description 具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置
++             */
++            model?: string | null;
++            /**
++             * Thinking Level
++             * @description 思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认
++             */
++            thinking_level?: string | null;
+             /**
+              * Agent Profile Id
+-             * @description 智能体方案（AgentProfile）
++             * @description 档案（AgentProfile，人格/工具集/技能）
+              */
+             agent_profile_id?: string | null;
+             /**
+@@ -19257,6 +19271,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19337,6 +19355,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19422,6 +19444,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Team Enabled */
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 77f35b541..d41467b57 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -19139,6 +19139,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19203,12 +19207,22 @@ export interface components {
+             provider: string;
+             /**
+              * Llm Provider Id
+-             * @description 模型（LLM 供应商）
++             * @description 供应商（LLM 供应商）
+              */
+             llm_provider_id?: string | null;
++            /**
++             * Model
++             * @description 具体模型名（如 deepseek-v4.1-flash）；None=跟随供应商配置
++             */
++            model?: string | null;
++            /**
++             * Thinking Level
++             * @description 思考等级（七档词表 off/minimal/low/medium/high/xhigh/max）；None=引擎默认
++             */
++            thinking_level?: string | null;
+             /**
+              * Agent Profile Id
+-             * @description 智能体方案（AgentProfile）
++             * @description 档案（AgentProfile，人格/工具集/技能）
+              */
+             agent_profile_id?: string | null;
+             /**
+@@ -19257,6 +19271,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19337,6 +19355,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /**
+@@ -19422,6 +19444,10 @@ export interface components {
+             provider?: string | null;
+             /** Llm Provider Id */
+             llm_provider_id?: string | null;
++            /** Model */
++            model?: string | null;
++            /** Thinking Level */
++            thinking_level?: string | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Team Enabled */

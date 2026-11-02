@@ -59,3 +59,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-29-engine-live-perception | 2026-10-29-engine-live-perception
 - 2026-10-30-task-resume-revive-notify-retry | 子代理续唤复活终态任务行+上报502重试
 - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
+- 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径

@@ -2631,3 +2631,11 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
 理由：答：最大风险是保留旧 `lastActiveAt` 后，显式启用 idle 回收（`SESSION_IDLE_TIMEOUT_SEC>0`）的部署会把刚恢复的会话立即回收——以 `restoredAt` 起算空闲时长封闭该路径（boot 恢复路径顺带修复既有同形态隐患）；默认关闭形态零影响。次风险：record-less 兜底 `Date.now()` 在「跨机移交全量 reopen」的罕见形态下仍可顶闸——接受（规模受 backend 24h GC 约束；彻底封死需协议加 last_active_at 字段，本期不做，留作后续升级位：daemon 已按 payload 显式值优先实现，backend 未来补发即生效，零 daemon 改动）。 放弃的方案：① 改闸计数口径（如排除「恢复后从未 inject」的会话）——需新增跨路径状态位且改动防风暴闸本体，风险面大于收益；改时间戳源头一处即闭环。② backend 全量恢复改分批/限速下发——治标不治本（30 分钟窗口仍在，只是推迟），且改动 backend 调度节奏牵连重连收敛时序。③ 用 `turnCount===0` 判恢复态——新会话首轮未完成前同为 0，误伤新建会话判据，弃。
+
+## D-unmapped-328@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-11-02-group-member-footer-config
+原编号：D-001@v1
+锚点：未记录
+最近确认：2ef4ea0460957804dcaca9fc0659a31e5dcf96a8
+理由：答：最大风险是 config_snapshot「model」键语义切换的兼容面——现值为供应商名（错位），改存真实模型名后，前端 chips 与 multimodal gate（shadow.py:832）消费口径随之归正，但若有未盘点消费方按「供应商名」解析该键会读错。缓解：盘点 config_snapshot.model 全部消费点（前端 chips、shadow gate）随本变更一并切换；daemon 侧不消费该键（模型走 lease metadata）。次风险：thinking_level 引擎门控口径——pi/codex 的档位支持差异照 session-config-bar 既有 caps 判定复用，不另造词表。放弃的方案：①model/thinking_level 存 config_snapshot JSON 而非独立列——快照定位是展示冗余（组装自关联行），源数据入 JSON 会延续「快照当真值」的错位（本次正是要修它）；②整体替换三表面为 session-config-bar 复用——该组件绑会话 inject 暂存语义（running/ended/暂存态），成员表单是静态配置提交，硬套会引入无关状态面。

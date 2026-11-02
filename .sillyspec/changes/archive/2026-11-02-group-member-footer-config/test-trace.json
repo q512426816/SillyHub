@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-group-member-footer-config",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-02-group-member-footer-config:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx「成员配置块渲染供应商/模型/思考等级/档案四选并级联」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-group-member-footer-config"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-02-group-member-footer-config:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx「机器下拉无别名时显示主机名不回落引擎名」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-group-member-footer-config"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-02-group-member-footer-config:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_group_member_model_thinking.py「成员模型与思考等级存储及影子派发透传」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-group-member-footer-config"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-02-group-member-footer-config:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_group_member_model_thinking.py「回归面」",
+        "frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx「提交payload」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-02-group-member-footer-config"
+    }
+  ]
+}

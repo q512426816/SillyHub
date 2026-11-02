@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-02-group-member-footer-config",
+  "reviewer": "inline-self（子代理通道使用限额中断，主会话按任务书降级条款代行，如实标注）",
+  "verdict": "PASS",
+  "reviewedAgainst": "2ef4ea0460957804dcaca9fc0659a31e5dcf96a8",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "thinking_level 对已建影子热切换不生效（重建/新建生效），生效时机与 model 维度不一致且 design 边界节未落字",
+      "evidence": "members.py update 段注释声明「思考等级走影子重建/新建生效（已建影子热切边界见 design 边界节）」但 design.md 边界节并无该条；实际行为：model 经 inject_session_as_service 切换轮下轮生效，thinking_level 仅改成员列+快照，已活跃影子须机器组重建（换机器/工作区/团队能力）才按新档位建 lease。语义可接受——与 team_enabled/stage「随 lease 建时定、重建生效」同族先例，且未指定态零回归；接受理由：影子热切档位需 daemon 侧 thinking-level RPC 端点接线（会话侧有、群成员影子未接），属后续增强而非本变更缺陷。",
+      "location": "backend/app/modules/daemon/group/service/members.py:476"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（成员配置仅创建/热切换写入行；影子创建事务内读行一致快照；模型组/机器组分流语义与既有六要素同源）",
+    "并发": "ok（单行 UPDATE 由 PG 行锁串行化，两键与既有六键同一 UPDATE；无新增并发面）",
+    "切换": "边界已裁决：可接受（thinking_level 已建影子热切不生效走重建——finding P3 记录；model 热切换下轮生效；机器组重建读新值无半态；存量 NULL 两列零回归——指定/未指定两态测试覆盖）",
+    "作用域": "ok（两列挂成员行群内唯一，派发参数随成员影子 lease 走；供应商模型候选按成员 llm_provider_id 解析不串台；snapshot model 键语义切换消费点已盘点=前端 chips+shadow multimodal gate 均已随变更归正）"
+  },
+  "reviewedAt": "2026-11-02T08:12:30Z"
+}
