@@ -439,3 +439,18 @@ supersedes：D-008@v1
 理由：否决。
 否决理由：会话 SSE 是会话域事件流，混入变更进度域语义膨胀；daemon 离线时前端无数据；15s 轮询对进度展示足够。
 复潮条件：用户对进度实时性提出秒级要求且接受通道语义扩展时重议。
+
+
+## D-unmapped-006@v1 : 打破 daemon 零改动 Non-Goal——session 级 overlay roots 写守卫增量（spike-02 B 裁决）
+状态：implemented
+原编号：D-011@v1
+锚点：未记录
+最近确认：3b2df3ff
+理由：选项 II（最小 daemon 增量）：_judgeWriteViaPolicyEngine 增加 per-session
+
+## D-unmapped-007@v1 : platform grant 的 pinned runtime 不经共享档案直接钉定 → 404
+状态：implemented
+原编号：D-012@v1
+锚点：未记录
+最近确认：3b2df3ff
+理由：否——共享的是智能体而非裸 runtime：authorize_pinned_runtime 的

@@ -63,3 +63,34 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：163e1065
 理由：补入。`_ensure_creator_as_owner`(`workspace/service.py:729`,line 770 写 UserWorkspaceRole 授 owner)的**所有调用方**——`create`(`:148/165/222`)与 `scan_generate`(`:609`,daemon-client 建工作区独立路径,`:669` 调用,不经 create)——commit 后都需调 invalidate_all_permissions,创建者的 all/everywhere 缓存才及时失效(否则最长 TTL 内缺新 ws 权限——权限缺失方向,非越权,但仍是错误)。plan-review 发现 scan_generate 遗漏(Design Grill X2 当时未穷尽 `_ensure_creator_as_owner` 调用方,属误判闭合,现补)。bootstrap 启动种子(auth/service.py seed_*)免失效(进程冷启无缓存)。
+
+
+## D-unmapped-002@v1 : 平台共享智能体绑定的守护进程取管理员自己名下
+状态：implemented
+原编号：D-003@v1
+锚点：未记录
+最近确认：3b2df3ff
+理由：仅平台管理员自己名下的在线 daemon runtime。依据：避免引入「管理员
+
+## D-unmapped-003@v2 : 平台共享智能体会话——源码只读 + 指定目录可写
+状态：implemented
+原编号：D-002@v2
+锚点：未记录
+最近确认：3b2df3ff
+理由：用户实答（重问轮）：「允许某个目录下写操作，可以生成点文档原型图
+supersedes：D-002@v1
+
+## D-unmapped-004@v2 : 共享机器/智能体由用户在会话中显式选择
+状态：implemented
+原编号：D-004@v2
+锚点：未记录
+最近确认：3b2df3ff
+理由：用户实答（重问轮）：「会话选择共享的机器和智能体呀，用户自己选」
+supersedes：D-004@v1
+
+## D-unmapped-005@v1 : 实现方案选 B——统一授权表 daemon_runtime_grants
+状态：implemented
+原编号：D-006@v1
+锚点：未记录
+最近确认：3b2df3ff
+理由：用户选定方案 B：新建 daemon_runtime_grants 统一授权表，工作区共享与
