@@ -4808,6 +4808,57 @@ export class Daemon {
     }
   }
 
+  /**
+   * 2026-11-04-turn-activity-watchdog：轮活动看门狗触发的失败回报。
+   *
+   * SessionManager 活动看门狗到点（running 轮超窗无事件/心跳——引擎 turn 疑似
+   * 中途挂死，腾讯云生产会话 414bc7d5 实证形态）且已 best-effort interrupt +
+   * 重置会话态后经 deps.onTurnActivityTimeout 到达本方法。用 state 的
+   * leaseId/claimToken 经 notifyRunResult 把该 run 收敛 failed（status=
+   * 'turn_activity_timeout' + is_error=true → backend close_interactive_run 落
+   * error_code=interactive_failed + result_summary 作可读原因，SSE 终态随之到达
+   * 前端并解锁输入框、派发排队消息）。
+   *
+   * 边界：session-manager / state 缺失（终态清理后迟到触发）→ warn no-op；
+   * notifyRunResult 网络/HTTP 失败 → warn 不重试（与 onTurnStartTimeout 同款
+   * 收敛姿势。残余风险：backend running run 无独立超时兜底——该形态要求 REST
+   * 持续失败而 WS 存活，概率极低；WS 亦断时 600s offline sweep 兜底）。
+   */
+  async onTurnActivityTimeout(sessionId: string, runId: string): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('on_turn_activity_timeout_no_manager', { session_id: sessionId });
+      return;
+    }
+    const state = this._sessionManager.get(sessionId);
+    if (!state) {
+      this._logger.warn('on_turn_activity_timeout_session_not_found', {
+        session_id: sessionId,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(state.leaseId, state.claimToken, runId, {
+        status: 'turn_activity_timeout',
+        is_error: true,
+        result_summary:
+          '本轮执行长时间无任何进展（引擎疑似挂死），已自动打断并收敛为失败。' +
+          '请重新发送消息即可继续',
+      });
+      this._logger.info('turn_activity_timeout_reported', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+      });
+    } catch (e) {
+      this._logger.warn('turn_activity_timeout_report_failed', {
+        session_id: sessionId,
+        run_id: runId,
+        lease_id: state.leaseId,
+        error: e,
+      });
+    }
+  }
+
 
   /**
    * 桥接：增量上报 agent 执行消息（流式）。

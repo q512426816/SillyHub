@@ -885,6 +885,12 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 日志，backend 侧由 pending run 启动超时清扫兜底）。
       onTurnStartTimeout: (sessionId, runId) =>
         daemon.onTurnStartTimeout(sessionId, runId),
+      // 2026-11-04-turn-activity-watchdog：轮活动看门狗触发 → daemon 桥
+      // notifyRunResult 收敛该 run（session-manager 已 interrupt + 重置会话态；
+      // 回报失败仅日志，backend 侧 running run 无独立兜底——与启动看门狗同款
+      // warn 边界，详见 daemon.onTurnActivityTimeout 注释）。
+      onTurnActivityTimeout: (sessionId, runId) =>
+        daemon.onTurnActivityTimeout(sessionId, runId),
       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
         void (async () => {
           try {

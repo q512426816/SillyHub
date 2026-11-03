@@ -73,6 +73,9 @@ export async function onResult(
   }
   // 2026-10-21-daemon-zombie-turn FR-01：result 到达 = 轮确实启动过，撤防看门狗。
   mgr._disarmTurnStartWatchdog(state.sessionId);
+  // 2026-11-04-turn-activity-watchdog：轮边界已落，撤防活动看门狗（下一轮由
+  // 下一次 inject 重新布防；排队消息的 SDK 拉取亦经 inject 派发路径）。
+  mgr._disarmTurnActivityWatchdog(state.sessionId);
   // 先切换 status→active + 清空 currentRunId（turn 边界已落，spike D4），
   // 再 await onTurnResult。这样即便调用方同步触发 onResult（fire-and-forget），
   // 也能在 onTurnResult 回调内读到稳定的 active 状态；且避免 onTurnResult 抛错时
@@ -296,6 +299,13 @@ export async function onMessage(
   // 刷新 stale 判定基准（lastTurnEventAt），并登记当前 run 为「已启动」。
   state.lastTurnEventAt = Date.now();
   if (state.currentRunId) rememberObservedRun(state, state.currentRunId);
+  // 2026-11-04-turn-activity-watchdog：envelope = 轮内活动证据，续防活动看门狗
+  // （重挂窗口）。仅 running 态续防：轮结束后的后台任务锚点事件（currentRunId
+  // 保留但 status=active）不给已收口轮续命；触发守卫本会拦，此处显式判省 stray
+  // timer。粒度取舍对齐上方启动看门狗撤防注释：后台任务事件也算活动，宽面续防。
+  if (state.status === 'running' && state.currentRunId) {
+    mgr._refreshTurnActivityWatchdog(state.sessionId, state.currentRunId);
+  }
   const events = Array.isArray(envelope?.events) ? envelope.events : [];
   // 对账表 #4 前置判定：本 envelope 是否含 Task/Agent tool_use 事件——归一化器把
   // 同一 assistant message 的 tool_use 派生会话信号（agent_task_status running）

@@ -215,10 +215,12 @@ import {
 import {
   armTurnStartWatchdog,
   disarmTurnStartWatchdog,
+  disarmTurnActivityWatchdog,
   downloadAttachmentWithTimeout,
   getPendingInjectCount,
   inject,
   interrupt,
+  refreshTurnActivityWatchdog,
   interruptInternal,
   refreshClaimToken,
   resolvePlanResponse,
@@ -429,6 +431,17 @@ export class SessionManager {
    * deps.onTurnStartTimeout 回报该 run 失败。方法体在 turn-control.ts 尾部簇。
    */
   private readonly _turnStartWatchdogs = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; runId: string }
+  >();
+
+  /**
+   * 2026-11-04-turn-activity-watchdog：轮活动看门狗（sessionId → timer + 布防轮
+   * runId）。running 期间任意轮事件/心跳续防；超窗静默触发（interrupt 软收敛 +
+   * 复位会话态 + 经 deps.onTurnActivityTimeout 回报该 run 失败）。方法体在
+   * turn-control.ts 尾部簇。
+   */
+  private readonly _turnActivityWatchdogs = new Map<
     string,
     { timer: ReturnType<typeof setTimeout>; runId: string }
   >();
@@ -1393,6 +1406,12 @@ export class SessionManager {
       if (!isAuthoritative()) return;
       const runId = state.currentRunId;
       if (!runId) return;
+      // 2026-11-04-turn-activity-watchdog：心跳 = 引擎活着的最强证据（生成期
+      // input_json_delta/token_usage），续防活动看门狗。仅 running 态：触发守卫
+      // 本会拦非 running，此处显式判省 stray timer。
+      if (state.status === 'running') {
+        this._refreshTurnActivityWatchdog(state.sessionId, runId);
+      }
       try {
         void Promise.resolve(
           this.deps.onTurnMessage(state.sessionId, runId, {
@@ -1582,6 +1601,18 @@ export class SessionManager {
   /** 撤防看门狗（轮事件/会话终态/stop 调用；幂等）。 */
   private _disarmTurnStartWatchdog(sessionId: string): void {
     return disarmTurnStartWatchdog(this._core(), sessionId);
+  }
+
+  // ── 2026-11-04-turn-activity-watchdog：轮活动看门狗（方法体在 turn-control.ts）──
+
+  /** 布防/续防看门狗（inject/轮事件/心跳到达调用；窗口 0=显式关闭 no-op）。 */
+  private _refreshTurnActivityWatchdog(sessionId: string, runId: string): void {
+    return refreshTurnActivityWatchdog(this._core(), sessionId, runId);
+  }
+
+  /** 撤防看门狗（轮 result/会话终态/stale-reset/stop 调用；幂等）。 */
+  private _disarmTurnActivityWatchdog(sessionId: string): void {
+    return disarmTurnActivityWatchdog(this._core(), sessionId);
   }
 
   /**

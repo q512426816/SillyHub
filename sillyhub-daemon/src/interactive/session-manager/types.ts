@@ -588,6 +588,11 @@ export interface SessionManagerCore {
     string,
     { timer: ReturnType<typeof setTimeout>; runId: string }
   >;
+  /** 2026-11-04-turn-activity-watchdog：轮活动看门狗（sessionId → timer + 布防轮 runId）。 */
+  readonly _turnActivityWatchdogs: Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; runId: string }
+  >;
   /** 2026-10-25-trajectory-source-model task-03：配置面请求头快照缓存（变更检测基线）。 */
   readonly _headerSnapshotBySession: Map<string, SessionHeaderSnapshot>;
   /** 2026-10-25-trajectory-source-model task-04：无 runId 采集的待上报快照（inject 补发）。 */
@@ -601,6 +606,10 @@ export interface SessionManagerCore {
   _armTurnStartWatchdog(sessionId: string, runId: string): void;
   /** turn-control.ts（同上，撤防） */
   _disarmTurnStartWatchdog(sessionId: string): void;
+  /** turn-control.ts（2026-11-04-turn-activity-watchdog：轮活动看门狗布防/续防） */
+  _refreshTurnActivityWatchdog(sessionId: string, runId: string): void;
+  /** turn-control.ts（同上，撤防） */
+  _disarmTurnActivityWatchdog(sessionId: string): void;
   /** facade 类内保留（create/restore/reload 编排） */
   _runConsume(state: SessionState): Promise<void>;
   /** persistence.ts */

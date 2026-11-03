@@ -643,6 +643,17 @@ export interface SessionManagerDeps {
    */
   onTurnStartTimeout?: (sessionId: string, runId: string) => void | Promise<void>;
   /**
+   * 2026-11-04-turn-activity-watchdog：轮活动看门狗触发回调。
+   *
+   * running 轮超窗（默认 30min，env SILLYHUB_TURN_ACTIVITY_WATCHDOG_MS 可调，
+   * 0=关闭）无任何轮事件/心跳时，session-manager 已 best-effort interrupt +
+   * 重置会话态（active + staleRunResetAt 写通道宽限），经本回调由 daemon 桥
+   * notifyRunResult 把该 run 收敛 failed（backend close_interactive_run 既有
+   * 路径 → 广播 turn_completed → 派发排队消息）。可选：未注入时仅收敛本地态
+   * 不上报，测试 mock 零影响（对齐 onTurnStartTimeout 的 additive-optional 先例）。
+   */
+  onTurnActivityTimeout?: (sessionId: string, runId: string) => void | Promise<void>;
+  /**
    * task-10（§4.3）：元数据持久化端口。
    *
    * 可选（未注入时 SessionManager 不落盘，保持 task-04 内存态行为向后兼容；

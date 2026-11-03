@@ -250,6 +250,9 @@ export async function inject(
     state.staleRunResetAt = Date.now();
     // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
     mgr._pendingInjectCount.delete(sessionId);
+    // 2026-11-04-turn-activity-watchdog：stale 翻转 = status 离开 running，撤防
+    // （下方本条 inject 会按新 run 重新布防）。
+    disarmTurnActivityWatchdog(mgr, sessionId);
   }
   // 同 runId 注入恒按「追加输入」处理：即使此前 stale 翻转把 status 翻成 active，
   // 也不得走首轮启动路径（否则会给活轮重新布防看门狗）。
@@ -391,6 +394,12 @@ export async function inject(
   // （refreshClaimToken 先于 sessionManager.inject），上报链畅通。常规轮 pending
   // 为空 no-op（create/reload 采集时有 runId 已直发）。
   mgr._flushPendingSessionHeader(sessionId, runId);
+
+  // 2026-11-04-turn-activity-watchdog：inject = 活动点，布防/续防（换防 keyed by
+  // 本 runId）。首轮路径与排队路径统一在此布防：排队 inject 虽然轮未启动，但
+  // currentRunId 已切本 run，超窗回报对象正确；steering 同 runId 注入 = 刷新
+  // 窗口（用户输入也是活跃信号）。窗口 0（显式关闭）内部 no-op。
+  refreshTurnActivityWatchdog(mgr, sessionId, runId);
 
   if (wasRunningBeforeInject) {
     // 本条 inject 排在前一未 result turn 之后（spike S1 QUEUED 语义）。
@@ -669,6 +678,125 @@ async function fireTurnStartWatchdog(
   );
   mgr._scheduleFlush();
   const cb = mgr.deps.onTurnStartTimeout;
+  if (typeof cb === 'function') {
+    await cb(sessionId, runId);
+  }
+}
+
+// ── 2026-11-04-turn-activity-watchdog：轮活动看门狗 ─────────────────────────
+//
+// 根因（腾讯云生产会话 414bc7d5 实证 + 2026-10-21 宿主冻结/2026-10-26 假活同族）：
+// 引擎 turn 中途挂死（已产生过事件后引擎僵死/宿主冻结吞 result）→ daemon 永停
+// running、backend run 永停 running（sweep 档4 只管 pending 不敢动 running）→
+// 会话后续消息全排队、满 5 条 409，永久无法继续发消息。启动看门狗（上方）只布防
+// 「首轮零事件」形态；本看门狗补「轮中途静默」形态：running 期间任意轮事件
+// （events.ts onMessage）/轮内心跳（onHeartbeat）续防，超窗静默即触发。
+//
+// 误杀防护（2026-06-24「不加 turn 超时兜底」否决的复潮缓解，decisions D-001）：
+// 测「无活动时长」非「轮总时长」——生成期恒有 input_json_delta/token_usage 心跳
+// 续防，静默只剩工具执行；默认窗 30min 远大于常规工具静默期；env 0 可关；触发走
+// interrupt 软收敛（引擎若活着可经 abort 收尾正常吐 result）非硬杀。
+
+/** 活动看门狗默认窗口（ms）。静默工具执行（测试/构建套件）常规在分钟级，
+ * 30min 给足余量；复现/调参用 env 覆写。 */
+export const DEFAULT_TURN_ACTIVITY_WATCHDOG_MS = 30 * 60_000;
+
+/**
+ * 读取活动看门狗窗口（env SILLYHUB_TURN_ACTIVITY_WATCHDOG_MS）。
+ * 与启动看门狗 env 解析的差异：`0` 显式关闭（长静默工具作业的仓主逃生口，
+ * 对齐 config sillyspec_update_interval_sec 0=关闭惯例）；缺省/空/非法/负数
+ * 回落默认。逐次读取便于测试覆写。
+ */
+export function turnActivityWatchdogMs(): number {
+  const raw = process.env.SILLYHUB_TURN_ACTIVITY_WATCHDOG_MS;
+  if (raw === undefined || raw === '') return DEFAULT_TURN_ACTIVITY_WATCHDOG_MS;
+  const v = Number.parseInt(raw, 10);
+  if (!Number.isFinite(v) || v < 0) return DEFAULT_TURN_ACTIVITY_WATCHDOG_MS;
+  return v;
+}
+
+/**
+ * 布防/续防（换防 = 清旧 timer 挂新，keyed by runId——同会话任何活动点重挂窗口）。
+ * 窗口 0（显式关闭）no-op。timer unref 不阻塞 daemon 退出。
+ * 触发时的假活保护见 fireTurnActivityWatchdog（status/currentRunId 双守卫）。
+ */
+export function refreshTurnActivityWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  runId: string,
+): void {
+  const windowMs = turnActivityWatchdogMs();
+  if (windowMs <= 0) return;
+  disarmTurnActivityWatchdog(mgr, sessionId);
+  const timer = setTimeout(() => {
+    mgr._turnActivityWatchdogs.delete(sessionId);
+    void fireTurnActivityWatchdog(mgr, sessionId, runId).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[session-manager] turn activity watchdog fire failed',
+        sessionId,
+        runId,
+        err,
+      );
+    });
+  }, windowMs);
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  mgr._turnActivityWatchdogs.set(sessionId, { timer, runId });
+}
+
+/** 撤防（幂等）：轮 result / 会话终态 / stale-reset 翻 active / stop 时调用。 */
+export function disarmTurnActivityWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+): void {
+  const w = mgr._turnActivityWatchdogs.get(sessionId);
+  if (w) {
+    clearTimeout(w.timer);
+    mgr._turnActivityWatchdogs.delete(sessionId);
+  }
+}
+
+/**
+ * 看门狗触发：会话态仍停留在布防轮（status=running & currentRunId 未变）才动作
+ * ——期间 result 已收（撤防）/新 inject 已切 runId（换防）则静默跳过；首轮启动
+ * 看门狗先行触发（status 已复位 active）后本守卫同样拦下，不重复回报。
+ *
+ * 动作（对齐启动看门狗姿势 + inject stale-reset 的写通道宽限）：
+ * 1. best-effort interrupt（活着但卡住的引擎给一次 abort 收敛机会；失败/假死
+ *    no-op 返回 false 静默）——必须在状态复位前调（interrupt 要求 running）；
+ * 2. status→active + staleRunResetAt 记录（假阳性下「仍活着但安静」的长轮写类
+ *    工具在宽限窗内放行，见 _writeChannelGuardDeny）；
+ * 3. pendingInjectCount 清零（旧 turn 的排队计数已无意义；backend 侧排队消息
+ *    由 run 终态化后的 dispatch_next_queued_message 派发，不归本层管）；
+ * 4. currentRunId 有意保留（迟到 result 幂等归属锚，同启动看门狗 P2 缓解）；
+ * 5. 经 deps.onTurnActivityTimeout（可选）由 daemon 桥 notifyRunResult 收敛该
+ *    run（backend close_interactive_run → 广播 turn_completed 解锁输入框 →
+ *    自动派发排队消息）。
+ */
+async function fireTurnActivityWatchdog(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  runId: string,
+): Promise<void> {
+  const state = mgr._store.get(sessionId);
+  if (!state) return;
+  if (state.status !== 'running' || state.currentRunId !== runId) return;
+  await interrupt(mgr, sessionId).catch(() => false);
+  state.status = 'active';
+  state.lastActiveAt = Date.now();
+  state.staleRunResetAt = Date.now();
+  mgr._pendingInjectCount.delete(sessionId);
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[session-manager] turn activity watchdog fired: no turn events or ' +
+      'heartbeats within window (engine turn likely hung). Interrupt sent ' +
+      'best-effort; session state reset to active; run will be reported failed.',
+    { sessionId, runId, windowMs: turnActivityWatchdogMs() },
+  );
+  mgr._scheduleFlush();
+  const cb = mgr.deps.onTurnActivityTimeout;
   if (typeof cb === 'function') {
     await cb(sessionId, runId);
   }
