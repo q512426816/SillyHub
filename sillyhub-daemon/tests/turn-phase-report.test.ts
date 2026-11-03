@@ -248,11 +248,14 @@ function makeLightMgr(deps: Record<string, unknown>, state?: SessionState) {
     _drivers: {},
     _resolversBySession: new Map<string, unknown>(),
     _turnStartWatchdogs: new Map<string, unknown>(),
+    _turnActivityWatchdogs: new Map<string, unknown>(),
     _pendingInjectCount: new Map<string, number>(),
     _scheduleFlush: vi.fn(),
     _flushPendingSessionHeader: vi.fn(),
     _armTurnStartWatchdog: vi.fn(),
     _disarmTurnStartWatchdog: vi.fn(),
+    _refreshTurnActivityWatchdog: vi.fn(),
+    _disarmTurnActivityWatchdog: vi.fn(),
     _liftSessionUsage: vi.fn(),
   } as never;
 }
