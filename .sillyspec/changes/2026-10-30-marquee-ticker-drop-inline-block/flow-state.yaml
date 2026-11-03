@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页对话tab底部实时进度跑马灯 ticker 元素（data-testid=marquee-ticker）class 去掉 inline-block，其余 class 不动。
+
+
+  成功标准：
+
+  - turn-live-marquee.tsx 中 marquee-ticker span 的 className 不再包含 inline-block，其余 class（sh-live-marquee-ticker
+  whitespace-nowrap font-medium text-foreground）保持不变
+
+  - frontend 现有 turn-live-marquee 相关测试不回归
+autopilot: false
+prestage_ack: false
+baseline_commit: 3584d570b17411a8488ac888d7723bd3106203c6
+updatedAt: '2026-10-30T00:48:57.066Z'
+cross_baselines:
+  sillyspec: 05901a963032f87e9c0c0f40b6d94810413730c1
+baseline_sha256: a72e10768a53073cd55d92907cdc887a5eee879c7f06f1476e208b76c9fd5426
+spec_approved: false
+spec_rejected: true
+spec_rejected_at: '2026-10-30T00:48:57.063Z'
+spec_rejected_reason: 用户澄清需求方向：不是删 inline-block，而是等待状态条改为慢速无缝循环滚动（双份文本回卷），属重新设计——旧需求作废，另立新变更
+spec_rejected_by: anon@DESKTOP-HJ0AM09
+spec_rejected_superseded_at: null
+
