@@ -1,0 +1,1160 @@
+diff --git a/.sillyspec/docs/backend/modules/knowledge.changelog.md b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+index 5fe5f5fa0..9dc29beb2 100644
+--- a/.sillyspec/docs/backend/modules/knowledge.changelog.md
++++ b/.sillyspec/docs/backend/modules/knowledge.changelog.md
+@@ -8,3 +8,4 @@
+ - 2026-11-02-stale-test-sync-contract | 契约演进后测试欠同步修复
+ - 2026-11-02-embed-batch-chunk | embedding 全量批分批化根治 cgroup OOM
+ - 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正
++- 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 42a121d85..33d10599e 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -141,3 +141,4 @@
+ - 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建
+ - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
+ - 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正
++- 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
+diff --git a/backend/app/modules/knowledge/distill.py b/backend/app/modules/knowledge/distill.py
+index 49cb518e8..2667e81ff 100644
+--- a/backend/app/modules/knowledge/distill.py
++++ b/backend/app/modules/knowledge/distill.py
+@@ -166,6 +166,13 @@ def build_distill_prompt(
+       ``--spec-root`` 被其静默忽略回退 cwd）；change/quick 的来源读取路径同指
+       该树（platform-managed 下 cwd 无 .sillyspec）。``None`` 时回落旧行文
+       （无工作区上下文的直调/测试，零回归）。
++      2026-11-03 加固：文样改为「落盘前 ls 核验、悬空回落 cwd .sillyspec 并
++      留痕偏差」，删除失实的「会话结束自动上行」承诺；propose 命令换单引号
++      body + ``--from`` 来源标记；新增公共回流确认段（显式 platform sync）。
++      2026-11-03 条目质量加固（distill-entry-quality）：提炼要求第 2 条字段
++      清单扩展「适用条件与反例」并附编辑实录句（以实际落盘差异为准，不只写
++      修改意图），新增第 3 条断言实证纪律（会话事实支撑/超实证承诺收窄/禁推
++      测性断言），查重条目顺延为第 4 条。
+ 
+     quick-2dba0118：quick 式来源指引改为**条目级**——quicklog 是单文件多条目
+     形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），不再指 ``<ql>.md`` 独立文件
+@@ -173,7 +180,7 @@ def build_distill_prompt(
+     """
+     if source_type == "session":
+         if for_resume:
+-            source_line = "来源即本会话本身的完整对话记录（你是原会话的续接，已持有全部上下文），请回顾本会话全过程进行提炼。"
++            source_line = "来源即本会话本身的完整对话记录（你是原会话的续接，已持有全部上下文），请回顾本会话全过程进行提炼。若上下文已被摘要压缩，基于可得内容提炼，不臆测丢失细节。"
+         else:
+             if not export_name:
+                 raise ValueError(
+@@ -211,32 +218,49 @@ def build_distill_prompt(
+         propose_cmd = (
+             'sillyspec knowledge propose --title "<条目标题>" '
+             "--category <conventions|patterns|known-issues|uncategorized> "
+-            f'--body "<Markdown 正文>" --spec-dir {spec_dir}'
++            '--from "session-distill" '
++            f"--body '<Markdown 正文>' --spec-dir {spec_dir}"
+         )
+         spec_note = (
+-            f"\n必须携带 --spec-dir {spec_dir}：该路径是平台同步的规范树"
+-            "（会话结束自动上行回流平台知识库，无需你手动同步）；不带该参数会落到"
+-            "你当前工作目录的 .sillyspec，不一定参与平台同步，产物可能无法回流。\n"
++            f"\n--spec-dir {spec_dir} 是本工作区的平台同步规范树：落盘前必须先用 ls 核验"
++            "该路径真实存在——存在则按原路径落盘；不存在（悬空引用，propose 会静默创建"
++            "无人同步的孤儿树）则改落你当前工作目录的 .sillyspec（平台同步面），并在汇报中"
++            "留痕偏差，禁止写进自建的新目录。\n"
+         )
+     else:
+         propose_cmd = (
+             'sillyspec knowledge propose --title "<条目标题>" '
+             "--category <conventions|patterns|known-issues|uncategorized> "
+-            '--body "<Markdown 正文>"'
++            '--from "session-distill" '
++            "--body '<Markdown 正文>'"
+         )
+         spec_note = ""
+     return (
+         "你是知识沉淀助手，负责把平台的记录资产提炼成可长期复用的知识条目。\n"
+         f"\n{source_line}\n"
+         "\n提炼要求：\n"
+-        "1. 只保留值得长期复用的知识：踩坑与解法、可复用模式、平台约定与契约；忽略过程性描述与一次性信息。\n"
+-        "2. 每条知识独立成条，标题概括问题本身，正文用 Markdown 写清「问题、解法、证据（文件/提交）、适用条件」。\n"
++        "1. 只保留值得长期复用的知识：踩坑与解法、可复用模式、平台约定与契约；忽略过程性"
++        "描述与一次性信息。宁缺毋滥：通常 2～5 条，确无可沉淀内容时直接汇报「本批无候选」，"
++        "不硬凑。\n"
++        "2. 每条知识独立成条，标题概括问题本身，正文用 Markdown 写清「问题、解法、证据（文件/提交）、适用条件与反例」：适用条件写明何时适用，反例写明何时不适用或不能推广到的场景，防止条目被下游当成无条件规则；记录修复或方案取舍时，以实际落盘的编辑与最终差异为准，不得只写修改意图。\n"
++        "3. 每条断言都要有会话事实支撑（文件路径、提交、命令输出或用户原话）；「支持/自动/无需」类承诺超出实证范围时收窄表述或补证据，禁止写推测性断言。\n"
++        '4. 动笔前先查重：sillyspec knowledge search --query "<关键词>"（必须用 --query 传参）；'
++        "命中相近条目时沿用其原标题重提——同题即幂等更新，不会产生重复条目。\n"
+         f"{focus_line}"
+-        "\n落盘方式（必须逐字遵守，不许改用其它写文件方式）：\n"
++        "\n落盘方式（每条都必须走 sillyspec knowledge propose 写入，禁止用其它任何写文件方式"
++        "直写知识库——会绕过 frontmatter、不被评审闭环承认；命令模板如下，参数值按条目替换）：\n"
+         "对每条提炼出的知识，执行：\n"
+         f"{propose_cmd}\n"
+         f"{spec_note}"
+-        "\n完成后简要汇报提炼出的候选知识清单即可，不要修改知识库之外的任何文件。"
++        "\npropose 传参规则：--category 只能取上述四个枚举值（CLI 不校验，笔误静默入库），"
++        "known-issues 用连字符、禁用 known_issues；--body 一律用单引号包裹（单引号内反引号、"
++        "$、双引号均为字面量，正文可安全含行内代码与路径），正文内 ASCII 单引号须转义或改写"
++        "避开，禁止用双引号包裹 --body——正文含反引号或 $ 时会被 shell 展开，静默损坏落库。\n"
++        "\n回流确认（必须执行）：propose 全部完成后显式跑一次 sillyspec platform sync"
++        "（不带 --change）。已连接平台时按回执留痕回流结果；未连接平台时 sync 会静默跳过，"
++        "必须在汇报中留痕「未回流」。\n"
++        "\n完成后简要汇报：提炼出的候选知识清单（标题+分类）、propose 落盘点（原路径或偏差"
++        "说明）、platform sync 回执结果。不要修改知识库之外的任何文件，也不要做 git 提交。"
+     )
+ 
+ 
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index 3b58a2aae..9c96eea3e 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -548,6 +548,7 @@ async def search_knowledge(
+         results=filtered[:limit],
+         model_ready=out["model_ready"],
+         reason=out["reason"],
++        index_sync=out.get("index_sync"),
+     )
+ 
+ 
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index 9f2acea0a..21163a24c 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -670,9 +670,14 @@ class KnowledgeSearchResultItem(BaseModel):
+ 
+ class KnowledgeSearchOut(BaseModel):
+     """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
+-    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"""
++    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。index_sync 为索引新鲜度
++    信号（2026-11-03-knowledge-search-async-refresh / D-004）：fresh=存量索引即最新；
++    scheduled=语料失配已调度后台同步（结果基于存量索引）；building=无索引后台首建中
++    （当前词面降级）；None=禁建库无索引（reason=index_not_built 已表意）或早期返回——
++    可选字段缺省 None，旧客户端零感知。"""
+ 
+     ok: bool = True
+     results: list[KnowledgeSearchResultItem]
+     model_ready: bool = True
+     reason: str | None = None
++    index_sync: str | None = None
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+index 94398cc66..16f5c510f 100644
+--- a/backend/app/modules/knowledge/search.py
++++ b/backend/app/modules/knowledge/search.py
+@@ -36,6 +36,7 @@ from dataclasses import dataclass
+ from datetime import UTC, datetime
+ from pathlib import Path
+ 
++import structlog
+ from sqlalchemy import (
+     JSON,
+     Column,
+@@ -61,6 +62,8 @@ from sqlmodel import Field
+ from app.models.base import BaseModel
+ from app.modules.knowledge.parser import slugify_anchor
+ 
++logger = structlog.get_logger()
++
+ # ── 持久化 ORM（change 2026-10-15-knowledge-search-pgvector / D-002@v1）──────────
+ #
+ # 向量与 chunk 元数据落 PG pgvector（embedding vector(512)），重启零重建；测试引擎为
+@@ -379,6 +382,86 @@ _EMBED_BATCH = 32
+ _LEGACY_INDEXES: dict[tuple[str, str], dict] = {}  # 兼容留位（旧内存路径已由 DB 取代）
+ 
+ 
++# ── 后台同步调度（2026-11-03-knowledge-search-async-refresh / D-001~D-005）──────
++#
++# 读路径与嵌入彻底解耦（stale-while-revalidate）：搜索只做只读判定（_sync_needed），
++# 失配/缺索引时调度进程内后台任务执行 _ensure_synced（全量/差量逻辑零改动），请求
++# 即刻返回存量索引或词面降级结果。注册表同时是 create_task 的强引用（事件循环仅持
++# 弱引用，不持会被 GC 静默吞）与在途去重判据（D-005）；失败只记日志不重试、进程
++# 重启自愈=下次搜索重触发（D-003，刻意对齐 D-backend-023 否决理由防周期空转）。
++
++_bg_sync_tasks: dict[str, asyncio.Task] = {}
++
++
++def _schedule_background_sync(
++    spec_root: Path,
++    workspace_key: str,
++    ws_id: uuid.UUID,
++    fp_now: tuple | None,
++    model_name: str,
++    embedder: object | None,
++    session_factory: object | None,
++) -> None:
++    """调度后台同步（在途即跳过；调用方不等待——读路径永不阻塞）。"""
++    existing = _bg_sync_tasks.get(workspace_key)
++    if existing is not None and not existing.done():
++        return
++    task = asyncio.create_task(
++        _bg_sync(spec_root, workspace_key, ws_id, fp_now, model_name, embedder, session_factory)
++    )
++    _bg_sync_tasks[workspace_key] = task
++
++
++async def _bg_sync(
++    spec_root: Path,
++    workspace_key: str,
++    ws_id: uuid.UUID,
++    fp_now: tuple | None,
++    model_name: str,
++    embedder: object | None,
++    session_factory: object | None,
++) -> None:
++    """后台同步主体：独立会话 + per-ws 锁内复用 _ensure_synced；失败只记日志（D-003）。"""
++    try:
++        async with await _db_session(session_factory) as session:
++            async with _get_sync_lock(workspace_key):
++                await _ensure_synced(
++                    session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
++                )
++    except Exception as exc:
++        logger.warning(
++            "knowledge_search.bg_sync_failed",
++            workspace=workspace_key,
++            error=f"{type(exc).__name__}: {exc}",
++        )
++    finally:
++        _bg_sync_tasks.pop(workspace_key, None)
++
++
++async def _sync_needed(
++    session: AsyncSession, ws_id: uuid.UUID, fp_norm: list | None, model_name: str
++) -> str:
++    """只读同步判定（读路径决策，零写零嵌入）：``missing`` / ``stale`` / ``fresh``。"""
++    state = (
++        await session.execute(
++            select(KnowledgeSearchState).where(KnowledgeSearchState.workspace_id == ws_id)
++        )
++    ).scalar_one_or_none()
++    if state is None:
++        return "missing"
++    if state.model_version != model_name or _norm_fingerprint(state.corpus_fingerprint) != fp_norm:
++        return "stale"
++    return "fresh"
++
++
++async def await_background_syncs_for_tests() -> None:
++    """测试隔离：等待全部在途后台同步结束并清空注册表（生产勿调，同 reset_index_for_tests 族）。"""
++    pending = [t for t in _bg_sync_tasks.values() if not t.done()]
++    if pending:
++        await asyncio.gather(*pending)
++    _bg_sync_tasks.clear()
++
++
+ def _get_sync_lock(workspace_key: str) -> asyncio.Lock:
+     """per-workspace asyncio.Lock（async 协程跨 await 持有安全——Grill 增量复审残留①）。"""
+     with _sync_locks_guard:
+@@ -560,6 +643,8 @@ async def _sync_delta(
+                 row.text = c.text
+                 row.start_line = c.start_line
+                 row.kind = c.kind
++                row.title = c.title
++                row.anchor = c.anchor
+                 row.content_hash = _content_hash(c.text)
+                 row.embedding = vec
+         if new_rows:
+@@ -697,7 +782,8 @@ async def _query_word_candidates(
+ 
+ 
+ def reset_index_for_tests() -> None:
+-    """测试隔离：清空进程内同步锁（生产勿调）。"""
++    """测试隔离：清空进程内同步锁与在途后台同步注册表（生产勿调）。"""
++    _bg_sync_tasks.clear()
+     with _sync_locks_guard:
+         _sync_locks.clear()
+ 
+@@ -768,40 +854,71 @@ async def search_sync(
+     session_factory: object | None = None,
+     server_build: bool = True,
+ ) -> dict:
+-    """检索：返回 ``{results, model_ready, reason}``（形态与上变更内存版逐字段一致）。
+-
+-    ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（融合分降序；
+-    去重取最高分）。embedder None → 纯词面 + ``model_ready=False``；DB 异常 →
+-    词面内存直查降级（reason 带 ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx）。
+-    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：跳过懒同步
+-    （全量/差量嵌入一律禁，索引新鲜度职责移交外部预建机器）；无 state 行的工作区词面
+-    内存直查降级，``model_ready=False + reason="index_not_built"``，首搜秒回不超时
+-    （known-issues「首搜建库地雷」根治口径）。
++    """检索：返回 ``{results, model_ready, reason, index_sync}``。
++
++    读路径零嵌入阻塞（stale-while-revalidate，2026-11-03-knowledge-search-async-refresh）：
++    只读判定 ``_sync_needed``——fresh 直查；stale 调度后台同步（``_bg_sync``）后即刻读
++    存量行（``index_sync="scheduled"``）；missing 调度后台首建并词面内存降级
++    （``index_sync="building"``）。``results`` 项 = ``{spec_path, kind, title, anchor,
++    snippet, score}``（融合分降序；去重取最高分）。embedder None → 纯词面 +
++    ``model_ready=False``；DB 异常 → 词面内存直查降级（reason 带
++    ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx；异常路径不调度）。
++    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：语义不变
++    ——不调度任何任务，无 state 行的工作区词面内存直查降级，``model_ready=False +
++    reason="index_not_built"``（此时 ``index_sync=None``，由 reason 表意）。
+     """
+     q = str(query or "").strip()
+     model_ready = embedder is not None
+     reason = None if model_ready else (embedder_error or "embedder unavailable")
+     if not q:
+-        return {"results": [], "model_ready": model_ready, "reason": reason}
++        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
+     fp_now = await asyncio.to_thread(corpus_fingerprint, spec_root)
+     if fp_now is None:
+-        return {"results": [], "model_ready": model_ready, "reason": reason}
++        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
+     try:
+         ws_id = uuid.UUID(workspace_key)
+     except (ValueError, AttributeError):
+-        return {"results": [], "model_ready": model_ready, "reason": reason}
++        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
+ 
++    index_sync: str | None = None
+     try:
+         async with await _db_session(session_factory) as session:
+             if server_build:
+-                lock = _get_sync_lock(workspace_key)
+-                async with lock:
+-                    await _ensure_synced(
+-                        session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
++                # 只读判定（零写零嵌入）——同步一律后台化，读路径永不等待嵌入（D-001/D-005）
++                sync_state = await _sync_needed(
++                    session, ws_id, _norm_fingerprint(fp_now), model_name
++                )
++                if sync_state == "missing":
++                    # 首建后台化：请求即刻词面降级（零写库），建库完成后下搜全语义（D-002）
++                    _schedule_background_sync(
++                        spec_root,
++                        workspace_key,
++                        ws_id,
++                        fp_now,
++                        model_name,
++                        embedder,
++                        session_factory,
++                    )
++                    return await _fallback_word_scan(
++                        spec_root, q, limit, model_ready, reason, index_sync="building"
+                     )
++                if sync_state == "stale":
++                    # 失配后台差量/全量同步；请求读存量行（stale-while-revalidate，D-001）
++                    _schedule_background_sync(
++                        spec_root,
++                        workspace_key,
++                        ws_id,
++                        fp_now,
++                        model_name,
++                        embedder,
++                        session_factory,
++                    )
++                    index_sync = "scheduled"
++                else:
++                    index_sync = "fresh"
+             else:
+-                # 禁建库：只读判 state——无索引工作区直接词面内存降级（不 scan 落库、
+-                # 不嵌语料、不写任何行）；有索引则跳过 sync 直查存量行（查询向量嵌入保留）。
++                # 禁建库：语义逐字不变（只读判 state——无索引工作区直接词面内存降级（不 scan
++                # 落库、不嵌语料、不写任何行、不调度任务）；有索引则直查存量行。
+                 state_row = (
+                     await session.execute(
+                         select(KnowledgeSearchState.id).where(
+@@ -813,7 +930,7 @@ async def search_sync(
+                     return await _fallback_word_scan(
+                         spec_root, q, limit, model_ready=False, reason="index_not_built"
+                     )
+-            # 查询双路（同步完成后读——不读半态）
++            # 查询双路（读存量行，不持同步锁；查询向量嵌入保留内联——单条、响应必需）
+             q_vec = None
+             if embedder is not None:
+                 q_vec = (await asyncio.to_thread(embedder.embed, [q]))[0]
+@@ -821,7 +938,7 @@ async def search_sync(
+             if q_vec is not None:
+                 vec_rows = await _query_vector_candidates(session, ws_id, q_vec, limit * 3)
+             word_rows = await _query_word_candidates(session, ws_id, q)
+-    except Exception as exc:  # DB 异常 → 词面内存直查降级（fail-soft，搜索永不 5xx）
++    except Exception as exc:  # DB 异常 → 词面内存直查降级（fail-soft，搜索永不 5xx；不调度）
+         return await _fallback_word_scan(
+             spec_root, q, limit, model_ready, f"{_DB_DEGRADED_PREFIX}{type(exc).__name__}: {exc}"
+         )
+@@ -860,7 +977,12 @@ async def search_sync(
+         }
+         for score, c in ranked[: max(1, int(limit))]
+     ]
+-    return {"results": results, "model_ready": model_ready, "reason": reason}
++    return {
++        "results": results,
++        "model_ready": model_ready,
++        "reason": reason,
++        "index_sync": index_sync,
++    }
+ 
+ 
+ def _word_score_row(query_lower: str, row: _HitRow) -> tuple[float, bool]:
+@@ -881,7 +1003,12 @@ def _word_score_row(query_lower: str, row: _HitRow) -> tuple[float, bool]:
+ 
+ 
+ async def _fallback_word_scan(
+-    spec_root: Path, q: str, limit: int, model_ready: bool, reason: str
++    spec_root: Path,
++    q: str,
++    limit: int,
++    model_ready: bool,
++    reason: str,
++    index_sync: str | None = None,
+ ) -> dict:
+     """DB 异常降级：scan_corpus + _word_score 内存直查（上变更内存实现的无向量版）。"""
+     chunks = await asyncio.to_thread(scan_corpus, spec_root)
+@@ -908,4 +1035,9 @@ async def _fallback_word_scan(
+         }
+         for word, c in ranked[: max(1, int(limit))]
+     ]
+-    return {"results": results, "model_ready": model_ready, "reason": reason}
++    return {
++        "results": results,
++        "model_ready": model_ready,
++        "reason": reason,
++        "index_sync": index_sync,
++    }
+diff --git a/backend/app/modules/knowledge/tests/test_distill.py b/backend/app/modules/knowledge/tests/test_distill.py
+index 5e7a3a2b4..725c8257d 100644
+--- a/backend/app/modules/knowledge/tests/test_distill.py
++++ b/backend/app/modules/knowledge/tests/test_distill.py
+@@ -787,7 +787,11 @@ def test_build_distill_prompt_session_fresh_requires_export_name() -> None:
+ 
+ 
+ def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
+-    """洞二回流指引：全来源（含 resume 式）propose 命令带 --spec-dir 平台同步树。"""
++    """洞二回流指引（2026-11-03 加固）：propose 命令单引号 body + --from 来源标记；
++    spec_dir 段改 ls 核验回落（删「自动上行/无需手动同步」失实表述）；全形态（含
++    spec_dir=None 旧形）含回流确认段与查重/幂等/数量指引。
++    2026-11-03 条目质量加固（distill-entry-quality）：字段扩展「适用条件与反例」+
++    编辑实录句（实际落盘差异而非修改意图）+ 断言实证纪律条目，全形态一致。"""
+     spec_dir = "~/.sillyhub/daemon/specs/ws-1"
+     fresh_session = build_distill_prompt(
+         "session", "sid-1", None, export_name="distill-source-sid-1.md", spec_dir=spec_dir
+@@ -797,16 +801,51 @@ def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
+     )
+     change = build_distill_prompt("change", "key-1", None, spec_dir=spec_dir)
+     quick = build_distill_prompt("quick", "ql-a", None, spec_dir=spec_dir)
++    legacy = build_distill_prompt("change", "key-1", None)
++    for label, prompt in (
++        ("fresh_session", fresh_session),
++        ("resume_session", resume_session),
++        ("change", change),
++        ("quick", quick),
++        ("legacy", legacy),
++    ):
++        # FR-01：命令模板单引号 body + 来源标记。
++        assert "--body '<Markdown 正文>'" in prompt, label
++        assert '--from "session-distill"' in prompt, label
++        assert '--body "' not in prompt, label  # 双引号 body 模板禁止回归
++        # FR-04：查重 --query 精确用法 + 同题幂等 + 枚举（连字符/禁下划线）+ 数量纪律。
++        assert "search --query" in prompt, label
++        assert "幂等更新" in prompt, label
++        assert "known-issues 用连字符" in prompt, label
++        assert "known_issues" in prompt, label  # 以「禁用 known_issues」警示形态出现
++        assert "宁缺毋滥" in prompt, label
++        # FR-03：回流确认段全形态存在（含未连接平台的留痕要求）。
++        assert "sillyspec platform sync" in prompt, label
++        assert "未回流" in prompt, label
++        # distill-entry-quality FR-01：字段清单扩展「适用条件与反例」+ 反例释义句。
++        assert "适用条件与反例" in prompt, label
++        assert "不能推广到的场景" in prompt, label
++        assert "无条件规则" in prompt, label
++        # distill-entry-quality FR-02：编辑实录——实际落盘差异而非修改意图。
++        assert "以实际落盘的编辑与最终差异为准" in prompt, label
++        assert "不得只写修改意图" in prompt, label
++        # distill-entry-quality FR-03：断言实证纪律（查重条目顺延不丢）。
++        assert "会话事实支撑" in prompt, label
++        assert "推测性断言" in prompt, label
+     for label, prompt in (
+         ("fresh_session", fresh_session),
+         ("resume_session", resume_session),
+         ("change", change),
+         ("quick", quick),
+     ):
++        # FR-02：spec_dir 核验回落指引；失实表述必须消失。
+         assert f"--spec-dir {spec_dir}" in prompt, label
+-        assert "上行回流" in prompt, label
++        assert "ls 核验" in prompt, label
++        assert "孤儿树" in prompt, label
++        assert "留痕偏差" in prompt, label
++        assert "自动上行" not in prompt, label
++        assert "无需你手动同步" not in prompt, label
+     # 无 spec_dir 旧形不带该参数（零回归直调路径）。
+-    legacy = build_distill_prompt("change", "key-1", None)
+     assert "--spec-dir" not in legacy
+ 
+ 
+@@ -815,6 +854,9 @@ def test_build_distill_prompt_resume_variant() -> None:
+     resume_prompt = build_distill_prompt("session", "024a9fc2", None, for_resume=True)
+     assert "本会话本身的完整对话记录" in resume_prompt
+     assert "session_id" not in resume_prompt
++    # 2026-11-03 加固：长会话上下文可能被摘要压缩——必须带兜底句（不臆测丢失细节）。
++    assert "摘要" in resume_prompt
++    assert "不臆测" in resume_prompt
+ 
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/backend/app/modules/knowledge/tests/test_knowledge_search.py b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+index c3410804b..12a7d7c4f 100644
+--- a/backend/app/modules/knowledge/tests/test_knowledge_search.py
++++ b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+@@ -14,6 +14,7 @@
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import itertools
+ import uuid
+ from collections.abc import Iterator
+@@ -22,8 +23,10 @@ from pathlib import Path
+ import pytest
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
++import app.modules.knowledge.search as search_mod
+ from app.modules.knowledge.search import (
+     Chunk,
++    await_background_syncs_for_tests,
+     chunk_markdown,
+     corpus_fingerprint,
+     reset_index_for_tests,
+@@ -263,20 +266,24 @@ async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env
+     out1 = await search_sync(
+         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+-    assert out1["model_ready"] is True
+-    calls_after_first = fake.embed_calls
+-    assert calls_after_first >= 2  # 语料构建 1 次 + query 1 次
++    assert out1["index_sync"] == "building"
++    await await_background_syncs_for_tests()
++    calls_after_build = fake.embed_calls
++    assert calls_after_build >= 1  # 语料构建（building 路径无 query 嵌入）
+     out2 = await search_sync(
+         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+-    assert fake.embed_calls == calls_after_first + 1, "文件未变仅 query embed，不重建索引"
++    assert out2["index_sync"] == "fresh"
++    assert fake.embed_calls == calls_after_build + 1, "文件未变仅 query embed，不重建索引"
+     assert out2["results"]
+-    # 语料变更 → 重建（再多一次全量 embed）
++    # 语料变更 → 后台差量（请求路径仅 query embed），drain 后完成重嵌
+     _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
+-    await search_sync(
++    out3 = await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+-    assert fake.embed_calls >= calls_after_first + 3, "文件变更后应重建索引"
++    assert out3["index_sync"] == "scheduled"
++    await await_background_syncs_for_tests()
++    assert fake.embed_calls >= calls_after_build + 3, "文件变更后应重建索引"
+ 
+ 
+ # ── 融合检索 ─────────────────────────────────────────────────────────────────
+@@ -285,6 +292,10 @@ async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env
+ async def test_search_exact_decision_id_ranks_first(tmp_path: Path, search_env) -> None:
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
+     out = await search_sync(
+         tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+@@ -317,6 +328,10 @@ async def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path, sear
+     )
+     fake = FakeEmbedder()
+     # 「会话状态」在语料中无连续子串（「会话过程」/「状态点」分离）→ 纯语义路召回
++    await search_sync(
++        tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
+     out = await search_sync(
+         tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+@@ -346,6 +361,7 @@ async def test_search_degraded_word_only_when_embedder_unavailable(
+     assert all(r["score"] <= 1.0 for r in out["results"])
+     # 词面命中：snippet 含查询词
+     assert any("会话状态点" in r["snippet"] for r in out["results"])
++    await await_background_syncs_for_tests()  # 建库任务（零向量占位）收尾，防泄漏到邻用例
+ 
+ 
+ async def test_search_empty_query_returns_empty(tmp_path: Path, search_env) -> None:
+@@ -373,6 +389,7 @@ async def test_search_snippet_window_around_match(tmp_path: Path, search_env) ->
+     assert "会话状态点" in snippet
+     # 窗口截断：snippet 显著短于整段
+     assert len(snippet) < 400
++    await await_background_syncs_for_tests()
+ 
+ 
+ async def test_search_missing_corpus_returns_empty(tmp_path: Path, search_env) -> None:
+@@ -398,6 +415,7 @@ async def test_search_unrelated_query_returns_empty_state(tmp_path: Path, search
+         session_factory=search_env[1],
+     )
+     assert out["results"] == [], "无信号查询应返回空（前端空态）"
++    await await_background_syncs_for_tests()
+ 
+ 
+ # ── 持久化 ORM 面（change 2026-10-15-knowledge-search-pgvector / task-01）────────
+@@ -485,14 +503,20 @@ async def test_search_model_version_change_triggers_full_rebuild(
+     await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "model-a", session_factory=search_env[1]
+     )
++    await await_background_syncs_for_tests()
+     embedded_a = fake.embedded_texts
+-    assert embedded_a > 0
+-    # 换模型名 → 全量重算（再嵌入全部 chunk）+ 1 次 query 嵌入
++    assert embedded_a > 0  # 全量(chunks)，building 路径无 query 嵌入
++    # 换模型名 → 后台全量重算（再嵌入全部 chunk）+ 请求路径 1 次 query 嵌入
+     out = await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
+     )
+-    assert fake.embedded_texts == embedded_a * 2  # 全量(chunks) + query，与首次同构
+-    assert out["results"]
++    assert out["index_sync"] == "scheduled"
++    await await_background_syncs_for_tests()
++    assert fake.embedded_texts == embedded_a * 2 + 1  # 全量(chunks)×2 + query×1
++    out2 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
++    )
++    assert out2["results"]
+ 
+ 
+ async def test_search_db_error_falls_back_to_word_scan(tmp_path: Path, search_env) -> None:
+@@ -529,8 +553,9 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
+     await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+     )
++    await await_background_syncs_for_tests()
+     baseline = fake.embedded_texts
+-    # 改单文件（known-issues.md 新增一段）
++    # 改单文件（known-issues.md 新增一段）→ 失配首搜仅 query 嵌入，drain 后差量重嵌
+     p = tmp_path / "knowledge" / "known-issues.md"
+     p.write_text(
+         p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
+@@ -538,9 +563,15 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
+     out = await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+     )
+-    # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
+-    assert fake.embedded_texts == baseline + 2
+-    assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
++    assert out["index_sync"] == "scheduled"
++    assert fake.embedded_texts == baseline + 1, "请求路径仅 query 嵌入"
++    await await_background_syncs_for_tests()
++    out2 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    # known-issues.md 新增 1 块（差量重嵌）+ 第二次 query 1 次
++    assert fake.embedded_texts == baseline + 3, "差量只重嵌新增块"
++    assert any(r["title"] == "新增小节" for r in out2["results"]), "新内容应可搜到"
+ 
+ 
+ async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path(
+@@ -548,8 +579,6 @@ async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_pa
+ ) -> None:
+     """updated_at 可观测性（2026-11-03-knowledge-search-hardening / FR-02）：
+     差量同步成功 → updated_at 刷新为同步时刻；指纹一致快路径零 UPDATE → 保持不变。"""
+-    import asyncio as _asyncio
+-
+     from sqlalchemy import select
+ 
+     from app.modules.knowledge.search import KnowledgeSearchState
+@@ -563,16 +592,19 @@ async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_pa
+     await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+     )
++    await await_background_syncs_for_tests()  # 首建完成（state 行落库）
+     t1 = await _state_updated_at()
+     # 改单文件 → 差量同步（指纹变化必触发 state UPDATE）
+     p = tmp_path / "knowledge" / "known-issues.md"
+     p.write_text(
+         p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
+     )
+-    await _asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
+-    await search_sync(
++    await asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
++    out = await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+     )
++    assert out["index_sync"] == "scheduled"
++    await await_background_syncs_for_tests()  # 后台差量提交 state UPDATE
+     t2 = await _state_updated_at()
+     assert t2 is not None and t2 > t1, "差量同步成功后 updated_at 必须刷新"
+     # 快路径：语料未变再搜 → 无 UPDATE → updated_at 不变（未发生同步的真信号）
+@@ -627,13 +659,17 @@ async def test_search_server_build_off_with_index_serves_without_resync(
+     """禁建库 + 有索引：跳过懒同步（语料变更也不差量重嵌），直接查存量行。"""
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    # 先以默认开关建好索引
++    # 先以默认开关建好索引（首搜 building 调度，drain 后完成）
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
+     await search_sync(
+         tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+     calls_after_build = fake.embed_calls
+     assert calls_after_build >= 2
+-    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌
++    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌、不得调度
+     _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
+     out = await search_sync(
+         tmp_path,
+@@ -645,6 +681,8 @@ async def test_search_server_build_off_with_index_serves_without_resync(
+         session_factory=search_env[1],
+         server_build=False,
+     )
++    assert out["index_sync"] is None, "禁建库不产出 index_sync 信号（reason 表意）"
++    assert search_mod._bg_sync_tasks == {}, "禁建库失配也不得调度"
+     assert fake.embed_calls == calls_after_build + 1, "仅 query embed，禁建库不得重嵌语料"
+     assert out["model_ready"] is True
+     assert out["reason"] is None
+@@ -657,20 +695,286 @@ async def test_search_server_build_off_with_index_serves_without_resync(
+ async def test_search_server_build_default_true_keeps_lazy_build(
+     tmp_path: Path, search_env
+ ) -> None:
+-    """默认值回归：不传 server_build（缺省 True）仍懒建库（现行为零变化）。"""
++    """默认值回归：不传 server_build（缺省 True）仍懒建库（现为后台化懒建，语义不变）。"""
+     from sqlalchemy import select
+ 
+     from app.modules.knowledge.search import KnowledgeSearchState
+ 
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    out = await search_sync(
++    out1 = await search_sync(
+         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+     )
+-    assert fake.embed_calls >= 2, "缺省开关必须保持懒建库"
+-    assert out["model_ready"] is True
+-    assert out["reason"] is None
++    assert out1["index_sync"] == "building", "缺省开关首搜应调度后台建库"
++    await await_background_syncs_for_tests()
++    assert fake.embed_calls >= 1, "缺省开关必须保持懒建库（后台全量嵌入）"
++    out2 = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out2["index_sync"] == "fresh"
++    assert out2["model_ready"] is True
++    assert out2["reason"] is None
++    assert fake.embed_calls >= 2, "建库完成后 query 嵌入恢复"
+     async with search_env[1]() as session:
+         assert (await session.execute(select(KnowledgeSearchState))).first() is not None, (
+             "缺省开关应落 state 行"
+         )
++
++
++# ── 后台同步调度（2026-11-03-knowledge-search-async-refresh / FR-01/FR-02）──────
++
++
++def _gate_bg_sync(monkeypatch: pytest.MonkeyPatch) -> tuple[asyncio.Event, asyncio.Event]:
++    """把 _bg_sync 换成可门控版本，返回 (started, release)。
++
++    StaticPool 下后台任务与请求会话共享同一 aiosqlite 连接，任务体一旦开跑即可能
++    写库——确定性断言「在途未写」必须先把任务停在门口，释放后再 drain。
++    """
++    started = asyncio.Event()
++    release = asyncio.Event()
++    real = search_mod._bg_sync
++
++    async def _gated(*args: object, **kwargs: object) -> None:
++        started.set()
++        await release.wait()
++        await real(*args, **kwargs)
++
++    monkeypatch.setattr(search_mod, "_bg_sync", _gated)
++    return started, release
++
++
++async def test_search_schedules_background_sync_without_blocking_read_path(
++    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
++) -> None:
++    """FR-01 stale：失配首搜请求路径零 chunk 嵌入、即时返回存量结果；drain 后全语义。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk
++
++    caplog.set_level("WARNING")
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out1 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out1["index_sync"] == "building", "首搜无索引=building"
++    await await_background_syncs_for_tests()
++    fresh1 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert fresh1["index_sync"] == "fresh"
++
++    started, release = _gate_bg_sync(monkeypatch)
++    _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
++    texts_before = fake.embedded_texts
++    out2 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out2["index_sync"] == "scheduled"
++    await asyncio.wait_for(started.wait(), timeout=5)  # 后台任务已被调度并停在门口
++    assert fake.embedded_texts == texts_before + 1, "请求路径仅 query 嵌入，chunk 嵌入全在后台"
++    assert all(r["title"] != "新增小节" for r in out2["results"]), "存量索引不含未同步内容"
++    release.set()
++    await await_background_syncs_for_tests()
++
++    async with search_env[1]() as s:
++        rows = (
++            await s.execute(select(KnowledgeSearchChunk.start_line, KnowledgeSearchChunk.title))
++        ).all()
++    assert ("新内容",) not in {(r[0], r[1]) for r in rows}
++    assert not [r.message for r in caplog.records if "bg_sync" in str(r.message)], (
++        "后台任务失败会以结构化 warning 留痕（本用例不应出现）"
++    )
++
++    out3 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out3["index_sync"] == "fresh"
++    assert any(r["title"] == "新增小节" for r in out3["results"]), "同步完成后新内容全语义可搜"
++
++
++async def test_search_missing_index_building_no_db_write(
++    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """FR-01 missing：无索引首搜即时词面降级（building）且请求路径零写库；drain 后建库。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
++
++    started, release = _gate_bg_sync(monkeypatch)
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out["index_sync"] == "building"
++    assert out["results"], "building 阶段词面降级仍可命中"
++    await asyncio.wait_for(started.wait(), timeout=5)  # 首建任务已调度并停在门口
++    async with search_env[1]() as session:
++        assert (await session.execute(select(KnowledgeSearchState))).first() is None, (
++            "请求路径零写库（state）"
++        )
++        assert (await session.execute(select(KnowledgeSearchChunk))).first() is None, (
++            "请求路径零写库（chunks）"
++        )
++    release.set()
++    await await_background_syncs_for_tests()
++    out2 = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out2["index_sync"] == "fresh"
++    assert out2["results"]
++
++
++async def test_background_sync_dedupes_while_inflight(
++    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """FR-02：在途任务唯一——注册表已有未完成任务时判重跳过，不重复调度。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
++
++    holder = asyncio.Event()
++
++    async def _holder() -> None:
++        await holder.wait()
++
++    t = asyncio.create_task(_holder())
++    search_mod._bg_sync_tasks[search_env[0]] = t
++    try:
++        _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
++        texts_before = fake.embedded_texts
++        out = await search_sync(
++            tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++        )
++        assert out["index_sync"] == "scheduled"
++        assert search_mod._bg_sync_tasks[search_env[0]] is t, "在途任务未被替换（判重跳过）"
++        assert fake.embedded_texts == texts_before + 1, "去重后未追加任何嵌入调用"
++    finally:
++        holder.set()
++        t.cancel()
++        search_mod._bg_sync_tasks.clear()
++
++
++async def test_background_sync_failure_clears_registry_and_retriggers(
++    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """FR-02：任务失败→注册表清理（可再触发），不自愈重试（D-003）。"""
++    calls = {"n": 0}
++    real = search_mod._ensure_synced
++
++    async def _flaky(*args: object, **kwargs: object) -> None:
++        calls["n"] += 1
++        if calls["n"] == 1:
++            raise RuntimeError("boom")
++        await real(*args, **kwargs)
++
++    monkeypatch.setattr(search_mod, "_ensure_synced", _flaky)
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out1 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out1["index_sync"] == "building"
++    await await_background_syncs_for_tests()
++    assert search_mod._bg_sync_tasks == {}, "失败后注册表清理"
++    out2 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out2["index_sync"] == "building", "失败后未写 state，仍判定 missing 可再触发"
++    await await_background_syncs_for_tests()
++    assert calls["n"] == 2, "第二次搜索重新触发（无残留锁死），且成功落库"
++    out3 = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out3["index_sync"] == "fresh"
++
++
++async def test_server_build_off_schedules_nothing_regression_lock(
++    tmp_path: Path, search_env
++) -> None:
++    """FR-04 回归锁：禁建库全流程零调度（missing/stale 皆然），语义与本变更前一致。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = await search_sync(
++        tmp_path,
++        search_env[0],
++        "会话状态点",
++        5,
++        fake,
++        "fake-model",
++        session_factory=search_env[1],
++        server_build=False,
++    )
++    assert out["index_sync"] is None
++    assert out["reason"] == "index_not_built"
++    assert search_mod._bg_sync_tasks == {}, "禁建库 missing 不得调度"
++    # 建好索引后语料失配（stale）→ 仍零调度
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
++    _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
++    out2 = await search_sync(
++        tmp_path,
++        search_env[0],
++        "状态点",
++        5,
++        fake,
++        "fake-model",
++        session_factory=search_env[1],
++        server_build=False,
++    )
++    assert out2["index_sync"] is None, "禁建库即使失配也不调度"
++    assert search_mod._bg_sync_tasks == {}, "禁建库 stale 不得调度"
++
++
++async def test_delta_update_refreshes_title_and_anchor(tmp_path: Path, search_env) -> None:
++    """D-006 回归锚定：改写小节标题保持行号坐标 → 差量后新标题/新词面可搜（mutation 判据：
++    去掉 _sync_delta UPDATE 分支的 title/anchor 赋值，本用例必红）。"""
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk
++
++    _write(
++        tmp_path,
++        "knowledge/manual.md",
++        "# 手册\n\n## 旧标题名\n\n状态点正文内容。\n",
++    )
++    fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    await await_background_syncs_for_tests()
++    # 改写标题（行号坐标不变：H2 仍在 line 3）→ 差量 UPDATE 路径
++    _write(
++        tmp_path,
++        "knowledge/manual.md",
++        "# 手册\n\n## 新标题名\n\n状态点正文内容。\n",
++    )
++    out = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out["index_sync"] == "scheduled"
++    await await_background_syncs_for_tests()
++    out2 = await search_sync(
++        tmp_path, search_env[0], "新标题名", 5, fake, "fake-model", session_factory=search_env[1]
++    )
++    assert out2["results"], "差量后新标题词面可搜"
++    assert out2["results"][0]["title"] == "新标题名", "索引行 title 必须随差量刷新（存量 bug 锚定）"
++    async with search_env[1]() as session:
++        anchors = (
++            (
++                await session.execute(
++                    select(KnowledgeSearchChunk.anchor).where(
++                        KnowledgeSearchChunk.spec_path == "knowledge/manual.md"
++                    )
++                )
++            )
++            .scalars()
++            .all()
++        )
++    assert anchors == ["新标题名"], "索引行 anchor 必须随差量刷新"
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 5d4b9aeb5..0bb15116d 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -54270,6 +54270,17 @@
+               }
+             ],
+             "title": "Reason"
++          },
++          "index_sync": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Index Sync"
+           }
+         },
+         "type": "object",
+@@ -54277,7 +54288,7 @@
+           "results"
+         ],
+         "title": "KnowledgeSearchOut",
+-        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；\nreason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"
++        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；\nreason=index_not_built 表示服务器禁建库且该 ws 索引未建）。index_sync 为索引新鲜度\n信号（2026-11-03-knowledge-search-async-refresh / D-004）：fresh=存量索引即最新；\nscheduled=语料失配已调度后台同步（结果基于存量索引）；building=无索引后台首建中\n（当前词面降级）；None=禁建库无索引（reason=index_not_built 已表意）或早期返回——\n可选字段缺省 None，旧客户端零感知。"
+       },
+       "KnowledgeSearchResultItem": {
+         "properties": {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 62a580c59..922f1f109 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -371,6 +371,8 @@ export default function KnowledgePage({ params }: Props) {
+   /** 语义模型可用性（null=未查询；false=降级态——展示提示条，结果为纯词面）。 */
+   const [searchModelReady, setSearchModelReady] = useState<boolean | null>(null);
+   const [searchDegradedReason, setSearchDegradedReason] = useState<string | null>(null);
++  /** 索引新鲜度信号（2026-11-03-knowledge-search-async-refresh）：scheduled=存量索引+后台同步中；building=后台首建中。 */
++  const [searchIndexSync, setSearchIndexSync] = useState<string | null>(null);
+   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
+   const [precipitateOpen, setPrecipitateOpen] = useState(false);
+   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
+@@ -564,11 +566,13 @@ export default function KnowledgePage({ params }: Props) {
+           setSearchResults(resp.results);
+           setSearchModelReady(resp.model_ready);
+           setSearchDegradedReason(resp.reason ?? null);
++          setSearchIndexSync(resp.index_sync ?? null);
+         })
+         .catch((err) => {
+           if (seq !== searchSeqRef.current) return;
+           setSearchResults(null);
+           setSearchError(errMessage(err, "搜索失败"));
++          setSearchIndexSync(null);
+         })
+         .finally(() => {
+           if (seq === searchSeqRef.current) setSearching(false);
+@@ -595,6 +599,7 @@ export default function KnowledgePage({ params }: Props) {
+       setSearchError(null);
+       setSearchModelReady(null);
+       setSearchDegradedReason(null);
++      setSearchIndexSync(null);
+       return;
+     }
+     runSearch(debouncedQuery);
+@@ -770,6 +775,22 @@ export default function KnowledgePage({ params }: Props) {
+                   data-testid="knowledge-search-input"
+                 />
+               </div>
++              {debouncedQuery && searchIndexSync === "scheduled" ? (
++                <div
++                  data-testid="knowledge-search-index-sync"
++                  className="mx-1 mb-2 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground"
++                >
++                  知识库有新变更，已后台同步，当前为存量索引结果
++                </div>
++              ) : null}
++              {debouncedQuery && searchIndexSync === "building" ? (
++                <div
++                  data-testid="knowledge-search-index-sync"
++                  className="mx-1 mb-2 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground"
++                >
++                  知识索引后台建设中，当前为关键词匹配结果
++                </div>
++              ) : null}
+               {debouncedQuery && searchModelReady === false ? (
+                 <div
+                   data-testid="knowledge-search-degraded"
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index d41467b57..088df015a 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -20056,7 +20056,11 @@ export interface components {
+         /**
+          * KnowledgeSearchOut
+          * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
+-         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。
++         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。index_sync 为索引新鲜度
++         *     信号（2026-11-03-knowledge-search-async-refresh / D-004）：fresh=存量索引即最新；
++         *     scheduled=语料失配已调度后台同步（结果基于存量索引）；building=无索引后台首建中
++         *     （当前词面降级）；None=禁建库无索引（reason=index_not_built 已表意）或早期返回——
++         *     可选字段缺省 None，旧客户端零感知。
+          */
+         KnowledgeSearchOut: {
+             /**
+@@ -20073,6 +20077,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * KnowledgeSearchResultItem
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index bbc6cc63c..855167b85 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -178,10 +178,12 @@ export async function getKnowledge(
+  * 平台知识搜索（change 2026-10-15-platform-knowledge-search / FR-01，task-03）：
+  * POST /knowledge/search——knowledge/ + docs/ 语料词面 + 向量融合召回；docs/ 类
+  * 结果由后端按 scan-docs:read 过滤（前端不做权限隐藏）；model_ready=false 时
+- * results 为纯词面降级结果（页面展示降级提示条）。
++ * results 为纯词面降级结果（页面展示降级提示条）。index_sync（2026-11-03-
++ * knowledge-search-async-refresh）为索引新鲜度信号：scheduled/building 时结果
++ * 基于存量索引（新变更后台同步中），页面展示轻提示。
+  *
+- * 显式放宽超时：首查含服务端索引构建（对齐 lib/knowledge.ts 的 graph 端点显式
+- * timeoutMs 先例——apiFetch POST 无缺省超时纪律，长时间构建易被误判网络错误）。
++ * 显式放宽超时：读路径已后台化（搜索即时返回），保留 120s 上限兜底异常慢查
++ * （对齐 graph 端点显式 timeoutMs 先例——apiFetch POST 无缺省超时纪律）。
+  */
+ export async function searchKnowledge(
+   workspaceId: string,
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index d41467b57..088df015a 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -20056,7 +20056,11 @@ export interface components {
+         /**
+          * KnowledgeSearchOut
+          * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
+-         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。
++         *     reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。index_sync 为索引新鲜度
++         *     信号（2026-11-03-knowledge-search-async-refresh / D-004）：fresh=存量索引即最新；
++         *     scheduled=语料失配已调度后台同步（结果基于存量索引）；building=无索引后台首建中
++         *     （当前词面降级）；None=禁建库无索引（reason=index_not_built 已表意）或早期返回——
++         *     可选字段缺省 None，旧客户端零感知。
+          */
+         KnowledgeSearchOut: {
+             /**
+@@ -20073,6 +20077,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * KnowledgeSearchResultItem

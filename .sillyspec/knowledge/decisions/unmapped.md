@@ -1551,3 +1551,58 @@
 文件：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/service/crud.py, backend/app/modules/daemon/group/service/helpers.py, backend/app/modules/daemon/group/service/members.py, backend/app/modules/daemon/group/service/shadow.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/tests/test_group_cross_mention.py, backend/app/modules/daemon/tests/test_group_member_model_thinking.py, backend/migrations/versions/20261102140000_group_member_model_thinking.py, backend/openapi.json, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx, frontend/src/components/group-chat/__tests__/member-panel.test.tsx, frontend/src/components/group-chat/create-group-wizard.tsx, frontend/src/components/group-chat/member-config-fields.tsx, frontend/src/components/group-chat/member-panel.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/lib/api-types.ts
 最近确认：2ef4ea0460957804dcaca9fc0659a31e5dcf96a8
 理由：答：最大风险是 config_snapshot「model」键语义切换的兼容面——现值为供应商名（错位），改存真实模型名后，前端 chips 与 multimodal gate（shadow.py:832）消费口径随之归正，但若有未盘点消费方按「供应商名」解析该键会读错。缓解：盘点 config_snapshot.model 全部消费点（前端 chips、shadow gate）随本变更一并切换；daemon 侧不消费该键（模型走 lease metadata）。次风险：thinking_level 引擎门控口径——pi/codex 的档位支持差异照 session-config-bar 既有 caps 判定复用，不另造词表。放弃的方案：①model/thinking_level 存 config_snapshot JSON 而非独立列——快照定位是展示冗余（组装自关联行），源数据入 JSON 会延续「快照当真值」的错位（本次正是要修它）；②整体替换三表面为 session-config-bar 复用——该组件绑会话 inject 暂存语义（running/ended/暂存态），成员表单是静态配置提交，硬套会引入无关状态面。
+
+## D-unmapped-329@v1 同步架构选 A1——后台同步 + 立回存量索引（stale-while-revalidate）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/search.py
+文件：backend/app/modules/knowledge/search.py
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：用户回复「继续」确认按上一轮汇报推荐项 A1 推进（汇报明示 A1 为推荐；选项 A1 后台同步+立回旧索引 / A2 daemon 事件预建 / A3 维持内联）。复潮裁决：D-backend-023@v1（后台常驻同步协程）与 D-backend-024@v1（首查触发+周期刷新混合）否决于小内存时代（防周期空转与双路径复杂度，见 knowledge/decisions/backend.md，变更 2026-10-15-knowledge-search-pgvector）；现复潮条件成立——生产已 8G 宿主/3500m 容器限额（2026-11-03-knowledge-search-hardening），且内联同步实证受损（63-81s 阻塞 + worker OOM 打断重头再来）；A1 为事件驱动（搜索触发、无周期空转、无持久化队列、单一路径），与被否决的「常驻轮询空转」有本质区别。A2（daemon 事件预建）落选：跨 daemon/backend 两仓联动周期长，平台无法兜底 daemon 离线；A3 落选：不改架构则首搜阻塞永存且随语料增长恶化。
+故障面：后台同步任务随进程重启丢失（自愈：下次搜索重触发）；后台嵌入与前台服务共享容器内存（3500m 限额内，嵌入 worker 闲置自灭机制沿用）。
+退役判据：若 A2（daemon spec-sync 后预建端点）未来落地且覆盖全部同步触发场景，事件驱动后台同步可简化移除。
+
+## D-unmapped-330@v1 无索引工作区首搜统一后台化（含全量建库）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-002@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：统一后台化——首搜（及一切同步触发态）请求不等待建库，立即返回词面降级结果（reason 用可区分值，如 index_building），后台任务执行全量/差量同步；同步完成后下次搜索走正常向量路。与 2026-10-19-knowledge-search-build-switch 的「禁建库降级」语义兼容：server_build=False 保持只读不调度。
+
+## D-unmapped-331@v1 后台任务生命周期——进程内 task + 懒触发自愈，不做持久化队列
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-003@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：进程内 asyncio task（沿用 per-workspace single-flight 锁防并发重复同步）；不做持久化队列、不设定时器重试——进程重启丢任务由下次搜索重触发自愈（懒触发语义保留），失败后同样等下次搜索再触发。此取舍刻意对齐 D-backend-023 否决理由（防周期空转），并在 design 风险登记为 R-xx。
+故障面：长期无搜索的静默工作区索引不刷新（可接受：无搜索即无读方；updated_at 可观测）。
+退役判据：出现「搜索少但索引新鲜度要求高」的消费方（如定时报告）时引入显式触发端点。
+
+## D-unmapped-332@v1 响应契约增量可选字段 index_sync 告知新鲜度
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-004@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：KnowledgeSearchOut 增加可选字段 index_sync（"fresh" | "scheduled" | "building"），additive 向后兼容（旧客户端忽略）；前端可在搜索框下方展示轻提示（轻于现有降级徽标的口径）。API 响应形态变化随本变更走契约文档与 api-types 再生成。
+
+## D-unmapped-333@v1 后台同步的实现结构——检索函数内联调度（asyncio.create_task），不新建调度器模块
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-005@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断（按 brainstorm 分层规则：两方案用户可见行为完全一致，不改变产物，属工程取舍）：方案 1 内联调度——search_sync 检测指纹失配/无 state 行时 `asyncio.create_task` 拉起同步协程后立即走只读查询。依据：①单一消费方（知识搜索）为它建调度器模块属过度设计；②per-ws single-flight 锁 + 「在途任务注册表」已覆盖去重（方案 2 的 dedupe 能力方案 1 同样具备）；③改动面最小、懒触发语义与既有代码位置一脉相承。方案 2（应用级队列）落选理由：新增基础设施面（生命周期/背压/可观测）只为单一 caller 服务，与 D-backend-023 否决理由同源的复杂度顾虑。
+故障面：create_task 的强引用需自行持有（asyncio 只持弱引用——任务注册表同时充当强引用集，任务完成时移除，防 GC 静默吞任务）。
+退役判据：出现第二个需要 spec 同步的后台消费方时，再抽应用级调度器。
+
+## D-unmapped-334@v1 差量 UPDATE 路径必须同步 title/anchor（存量数据正确性 bug 修复）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-006@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：执行期隔离复现实证（2026-11-03，最小复现两次 _ensure_synced 直调）：`_sync_delta` 的 UPDATE 路径只更新 text/kind/content_hash/embedding/start_line，**漏更 title/anchor**——文本已新而标题/锚点恒旧，且 state 指纹已推进不再重试，属静默永久陈旧（标题词面打分与展示面持续失真）。修复：UPDATE 路径补 `row.title = c.title; row.anchor = c.anchor`。该 bug 自 2026-10-15-knowledge-search-pgvector 引入 delta 起即存在（既有测试只覆盖 INSERT 路径，UPDATE 路径零覆盖），与调度化改造无关，但被本变更的新用例首次暴露。

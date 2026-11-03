@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-knowledge-search-async-refresh",
+  "reviewer": "subagent read-only reviewer (ZCode agent thread, GLM-5.3-Flash)",
+  "verdict": "PASS",
+  "reviewedAgainst": "7292f4448f52b8ff71a74fa7f690f9eb93cd633d",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "D-006 title/anchor 根因修复缺回归测试锚定（mutation 判据不成立）",
+      "evidence": "修复真实存在（_sync_delta UPDATE 分支补 row.title/row.anchor 赋值），但全测试文件对 UPDATE 路径 title/anchor 零断言——既有用例只覆盖 INSERT（新增块），本提交新增 6 用例也无改写标题保坐标的用例；去掉 search.py:646-647 两行不会有任何用例变红，与 D-006 normalized_requirement『由用例断言新标题可搜』不符，修复可静默回归。增量复审（a966fb1bd）已解决：新增 test_delta_update_refreshes_title_and_anchor——改写 H2 标题（旧标题名→新标题名）保持行号坐标走 UPDATE 路径，scheduled→drain→二搜断言 results 非空 + title=='新标题名' 词面可搜 + DB anchor==['新标题名']；去掉 search.py:646-647 赋值则 title/anchor 恒旧，三条断言必红，mutation 判据成立；复跑全套件 41 passed。",
+      "location": "backend/app/modules/knowledge/search.py:646"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "测试内调试残留：DBG stderr print + 函数内 import sys",
+      "evidence": "test_search_schedules_background_sync_without_blocking_read_path 内遗留 bug 排查会话的 print(\"DBG rows:\"/\"DBG texts:\"/\"DBG bg_errors:\", file=sys.stderr) 三处及函数内 import sys，属提交物卫生问题，不影响断言。增量复审（a966fb1bd）已解决：三处 print 与 import sys 删净，替换为行为断言（DB rows 无 H1 文档名行 + caplog 无 bg_sync 失败记录），复跑 41 passed 无调试输出残留。",
+      "location": "backend/app/modules/knowledge/tests/test_knowledge_search.py:786"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "FR-02 测试绑定名漂移（覆盖等价）",
+      "evidence": "requirements.md:64 绑定名「test_background_sync_dedupes_and_clears_registry_on_failure」在测试文件中不存在，实际拆为 test_background_sync_dedupes_while_inflight(:834) + test_background_sync_failure_clears_registry_and_retriggers(:867)，语义覆盖（判重+失败清理+可再触发+无自动重试）等价且均真实断言。",
+      "location": ".sillyspec/changes/2026-11-03-knowledge-search-async-refresh/requirements.md:64"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "design 接口示意 _sync_needed 写作同步 def，实现为 async def",
+      "evidence": "design.md 接口定义写 `def _sync_needed(...) -> str`，实现为 `async def`（需 await session.execute，AsyncSession API 必然如此）；示意签名不精确，无行为影响。",
+      "location": "backend/app/modules/knowledge/search.py:441"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklist": [
+    {
+      "item": "增量复审：首轮 open P2/P3 已修复（a966fb1bd）",
+      "result": "pass",
+      "note": "P2：test_delta_update_refreshes_title_and_anchor 精确锚定 UPDATE 路径（改标题保坐标→scheduled→drain→新标题词面可搜+DB anchor 断言），mutation 判据成立（去 search.py:646-647 赋值三条断言必红）；P3：DBG print/import sys 清净并以行为断言替代；全套件复跑 41 passed（40+1）；两 findings 翻 resolved，verdict 维持 PASS。"
+    }
+  ],
+  "reviewedAt": "2026-11-03T04:37:36Z"
+}

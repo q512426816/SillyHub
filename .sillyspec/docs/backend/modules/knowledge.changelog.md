@@ -9,3 +9,4 @@
 - 2026-11-02-embed-batch-chunk | embedding 全量批分批化根治 cgroup OOM
 - 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正
 - 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
+- 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh

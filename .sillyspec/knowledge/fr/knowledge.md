@@ -1041,3 +1041,78 @@ created_at: 2026-10-15T11:52:52.897Z
   confirmed_at: null
   source_change: 2026-11-03-distill-prompt-fix
   status: active
+
+## FR-knowledge-037 读路径去嵌入化——同步需求不得阻塞搜索响应
+变更：2026-11-03-knowledge-search-async-refresh
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-005@v1
+场景正文：
+- 场景：默认场景 — Given 工作区语料指纹与 `knowledge_search_state` 一致（fresh） 指纹失配（stale） 无 `state` 行（missing，serv；When 用户发起搜索 用户发起搜索 用户发起搜索；Then 请求路径零嵌入计算（查询向量除外），立即返回存量索引结果，`index_sync="fresh"`。 必须调度后台同步任务并立即返回存量行检索结果（`index
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-async-refresh/requirements.md#FR-01
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「test_search_schedules_background_sync_without_blocking_read_path」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-knowledge-search-async-refresh
+  status: active
+
+## FR-knowledge-038 后台同步任务生命周期（D-003/D-005）
+变更：2026-11-03-knowledge-search-async-refresh
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1、D-005@v1
+场景正文：
+- 场景：默认场景 — Given 同一 workspace 已有在途后台同步任务 后台任务执行失败 后台任务完成；When 再次搜索且仍失配 任务结束 state 行落库；Then 禁止重复调度（在途任务唯一）。 必须从在途注册表移除自身并记结构化日志，禁止自动定时重试；下次搜索须能重新触发。 `knowledge_search_state
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-async-refresh/requirements.md#FR-02
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「test_background_sync_dedupes_and_clears_registry_on_failure」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-knowledge-search-async-refresh
+  status: active
+
+## FR-knowledge-039 响应契约与前端提示（D-004）
+变更：2026-11-03-knowledge-search-async-refresh
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 任意搜索响应；When 前端消费；Then `index_sync` 为可选字段（缺省 None 旧行为不变）；`"scheduled"` 时知识页展示「知识库有新变更，已后台同步，当前为存量索引结果」，
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-async-refresh/requirements.md#FR-03
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+
+## FR-knowledge-040 禁建库语义回归锁
+变更：2026-11-03-knowledge-search-async-refresh
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given `server_build=False`（KNOWLEDGE_SEARCH_SERVER_BUILD=0）；When 任意搜索（含无索引工作区）；Then 零调度零写库，无索引时词面降级 `reason="index_not_built"`，行为与本变更前逐字一致。
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-async-refresh/requirements.md#FR-04
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-04
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「test_server_build_off_schedules_nothing_regression_lock」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-knowledge-search-async-refresh
+  status: active

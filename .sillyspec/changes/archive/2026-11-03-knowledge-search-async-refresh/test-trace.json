@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-knowledge-search-async-refresh",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「test_search_schedules_background_sync_without_blocking_read_path」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-knowledge-search-async-refresh"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「test_background_sync_dedupes_and_clears_registry_on_failure」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-knowledge-search-async-refresh"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-03-knowledge-search-async-refresh:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「test_server_build_off_schedules_nothing_regression_lock」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-knowledge-search-async-refresh"
+    }
+  ]
+}
