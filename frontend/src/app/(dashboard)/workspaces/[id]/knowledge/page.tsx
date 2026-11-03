@@ -371,6 +371,8 @@ export default function KnowledgePage({ params }: Props) {
   /** 语义模型可用性（null=未查询；false=降级态——展示提示条，结果为纯词面）。 */
   const [searchModelReady, setSearchModelReady] = useState<boolean | null>(null);
   const [searchDegradedReason, setSearchDegradedReason] = useState<string | null>(null);
+  /** 索引新鲜度信号（2026-11-03-knowledge-search-async-refresh）：scheduled=存量索引+后台同步中；building=后台首建中。 */
+  const [searchIndexSync, setSearchIndexSync] = useState<string | null>(null);
   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
   const [precipitateOpen, setPrecipitateOpen] = useState(false);
   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
@@ -564,11 +566,13 @@ export default function KnowledgePage({ params }: Props) {
           setSearchResults(resp.results);
           setSearchModelReady(resp.model_ready);
           setSearchDegradedReason(resp.reason ?? null);
+          setSearchIndexSync(resp.index_sync ?? null);
         })
         .catch((err) => {
           if (seq !== searchSeqRef.current) return;
           setSearchResults(null);
           setSearchError(errMessage(err, "搜索失败"));
+          setSearchIndexSync(null);
         })
         .finally(() => {
           if (seq === searchSeqRef.current) setSearching(false);
@@ -595,6 +599,7 @@ export default function KnowledgePage({ params }: Props) {
       setSearchError(null);
       setSearchModelReady(null);
       setSearchDegradedReason(null);
+      setSearchIndexSync(null);
       return;
     }
     runSearch(debouncedQuery);
@@ -770,6 +775,22 @@ export default function KnowledgePage({ params }: Props) {
                   data-testid="knowledge-search-input"
                 />
               </div>
+              {debouncedQuery && searchIndexSync === "scheduled" ? (
+                <div
+                  data-testid="knowledge-search-index-sync"
+                  className="mx-1 mb-2 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground"
+                >
+                  知识库有新变更，已后台同步，当前为存量索引结果
+                </div>
+              ) : null}
+              {debouncedQuery && searchIndexSync === "building" ? (
+                <div
+                  data-testid="knowledge-search-index-sync"
+                  className="mx-1 mb-2 px-2.5 py-1 text-[11px] leading-relaxed text-muted-foreground"
+                >
+                  知识索引后台建设中，当前为关键词匹配结果
+                </div>
+              ) : null}
               {debouncedQuery && searchModelReady === false ? (
                 <div
                   data-testid="knowledge-search-degraded"

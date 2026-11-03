@@ -548,6 +548,7 @@ async def search_knowledge(
         results=filtered[:limit],
         model_ready=out["model_ready"],
         reason=out["reason"],
+        index_sync=out.get("index_sync"),
     )
 
 

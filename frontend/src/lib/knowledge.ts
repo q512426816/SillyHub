@@ -178,10 +178,12 @@ export async function getKnowledge(
  * 平台知识搜索（change 2026-10-15-platform-knowledge-search / FR-01，task-03）：
  * POST /knowledge/search——knowledge/ + docs/ 语料词面 + 向量融合召回；docs/ 类
  * 结果由后端按 scan-docs:read 过滤（前端不做权限隐藏）；model_ready=false 时
- * results 为纯词面降级结果（页面展示降级提示条）。
+ * results 为纯词面降级结果（页面展示降级提示条）。index_sync（2026-11-03-
+ * knowledge-search-async-refresh）为索引新鲜度信号：scheduled/building 时结果
+ * 基于存量索引（新变更后台同步中），页面展示轻提示。
  *
- * 显式放宽超时：首查含服务端索引构建（对齐 lib/knowledge.ts 的 graph 端点显式
- * timeoutMs 先例——apiFetch POST 无缺省超时纪律，长时间构建易被误判网络错误）。
+ * 显式放宽超时：读路径已后台化（搜索即时返回），保留 120s 上限兜底异常慢查
+ * （对齐 graph 端点显式 timeoutMs 先例——apiFetch POST 无缺省超时纪律）。
  */
 export async function searchKnowledge(
   workspaceId: string,

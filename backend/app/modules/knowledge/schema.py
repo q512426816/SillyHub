@@ -670,9 +670,14 @@ class KnowledgeSearchResultItem(BaseModel):
 
 class KnowledgeSearchOut(BaseModel):
     """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft；
-    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。"""
+    reason=index_not_built 表示服务器禁建库且该 ws 索引未建）。index_sync 为索引新鲜度
+    信号（2026-11-03-knowledge-search-async-refresh / D-004）：fresh=存量索引即最新；
+    scheduled=语料失配已调度后台同步（结果基于存量索引）；building=无索引后台首建中
+    （当前词面降级）；None=禁建库无索引（reason=index_not_built 已表意）或早期返回——
+    可选字段缺省 None，旧客户端零感知。"""
 
     ok: bool = True
     results: list[KnowledgeSearchResultItem]
     model_ready: bool = True
     reason: str | None = None
+    index_sync: str | None = None

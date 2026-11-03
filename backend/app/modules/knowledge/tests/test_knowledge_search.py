@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import uuid
 from collections.abc import Iterator
@@ -22,8 +23,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.modules.knowledge.search as search_mod
 from app.modules.knowledge.search import (
     Chunk,
+    await_background_syncs_for_tests,
     chunk_markdown,
     corpus_fingerprint,
     reset_index_for_tests,
@@ -263,20 +266,24 @@ async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env
     out1 = await search_sync(
         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
     )
-    assert out1["model_ready"] is True
-    calls_after_first = fake.embed_calls
-    assert calls_after_first >= 2  # 语料构建 1 次 + query 1 次
+    assert out1["index_sync"] == "building"
+    await await_background_syncs_for_tests()
+    calls_after_build = fake.embed_calls
+    assert calls_after_build >= 1  # 语料构建（building 路径无 query 嵌入）
     out2 = await search_sync(
         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
     )
-    assert fake.embed_calls == calls_after_first + 1, "文件未变仅 query embed，不重建索引"
+    assert out2["index_sync"] == "fresh"
+    assert fake.embed_calls == calls_after_build + 1, "文件未变仅 query embed，不重建索引"
     assert out2["results"]
-    # 语料变更 → 重建（再多一次全量 embed）
+    # 语料变更 → 后台差量（请求路径仅 query embed），drain 后完成重嵌
     _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
-    await search_sync(
+    out3 = await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
     )
-    assert fake.embed_calls >= calls_after_first + 3, "文件变更后应重建索引"
+    assert out3["index_sync"] == "scheduled"
+    await await_background_syncs_for_tests()
+    assert fake.embed_calls >= calls_after_build + 3, "文件变更后应重建索引"
 
 
 # ── 融合检索 ─────────────────────────────────────────────────────────────────
@@ -285,6 +292,10 @@ async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env
 async def test_search_exact_decision_id_ranks_first(tmp_path: Path, search_env) -> None:
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
     out = await search_sync(
         tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
     )
@@ -317,6 +328,10 @@ async def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path, sear
     )
     fake = FakeEmbedder()
     # 「会话状态」在语料中无连续子串（「会话过程」/「状态点」分离）→ 纯语义路召回
+    await search_sync(
+        tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
     out = await search_sync(
         tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
     )
@@ -346,6 +361,7 @@ async def test_search_degraded_word_only_when_embedder_unavailable(
     assert all(r["score"] <= 1.0 for r in out["results"])
     # 词面命中：snippet 含查询词
     assert any("会话状态点" in r["snippet"] for r in out["results"])
+    await await_background_syncs_for_tests()  # 建库任务（零向量占位）收尾，防泄漏到邻用例
 
 
 async def test_search_empty_query_returns_empty(tmp_path: Path, search_env) -> None:
@@ -373,6 +389,7 @@ async def test_search_snippet_window_around_match(tmp_path: Path, search_env) ->
     assert "会话状态点" in snippet
     # 窗口截断：snippet 显著短于整段
     assert len(snippet) < 400
+    await await_background_syncs_for_tests()
 
 
 async def test_search_missing_corpus_returns_empty(tmp_path: Path, search_env) -> None:
@@ -398,6 +415,7 @@ async def test_search_unrelated_query_returns_empty_state(tmp_path: Path, search
         session_factory=search_env[1],
     )
     assert out["results"] == [], "无信号查询应返回空（前端空态）"
+    await await_background_syncs_for_tests()
 
 
 # ── 持久化 ORM 面（change 2026-10-15-knowledge-search-pgvector / task-01）────────
@@ -485,14 +503,20 @@ async def test_search_model_version_change_triggers_full_rebuild(
     await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "model-a", session_factory=search_env[1]
     )
+    await await_background_syncs_for_tests()
     embedded_a = fake.embedded_texts
-    assert embedded_a > 0
-    # 换模型名 → 全量重算（再嵌入全部 chunk）+ 1 次 query 嵌入
+    assert embedded_a > 0  # 全量(chunks)，building 路径无 query 嵌入
+    # 换模型名 → 后台全量重算（再嵌入全部 chunk）+ 请求路径 1 次 query 嵌入
     out = await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
     )
-    assert fake.embedded_texts == embedded_a * 2  # 全量(chunks) + query，与首次同构
-    assert out["results"]
+    assert out["index_sync"] == "scheduled"
+    await await_background_syncs_for_tests()
+    assert fake.embedded_texts == embedded_a * 2 + 1  # 全量(chunks)×2 + query×1
+    out2 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
+    )
+    assert out2["results"]
 
 
 async def test_search_db_error_falls_back_to_word_scan(tmp_path: Path, search_env) -> None:
@@ -529,8 +553,9 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
     await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
     )
+    await await_background_syncs_for_tests()
     baseline = fake.embedded_texts
-    # 改单文件（known-issues.md 新增一段）
+    # 改单文件（known-issues.md 新增一段）→ 失配首搜仅 query 嵌入，drain 后差量重嵌
     p = tmp_path / "knowledge" / "known-issues.md"
     p.write_text(
         p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
@@ -538,9 +563,15 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
     out = await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
     )
-    # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
-    assert fake.embedded_texts == baseline + 2
-    assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
+    assert out["index_sync"] == "scheduled"
+    assert fake.embedded_texts == baseline + 1, "请求路径仅 query 嵌入"
+    await await_background_syncs_for_tests()
+    out2 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    # known-issues.md 新增 1 块（差量重嵌）+ 第二次 query 1 次
+    assert fake.embedded_texts == baseline + 3, "差量只重嵌新增块"
+    assert any(r["title"] == "新增小节" for r in out2["results"]), "新内容应可搜到"
 
 
 async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path(
@@ -548,8 +579,6 @@ async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_pa
 ) -> None:
     """updated_at 可观测性（2026-11-03-knowledge-search-hardening / FR-02）：
     差量同步成功 → updated_at 刷新为同步时刻；指纹一致快路径零 UPDATE → 保持不变。"""
-    import asyncio as _asyncio
-
     from sqlalchemy import select
 
     from app.modules.knowledge.search import KnowledgeSearchState
@@ -563,16 +592,19 @@ async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_pa
     await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
     )
+    await await_background_syncs_for_tests()  # 首建完成（state 行落库）
     t1 = await _state_updated_at()
     # 改单文件 → 差量同步（指纹变化必触发 state UPDATE）
     p = tmp_path / "knowledge" / "known-issues.md"
     p.write_text(
         p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
     )
-    await _asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
-    await search_sync(
+    await asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
+    out = await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
     )
+    assert out["index_sync"] == "scheduled"
+    await await_background_syncs_for_tests()  # 后台差量提交 state UPDATE
     t2 = await _state_updated_at()
     assert t2 is not None and t2 > t1, "差量同步成功后 updated_at 必须刷新"
     # 快路径：语料未变再搜 → 无 UPDATE → updated_at 不变（未发生同步的真信号）
@@ -627,13 +659,17 @@ async def test_search_server_build_off_with_index_serves_without_resync(
     """禁建库 + 有索引：跳过懒同步（语料变更也不差量重嵌），直接查存量行。"""
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    # 先以默认开关建好索引
+    # 先以默认开关建好索引（首搜 building 调度，drain 后完成）
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
     await search_sync(
         tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
     )
     calls_after_build = fake.embed_calls
     assert calls_after_build >= 2
-    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌
+    # 语料新增文件（指纹过期）→ 禁建库搜索不得触发差量重嵌、不得调度
     _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
     out = await search_sync(
         tmp_path,
@@ -645,6 +681,8 @@ async def test_search_server_build_off_with_index_serves_without_resync(
         session_factory=search_env[1],
         server_build=False,
     )
+    assert out["index_sync"] is None, "禁建库不产出 index_sync 信号（reason 表意）"
+    assert search_mod._bg_sync_tasks == {}, "禁建库失配也不得调度"
     assert fake.embed_calls == calls_after_build + 1, "仅 query embed，禁建库不得重嵌语料"
     assert out["model_ready"] is True
     assert out["reason"] is None
@@ -657,20 +695,243 @@ async def test_search_server_build_off_with_index_serves_without_resync(
 async def test_search_server_build_default_true_keeps_lazy_build(
     tmp_path: Path, search_env
 ) -> None:
-    """默认值回归：不传 server_build（缺省 True）仍懒建库（现行为零变化）。"""
+    """默认值回归：不传 server_build（缺省 True）仍懒建库（现为后台化懒建，语义不变）。"""
     from sqlalchemy import select
 
     from app.modules.knowledge.search import KnowledgeSearchState
 
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    out = await search_sync(
+    out1 = await search_sync(
         tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
     )
-    assert fake.embed_calls >= 2, "缺省开关必须保持懒建库"
-    assert out["model_ready"] is True
-    assert out["reason"] is None
+    assert out1["index_sync"] == "building", "缺省开关首搜应调度后台建库"
+    await await_background_syncs_for_tests()
+    assert fake.embed_calls >= 1, "缺省开关必须保持懒建库（后台全量嵌入）"
+    out2 = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out2["index_sync"] == "fresh"
+    assert out2["model_ready"] is True
+    assert out2["reason"] is None
+    assert fake.embed_calls >= 2, "建库完成后 query 嵌入恢复"
     async with search_env[1]() as session:
         assert (await session.execute(select(KnowledgeSearchState))).first() is not None, (
             "缺省开关应落 state 行"
         )
+
+
+# ── 后台同步调度（2026-11-03-knowledge-search-async-refresh / FR-01/FR-02）──────
+
+
+def _gate_bg_sync(monkeypatch: pytest.MonkeyPatch) -> tuple[asyncio.Event, asyncio.Event]:
+    """把 _bg_sync 换成可门控版本，返回 (started, release)。
+
+    StaticPool 下后台任务与请求会话共享同一 aiosqlite 连接，任务体一旦开跑即可能
+    写库——确定性断言「在途未写」必须先把任务停在门口，释放后再 drain。
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+    real = search_mod._bg_sync
+
+    async def _gated(*args: object, **kwargs: object) -> None:
+        started.set()
+        await release.wait()
+        await real(*args, **kwargs)
+
+    monkeypatch.setattr(search_mod, "_bg_sync", _gated)
+    return started, release
+
+
+async def test_search_schedules_background_sync_without_blocking_read_path(
+    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """FR-01 stale：失配首搜请求路径零 chunk 嵌入、即时返回存量结果；drain 后全语义。"""
+    import sys
+
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk
+
+    caplog.set_level("WARNING")
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out1 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out1["index_sync"] == "building", "首搜无索引=building"
+    await await_background_syncs_for_tests()
+    fresh1 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert fresh1["index_sync"] == "fresh"
+
+    started, release = _gate_bg_sync(monkeypatch)
+    _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
+    texts_before = fake.embedded_texts
+    out2 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out2["index_sync"] == "scheduled"
+    await asyncio.wait_for(started.wait(), timeout=5)  # 后台任务已被调度并停在门口
+    assert fake.embedded_texts == texts_before + 1, "请求路径仅 query 嵌入，chunk 嵌入全在后台"
+    assert all(r["title"] != "新增小节" for r in out2["results"]), "存量索引不含未同步内容"
+    release.set()
+    await await_background_syncs_for_tests()
+
+    async with search_env[1]() as s:
+        rows = (
+            await s.execute(select(KnowledgeSearchChunk.start_line, KnowledgeSearchChunk.title))
+        ).all()
+    print("DBG rows:", sorted(rows), file=sys.stderr)
+    print("DBG texts:", fake.embedded_texts, file=sys.stderr)
+    print(
+        "DBG bg_errors:",
+        [r.message for r in caplog.records if "bg_sync" in str(r.message)],
+        file=sys.stderr,
+    )
+
+    out3 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out3["index_sync"] == "fresh"
+    assert any(r["title"] == "新增小节" for r in out3["results"]), "同步完成后新内容全语义可搜"
+
+
+async def test_search_missing_index_building_no_db_write(
+    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-01 missing：无索引首搜即时词面降级（building）且请求路径零写库；drain 后建库。"""
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
+
+    started, release = _gate_bg_sync(monkeypatch)
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out["index_sync"] == "building"
+    assert out["results"], "building 阶段词面降级仍可命中"
+    await asyncio.wait_for(started.wait(), timeout=5)  # 首建任务已调度并停在门口
+    async with search_env[1]() as session:
+        assert (await session.execute(select(KnowledgeSearchState))).first() is None, (
+            "请求路径零写库（state）"
+        )
+        assert (await session.execute(select(KnowledgeSearchChunk))).first() is None, (
+            "请求路径零写库（chunks）"
+        )
+    release.set()
+    await await_background_syncs_for_tests()
+    out2 = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out2["index_sync"] == "fresh"
+    assert out2["results"]
+
+
+async def test_background_sync_dedupes_while_inflight(
+    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-02：在途任务唯一——注册表已有未完成任务时判重跳过，不重复调度。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
+
+    holder = asyncio.Event()
+
+    async def _holder() -> None:
+        await holder.wait()
+
+    t = asyncio.create_task(_holder())
+    search_mod._bg_sync_tasks[search_env[0]] = t
+    try:
+        _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
+        texts_before = fake.embedded_texts
+        out = await search_sync(
+            tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+        )
+        assert out["index_sync"] == "scheduled"
+        assert search_mod._bg_sync_tasks[search_env[0]] is t, "在途任务未被替换（判重跳过）"
+        assert fake.embedded_texts == texts_before + 1, "去重后未追加任何嵌入调用"
+    finally:
+        holder.set()
+        t.cancel()
+        search_mod._bg_sync_tasks.clear()
+
+
+async def test_background_sync_failure_clears_registry_and_retriggers(
+    tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-02：任务失败→注册表清理（可再触发），不自愈重试（D-003）。"""
+    calls = {"n": 0}
+    real = search_mod._ensure_synced
+
+    async def _flaky(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        await real(*args, **kwargs)
+
+    monkeypatch.setattr(search_mod, "_ensure_synced", _flaky)
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out1 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out1["index_sync"] == "building"
+    await await_background_syncs_for_tests()
+    assert search_mod._bg_sync_tasks == {}, "失败后注册表清理"
+    out2 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out2["index_sync"] == "building", "失败后未写 state，仍判定 missing 可再触发"
+    await await_background_syncs_for_tests()
+    assert calls["n"] == 2, "第二次搜索重新触发（无残留锁死），且成功落库"
+    out3 = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out3["index_sync"] == "fresh"
+
+
+async def test_server_build_off_schedules_nothing_regression_lock(
+    tmp_path: Path, search_env
+) -> None:
+    """FR-04 回归锁：禁建库全流程零调度（missing/stale 皆然），语义与本变更前一致。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    out = await search_sync(
+        tmp_path,
+        search_env[0],
+        "会话状态点",
+        5,
+        fake,
+        "fake-model",
+        session_factory=search_env[1],
+        server_build=False,
+    )
+    assert out["index_sync"] is None
+    assert out["reason"] == "index_not_built"
+    assert search_mod._bg_sync_tasks == {}, "禁建库 missing 不得调度"
+    # 建好索引后语料失配（stale）→ 仍零调度
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
+    _write(tmp_path, "knowledge/extra.md", "# 额外\n\n## 新落地小节\n\n缓存索引点。\n")
+    out2 = await search_sync(
+        tmp_path,
+        search_env[0],
+        "状态点",
+        5,
+        fake,
+        "fake-model",
+        session_factory=search_env[1],
+        server_build=False,
+    )
+    assert out2["index_sync"] is None, "禁建库即使失配也不调度"
+    assert search_mod._bg_sync_tasks == {}, "禁建库 stale 不得调度"

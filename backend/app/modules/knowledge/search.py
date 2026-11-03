@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
 from sqlalchemy import (
     JSON,
     Column,
@@ -60,6 +61,8 @@ from sqlmodel import Field
 
 from app.models.base import BaseModel
 from app.modules.knowledge.parser import slugify_anchor
+
+logger = structlog.get_logger()
 
 # ── 持久化 ORM（change 2026-10-15-knowledge-search-pgvector / D-002@v1）──────────
 #
@@ -379,6 +382,86 @@ _EMBED_BATCH = 32
 _LEGACY_INDEXES: dict[tuple[str, str], dict] = {}  # 兼容留位（旧内存路径已由 DB 取代）
 
 
+# ── 后台同步调度（2026-11-03-knowledge-search-async-refresh / D-001~D-005）──────
+#
+# 读路径与嵌入彻底解耦（stale-while-revalidate）：搜索只做只读判定（_sync_needed），
+# 失配/缺索引时调度进程内后台任务执行 _ensure_synced（全量/差量逻辑零改动），请求
+# 即刻返回存量索引或词面降级结果。注册表同时是 create_task 的强引用（事件循环仅持
+# 弱引用，不持会被 GC 静默吞）与在途去重判据（D-005）；失败只记日志不重试、进程
+# 重启自愈=下次搜索重触发（D-003，刻意对齐 D-backend-023 否决理由防周期空转）。
+
+_bg_sync_tasks: dict[str, asyncio.Task] = {}
+
+
+def _schedule_background_sync(
+    spec_root: Path,
+    workspace_key: str,
+    ws_id: uuid.UUID,
+    fp_now: tuple | None,
+    model_name: str,
+    embedder: object | None,
+    session_factory: object | None,
+) -> None:
+    """调度后台同步（在途即跳过；调用方不等待——读路径永不阻塞）。"""
+    existing = _bg_sync_tasks.get(workspace_key)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(
+        _bg_sync(spec_root, workspace_key, ws_id, fp_now, model_name, embedder, session_factory)
+    )
+    _bg_sync_tasks[workspace_key] = task
+
+
+async def _bg_sync(
+    spec_root: Path,
+    workspace_key: str,
+    ws_id: uuid.UUID,
+    fp_now: tuple | None,
+    model_name: str,
+    embedder: object | None,
+    session_factory: object | None,
+) -> None:
+    """后台同步主体：独立会话 + per-ws 锁内复用 _ensure_synced；失败只记日志（D-003）。"""
+    try:
+        async with await _db_session(session_factory) as session:
+            async with _get_sync_lock(workspace_key):
+                await _ensure_synced(
+                    session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
+                )
+    except Exception as exc:
+        logger.warning(
+            "knowledge_search.bg_sync_failed",
+            workspace=workspace_key,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    finally:
+        _bg_sync_tasks.pop(workspace_key, None)
+
+
+async def _sync_needed(
+    session: AsyncSession, ws_id: uuid.UUID, fp_norm: list | None, model_name: str
+) -> str:
+    """只读同步判定（读路径决策，零写零嵌入）：``missing`` / ``stale`` / ``fresh``。"""
+    state = (
+        await session.execute(
+            select(KnowledgeSearchState).where(KnowledgeSearchState.workspace_id == ws_id)
+        )
+    ).scalar_one_or_none()
+    if state is None:
+        return "missing"
+    if state.model_version != model_name or _norm_fingerprint(state.corpus_fingerprint) != fp_norm:
+        return "stale"
+    return "fresh"
+
+
+async def await_background_syncs_for_tests() -> None:
+    """测试隔离：等待全部在途后台同步结束并清空注册表（生产勿调，同 reset_index_for_tests 族）。"""
+    pending = [t for t in _bg_sync_tasks.values() if not t.done()]
+    if pending:
+        await asyncio.gather(*pending)
+    _bg_sync_tasks.clear()
+
+
 def _get_sync_lock(workspace_key: str) -> asyncio.Lock:
     """per-workspace asyncio.Lock（async 协程跨 await 持有安全——Grill 增量复审残留①）。"""
     with _sync_locks_guard:
@@ -560,6 +643,8 @@ async def _sync_delta(
                 row.text = c.text
                 row.start_line = c.start_line
                 row.kind = c.kind
+                row.title = c.title
+                row.anchor = c.anchor
                 row.content_hash = _content_hash(c.text)
                 row.embedding = vec
         if new_rows:
@@ -697,7 +782,8 @@ async def _query_word_candidates(
 
 
 def reset_index_for_tests() -> None:
-    """测试隔离：清空进程内同步锁（生产勿调）。"""
+    """测试隔离：清空进程内同步锁与在途后台同步注册表（生产勿调）。"""
+    _bg_sync_tasks.clear()
     with _sync_locks_guard:
         _sync_locks.clear()
 
@@ -768,40 +854,71 @@ async def search_sync(
     session_factory: object | None = None,
     server_build: bool = True,
 ) -> dict:
-    """检索：返回 ``{results, model_ready, reason}``（形态与上变更内存版逐字段一致）。
+    """检索：返回 ``{results, model_ready, reason, index_sync}``。
 
-    ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（融合分降序；
-    去重取最高分）。embedder None → 纯词面 + ``model_ready=False``；DB 异常 →
-    词面内存直查降级（reason 带 ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx）。
-    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：跳过懒同步
-    （全量/差量嵌入一律禁，索引新鲜度职责移交外部预建机器）；无 state 行的工作区词面
-    内存直查降级，``model_ready=False + reason="index_not_built"``，首搜秒回不超时
-    （known-issues「首搜建库地雷」根治口径）。
+    读路径零嵌入阻塞（stale-while-revalidate，2026-11-03-knowledge-search-async-refresh）：
+    只读判定 ``_sync_needed``——fresh 直查；stale 调度后台同步（``_bg_sync``）后即刻读
+    存量行（``index_sync="scheduled"``）；missing 调度后台首建并词面内存降级
+    （``index_sync="building"``）。``results`` 项 = ``{spec_path, kind, title, anchor,
+    snippet, score}``（融合分降序；去重取最高分）。embedder None → 纯词面 +
+    ``model_ready=False``；DB 异常 → 词面内存直查降级（reason 带
+    ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx；异常路径不调度）。
+    ``server_build=False``（服务器禁建库，KNOWLEDGE_SEARCH_SERVER_BUILD=0）：语义不变
+    ——不调度任何任务，无 state 行的工作区词面内存直查降级，``model_ready=False +
+    reason="index_not_built"``（此时 ``index_sync=None``，由 reason 表意）。
     """
     q = str(query or "").strip()
     model_ready = embedder is not None
     reason = None if model_ready else (embedder_error or "embedder unavailable")
     if not q:
-        return {"results": [], "model_ready": model_ready, "reason": reason}
+        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
     fp_now = await asyncio.to_thread(corpus_fingerprint, spec_root)
     if fp_now is None:
-        return {"results": [], "model_ready": model_ready, "reason": reason}
+        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
     try:
         ws_id = uuid.UUID(workspace_key)
     except (ValueError, AttributeError):
-        return {"results": [], "model_ready": model_ready, "reason": reason}
+        return {"results": [], "model_ready": model_ready, "reason": reason, "index_sync": None}
 
+    index_sync: str | None = None
     try:
         async with await _db_session(session_factory) as session:
             if server_build:
-                lock = _get_sync_lock(workspace_key)
-                async with lock:
-                    await _ensure_synced(
-                        session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
+                # 只读判定（零写零嵌入）——同步一律后台化，读路径永不等待嵌入（D-001/D-005）
+                sync_state = await _sync_needed(
+                    session, ws_id, _norm_fingerprint(fp_now), model_name
+                )
+                if sync_state == "missing":
+                    # 首建后台化：请求即刻词面降级（零写库），建库完成后下搜全语义（D-002）
+                    _schedule_background_sync(
+                        spec_root,
+                        workspace_key,
+                        ws_id,
+                        fp_now,
+                        model_name,
+                        embedder,
+                        session_factory,
                     )
+                    return await _fallback_word_scan(
+                        spec_root, q, limit, model_ready, reason, index_sync="building"
+                    )
+                if sync_state == "stale":
+                    # 失配后台差量/全量同步；请求读存量行（stale-while-revalidate，D-001）
+                    _schedule_background_sync(
+                        spec_root,
+                        workspace_key,
+                        ws_id,
+                        fp_now,
+                        model_name,
+                        embedder,
+                        session_factory,
+                    )
+                    index_sync = "scheduled"
+                else:
+                    index_sync = "fresh"
             else:
-                # 禁建库：只读判 state——无索引工作区直接词面内存降级（不 scan 落库、
-                # 不嵌语料、不写任何行）；有索引则跳过 sync 直查存量行（查询向量嵌入保留）。
+                # 禁建库：语义逐字不变（只读判 state——无索引工作区直接词面内存降级（不 scan
+                # 落库、不嵌语料、不写任何行、不调度任务）；有索引则直查存量行。
                 state_row = (
                     await session.execute(
                         select(KnowledgeSearchState.id).where(
@@ -813,7 +930,7 @@ async def search_sync(
                     return await _fallback_word_scan(
                         spec_root, q, limit, model_ready=False, reason="index_not_built"
                     )
-            # 查询双路（同步完成后读——不读半态）
+            # 查询双路（读存量行，不持同步锁；查询向量嵌入保留内联——单条、响应必需）
             q_vec = None
             if embedder is not None:
                 q_vec = (await asyncio.to_thread(embedder.embed, [q]))[0]
@@ -821,7 +938,7 @@ async def search_sync(
             if q_vec is not None:
                 vec_rows = await _query_vector_candidates(session, ws_id, q_vec, limit * 3)
             word_rows = await _query_word_candidates(session, ws_id, q)
-    except Exception as exc:  # DB 异常 → 词面内存直查降级（fail-soft，搜索永不 5xx）
+    except Exception as exc:  # DB 异常 → 词面内存直查降级（fail-soft，搜索永不 5xx；不调度）
         return await _fallback_word_scan(
             spec_root, q, limit, model_ready, f"{_DB_DEGRADED_PREFIX}{type(exc).__name__}: {exc}"
         )
@@ -860,7 +977,12 @@ async def search_sync(
         }
         for score, c in ranked[: max(1, int(limit))]
     ]
-    return {"results": results, "model_ready": model_ready, "reason": reason}
+    return {
+        "results": results,
+        "model_ready": model_ready,
+        "reason": reason,
+        "index_sync": index_sync,
+    }
 
 
 def _word_score_row(query_lower: str, row: _HitRow) -> tuple[float, bool]:
@@ -881,7 +1003,12 @@ def _word_score_row(query_lower: str, row: _HitRow) -> tuple[float, bool]:
 
 
 async def _fallback_word_scan(
-    spec_root: Path, q: str, limit: int, model_ready: bool, reason: str
+    spec_root: Path,
+    q: str,
+    limit: int,
+    model_ready: bool,
+    reason: str,
+    index_sync: str | None = None,
 ) -> dict:
     """DB 异常降级：scan_corpus + _word_score 内存直查（上变更内存实现的无向量版）。"""
     chunks = await asyncio.to_thread(scan_corpus, spec_root)
@@ -908,4 +1035,9 @@ async def _fallback_word_scan(
         }
         for word, c in ranked[: max(1, int(limit))]
     ]
-    return {"results": results, "model_ready": model_ready, "reason": reason}
+    return {
+        "results": results,
+        "model_ready": model_ready,
+        "reason": reason,
+        "index_sync": index_sync,
+    }
