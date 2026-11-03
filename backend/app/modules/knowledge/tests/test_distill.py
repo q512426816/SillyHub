@@ -789,7 +789,9 @@ def test_build_distill_prompt_session_fresh_requires_export_name() -> None:
 def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
     """洞二回流指引（2026-11-03 加固）：propose 命令单引号 body + --from 来源标记；
     spec_dir 段改 ls 核验回落（删「自动上行/无需手动同步」失实表述）；全形态（含
-    spec_dir=None 旧形）含回流确认段与查重/幂等/数量指引。"""
+    spec_dir=None 旧形）含回流确认段与查重/幂等/数量指引。
+    2026-11-03 条目质量加固（distill-entry-quality）：字段扩展「适用条件与反例」+
+    编辑实录句（实际落盘差异而非修改意图）+ 断言实证纪律条目，全形态一致。"""
     spec_dir = "~/.sillyhub/daemon/specs/ws-1"
     fresh_session = build_distill_prompt(
         "session", "sid-1", None, export_name="distill-source-sid-1.md", spec_dir=spec_dir
@@ -820,6 +822,16 @@ def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
         # FR-03：回流确认段全形态存在（含未连接平台的留痕要求）。
         assert "sillyspec platform sync" in prompt, label
         assert "未回流" in prompt, label
+        # distill-entry-quality FR-01：字段清单扩展「适用条件与反例」+ 反例释义句。
+        assert "适用条件与反例" in prompt, label
+        assert "不能推广到的场景" in prompt, label
+        assert "无条件规则" in prompt, label
+        # distill-entry-quality FR-02：编辑实录——实际落盘差异而非修改意图。
+        assert "以实际落盘的编辑与最终差异为准" in prompt, label
+        assert "不得只写修改意图" in prompt, label
+        # distill-entry-quality FR-03：断言实证纪律（查重条目顺延不丢）。
+        assert "会话事实支撑" in prompt, label
+        assert "推测性断言" in prompt, label
     for label, prompt in (
         ("fresh_session", fresh_session),
         ("resume_session", resume_session),
