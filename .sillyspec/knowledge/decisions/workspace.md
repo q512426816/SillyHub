@@ -15,6 +15,7 @@
 状态：implemented
 变更：2026-10-10-linked-repos-local-echo
 锚点：未记录
+文件：backend/app/modules/daemon/linked_repos_sync.py, backend/app/modules/workspace/linked_repos/model.py, backend/app/modules/workspace/linked_repos/router.py, backend/app/modules/workspace/linked_repos/schema.py, backend/app/modules/workspace/linked_repos/service.py, backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py, backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py, backend/openapi.json, frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx, frontend/src/components/workspace/linked-repos-card.tsx, frontend/src/components/workspace/linked-repos-form.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/linked-repos.ts
 最近确认：f4f974870
 理由：展示+一键导入：卡片新增「本机已有配置」对照区（三态：两边一致/仅本地/仅平台），「仅本地有」条目可勾选导入为平台登记。
 
@@ -95,5 +96,6 @@ supersedes：D-003@v1
 状态：implemented
 变更：2026-10-11-linked-repo-workspace-ref
 锚点：未记录
+文件：backend/app/modules/daemon/linked_repos_sync.py, backend/app/modules/workspace/linked_repos/model.py, backend/app/modules/workspace/linked_repos/router.py, backend/app/modules/workspace/linked_repos/schema.py, backend/app/modules/workspace/linked_repos/service.py, backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py, backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py, backend/openapi.json, frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx, frontend/src/components/workspace/linked-repos-card.tsx, frontend/src/components/workspace/linked-repos-form.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/linked-repos.ts
 最近确认：0f7af00fe
 理由：不做。自动匹配只提示（local-echo 回显时标 matched_workspace），确认后由用户手动挂载；双向自动会在两表间形成同步循环面；路径复用涉及跨工作区权限边界，均留 v2 候选。

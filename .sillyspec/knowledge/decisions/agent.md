@@ -6,6 +6,7 @@
 状态：implemented
 变更：2026-08-22-team-session-unify
 锚点：未记录
+文件：backend/app/main.py, backend/app/modules/agent/profile/seed.py, backend/app/modules/agent/tests/test_profile_seed.py
 最近确认：4d7adc1d
 理由：用户明确：团队类似子代理——当前会话的 agent（主控）通过 MCP 工具派分身（worker），进度与结果回到当前消息流，全程不离开对话。不新增会话类型、不新增列表条目、没有独立团队页面。
 
@@ -113,6 +114,7 @@ supersedes：D-007@v1
 状态：implemented
 变更：2026-10-08-backend-restart-fake-failed
 锚点：未记录
+文件：.sillyspec/changes/2026-10-08-backend-restart-fake-failed/design.md, .sillyspec/changes/2026-10-08-backend-restart-fake-failed/flow-state.yaml, .sillyspec/changes/2026-10-08-backend-restart-fake-failed/proposal.md, .sillyspec/changes/2026-10-08-backend-restart-fake-failed/requirements.md, .sillyspec/changes/2026-10-08-backend-restart-fake-failed/tasks.md, backend/app/modules/agent/service.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/tests/modules/agent/test_stale_run_cleanup_liveness.py, backend/tests/modules/daemon/test_close_interactive_run_retroactive.py, .sillyspec/changes/2026-10-08-backend-restart-fake-failed/review.json
 最近确认：89a7e9a42c4d0438ccccf1c85a4297cf19d04226
 理由：最大风险：宽限窗选小了误杀仍发生（长安静期轮被复扫判死）——但此时 FR-02 兜底回正，最坏 结果是徽标先失败后自动变回完成；窗选大了 daemon 真死时 UI 多挂一会儿"运行中"（10 分钟上 限，可接受）。放弃的方案：(a) 启动清理时探测 daemon WS 在线状态——backend 重启瞬间 daemon 往往尚未重连（实证重启后 41 秒才恢复上报），启动时点探测必假阴性，且"daemon 在线" ≠"该轮还在跑"，信号弱于日志 recency；(b) 迟到结果一律允许重放终态——会破坏既有幂等语义 （失败轮被重复 result 触发重复 auto-recover/事件），风险面大，收窄到误杀标记+成功这一种 组合。
 
@@ -120,6 +122,7 @@ supersedes：D-007@v1
 状态：implemented
 变更：2026-10-09-stale-recheck-scope
 锚点：未记录
+文件：.sillyspec/changes/2026-10-09-stale-recheck-scope/design.md, .sillyspec/changes/2026-10-09-stale-recheck-scope/requirements.md, .sillyspec/changes/2026-10-09-stale-recheck-scope/tasks.md, backend/app/modules/agent/service.py, backend/tests/modules/agent/test_stale_run_recheck.py, .sillyspec/changes/2026-10-09-stale-recheck-scope/proposal.md
 最近确认：ef3fca11264f031c7ef95c05eb7da475e76cbb81
 理由：最大风险：daemon 活性门放过的「在线 daemon + 永久静默轮」会一直被追踪不判死——有意取舍（对齐 patrol 判死段语义：在线 daemon 的轮不判死，归属用户取消/会话超时面）；若需硬上限可后续迭代加最长追踪时长。次风险：`_run_daemon_alive` 的 lease 倒序首见语义在 lease 频繁重建时可能解析到无 runtime_id 的新 pending lease 而返回 None——None 走 recency 判死，方向与原实现一致不放大。试过放弃：(a) 复扫判死面保持全局仅加活性门——放弃，启动后新开轮每 10 分钟进判死面本身就是审查实证缺陷源；(b) 循环异常无限重试——放弃，持久故障下无限日志噪音且违背有界退避要求。
 
@@ -141,6 +144,7 @@ supersedes：D-007@v1
 状态：implemented
 变更：2026-10-10-run-close-task-sweep
 锚点：未记录
+文件：.sillyspec/changes/2026-10-10-run-close-task-sweep/design.md, .sillyspec/changes/2026-10-10-run-close-task-sweep/flow-state.yaml, .sillyspec/changes/2026-10-10-run-close-task-sweep/proposal.md, .sillyspec/changes/2026-10-10-run-close-task-sweep/requirements.md, .sillyspec/changes/2026-10-10-run-close-task-sweep/review.json, .sillyspec/changes/2026-10-10-run-close-task-sweep/tasks.md, backend/app/modules/agent/service.py, backend/app/modules/daemon/agent_task_store.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_agent_session_tasks.py, .sillyspec/changes/2026-10-10-run-close-task-sweep/review.json.superseded-20261010T160543
 最近确认：9efccfff7751ef838fe436eafa9da030ef68554d
 理由：- 最大风险：daemon 对「子代理实际还在跑」的极窄窗口（run 收口瞬间任务仍在收尾事件在途）会被提前收口为 stopped——但 run 已终态意味着该轮进程已结束，任务不可能再产出合法结果，收口语义正确；迟到终态事件仍可覆盖（乱序问）。 - 放弃方案「读端把终态 run 的 running 任务渲染为停止」：治标——脏数据永存、导出/其它消费方仍见 running；放弃「给 upsert 加会话级对账」：面大且治不了存量。 - 已知残留：message 覆盖旧值（Optional 字段 latest-wins 既有语义内，可接受）。
 
@@ -148,6 +152,7 @@ supersedes：D-007@v1
 状态：implemented
 变更：2026-10-11-task-sweep-daemon-truth
 锚点：未记录
+文件：.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/design.md, .sillyspec/changes/2026-10-11-task-sweep-daemon-truth/flow-state.yaml, .sillyspec/changes/2026-10-11-task-sweep-daemon-truth/proposal.md, .sillyspec/changes/2026-10-11-task-sweep-daemon-truth/requirements.md, .sillyspec/changes/2026-10-11-task-sweep-daemon-truth/tasks.md, backend/app/modules/agent/provider_caps.py, backend/app/modules/agent/service.py, backend/app/modules/daemon/agent_task_store.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_agent_session_tasks.py, frontend/src/lib/provider-caps.ts, sillyhub-daemon/src/cli.ts, sillyhub-daemon/src/codex-settings.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/codex-app-server-driver.ts, sillyhub-daemon/src/interactive/cursor-driver.ts, sillyhub-daemon/src/interactive/pi-rpc-driver.ts, sillyhub-daemon/src/interactive/providers.ts, sillyhub-daemon/src/interactive/session-manager/background-tasks.ts, sillyhub-daemon/src/pi-settings.ts
 最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
 理由：- 最大风险：部署窗口内 daemon 旧版（无该 RPC method）→ method_not_found 跳过 → 卡死行暂不收敛（回到 v1 之前的滞留态）直到 daemon 升级——安全方向的退化（宁可不收不错收），daemon 经 /daemon 分发自动升级，窗口有限。 - 放弃方案「问询结果缓存 + TTL」：重新引入时间参数且收益微小（清扫触发点低频）；放弃「daemon 周期性全量推送任务表」：广播放大 + 双端状态机，远重于按需问询。 - 已知残留：daemon 注册表本身的丢失窗口（重启后 task_notification 无处可归被跳过——17 条实证根因）仍会让终态事件丢失，但确认清扫在下一触发点把它收敛（这正是本设计的收敛路径）；is_async 列仍恒 false（daemon emit 不带 async 字段——遗留元数据问题，不再是死判依赖，留待后续按需修）。 - 前两代裁决作废声明：run-close-task-sweep 的「run 终态即收」与 task-sweep-liveness-guard 的「5 分钟宽限」死判均被本变更废除，标记/复活机制沿用。
 
@@ -155,5 +160,6 @@ supersedes：D-007@v1
 状态：implemented
 变更：2026-10-14-agent-profile-express-preset
 锚点：未记录
+文件：backend/app/main.py, backend/app/modules/agent/profile/seed.py, backend/app/modules/agent/tests/test_profile_seed.py
 最近确认：534cef161623ee81046dd08d697300c005071294
 理由：最大风险：协议文案把「新功能/大改动」也错误降级进极速通道——文案显式写入规模定级与拒绝降级条款（新功能提示改走完整 brainstorm 流程）。放弃方案 A（加为第三条 `is_system_default=True` 默认档案）：会进 `resolve_profile` 兜底链改变所有未选档案会话的默认人格（破坏零回归），且 seed 去重按 provider 与既有 claude 默认档冲突；放弃方案 B（仅用管理 API 在当前库建一条数据）：DB 重置即丢（规则 11 允许重置）、不可复现，不符合「平台预置」语义。

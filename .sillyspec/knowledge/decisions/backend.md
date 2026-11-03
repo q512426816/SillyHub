@@ -5,6 +5,7 @@
 ## D-001@v1 : plan 模式采用强确认交互
 状态：implemented
 锚点：`frontend/src/components/daemon/plan-approval-card.tsx`
+文件：.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md, backend/Dockerfile
 最近确认：04bb45fe
 理由：强确认，类似 askuser 弹窗。
 
@@ -416,6 +417,7 @@ supersedes：D-005@v1
 状态：implemented
 变更：2026-10-08-backend-dockerfile-apt-mirror-sjtu
 锚点：未记录
+文件：.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md, backend/Dockerfile
 最近确认：d304aefe57ac5e79cc74c094f21d1760d3e5ac5f
 理由：最大风险：sjtu 源将来同样故障/限速（镜像站轮流抽风的先例：aliyun 2026-07-17、tuna 2026-10-08）——已在 Dockerfile 注释里留下完整的换源史与实测数据，下次故障按同模式 5 分钟内可再换。放弃的方案：① 原样重试（已试，两次死同层，tuna 服务端故障非瞬时抖动）；② 换 aliyun/ustc/huawei/http 官方源/deb.debian.org（实测同慢 ≈80KB/s，9.6MB 索引在 apt 超时内下不完）；③ 走本机 Clash 代理（7897 实测 2MB/33s 无改善）；④ 增大 apt 重试次数（传输中断形态重试无效，且要改同一行不如换源）。
 
@@ -424,6 +426,7 @@ supersedes：D-005@v1
 变更：2026-10-15-deploy-records-unicode-tolerance
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/frontend/modules/components-shared.md, .sillyspec/docs/frontend/modules/lib-api.md, .sillyspec/docs/frontend/modules/lib-health.md, .sillyspec/docs/frontend/modules/lib-menu-permissions.md, backend/app/modules/deploy_records/service.py, backend/app/modules/deploy_records/tests/test_service.py
 最近确认：95d37f93be47e223ffc6a1f405535b13f7de5d20
 理由：最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
 

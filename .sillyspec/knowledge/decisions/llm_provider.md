@@ -6,5 +6,6 @@
 状态：implemented
 变更：2026-10-08-provider-update-models-none-guard
 锚点：未记录
+文件：.sillyspec/changes/2026-10-08-provider-update-models-none-guard/design.md, .sillyspec/changes/2026-10-08-provider-update-models-none-guard/flow-state.yaml, .sillyspec/changes/2026-10-08-provider-update-models-none-guard/proposal.md, .sillyspec/changes/2026-10-08-provider-update-models-none-guard/requirements.md, .sillyspec/changes/2026-10-08-provider-update-models-none-guard/tasks.md, .sillyspec/docs/backend/modules/change.changelog.md, backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py, docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md, docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md
 最近确认：87e292759e4934ec73c9c92152c38de97610509e
 理由：最大风险：防护误伤「显式清空/替换列表」语义——已排除：清空应传 `[]`（非 None），防护只拦 None，回归用例内双断言钉死。放弃的方案：schema 层 validator 拒收 models=None——会使 openapi anyOf null 契约与字段注释「None=不动」双双失真，且与 api_key/agent_kinds 既有 None-pop 惯例不一致，不采用。

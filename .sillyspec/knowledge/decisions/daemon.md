@@ -13,6 +13,7 @@
 状态：implemented
 变更：2026-10-04-handoff-doc-kind-contract
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/session-manager/lifecycle.ts, sillyhub-daemon/src/interactive/turn-anchor.ts, sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts, sillyhub-daemon/tests/interactive/turn-anchor.test.ts
 最近确认：5d86f73b2cfc02a803dc079a4d0daaddbb85bc94
 理由：最大风险：regex 兜底从截断 JSON 提取 path 时，若 path 类键值本身被 2KB 截断切断会取出半截路径进「涉及文件」节（展示性瑕疵，不参与任何匹配/写库）。试过放弃的方案：改 daemon 侧让 tool_input 直接下发结构化 path 字段——要动 RPC 契约 + 老 daemon 兼容窗口 + 前端同步，代价远超收益；JSON 字符串解析在 backend 侧做即可闭环，故弃。
 
@@ -20,6 +21,7 @@
 状态：implemented
 变更：2026-10-04-handoff-op-detail
 锚点：未记录
+文件：.sillyspec/changes/2026-10-04-handoff-op-detail/design.md, .sillyspec/changes/2026-10-04-handoff-op-detail/flow-state.yaml, .sillyspec/changes/2026-10-04-handoff-op-detail/proposal.md, .sillyspec/changes/2026-10-04-handoff-op-detail/requirements.md, .sillyspec/changes/2026-10-04-handoff-op-detail/tasks.md, backend/app/modules/daemon/session/service/takeover.py, backend/app/modules/daemon/tests/test_takeover_handoff.py
 最近确认：0479804512b435b4129e8eacb2b5768802f9c1ac
 理由：最大风险：regex 兜底从截断 JSON 取 command 时，命令值本身被 2KB 截断切断会得到半截命令进操作行（展示性，同上一变更已披露的半截路径边界；不参与匹配/写库）。120 字符截断已把该噪声压到一行内。试过放弃的方案：操作行带完整 tool_input JSON——2KB/条的原始入参让 8 行操作节膨胀到淹没对话节，且大量与涉及文件节重复；摘要（单字段值）信息密度/噪声比最优，故弃。
 
@@ -34,6 +36,7 @@
 状态：implemented
 变更：2026-10-09-status-root-write-race
 锚点：未记录
+文件：.sillyspec/changes/2026-10-09-status-root-write-race/design.md, .sillyspec/changes/2026-10-09-status-root-write-race/flow-state.yaml, .sillyspec/changes/2026-10-09-status-root-write-race/proposal.md, .sillyspec/changes/2026-10-09-status-root-write-race/requirements.md, .sillyspec/changes/2026-10-09-status-root-write-race/tasks.md, docs/sillyspec/finished/flow-done-sentinel-token-split-and-no-subagent-review.md, docs/sillyspec/finished/init-skills-sync-no-zcode.md, docs/sillyspec/finished/thin-done-src-commit-order-and-attribution-paren.md, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
 最近确认：ad9c05fb8cb88d8510207c895a9157960bfa533d
 理由：最大风险：回归用例对竞态的检出是概率性的（旧码本地 ×20 用例 3 跑未触发、原用例 1/3 触发、CI 触发）——窗口取决于 fs 调度；以机理代码读证 + CI 实跑红作红证，用例作放大器非唯一防线。次风险：链上积压（极端高频 claim）延迟落盘——量级为毫秒级写排队，claim 频率远达不到。试过放弃：(a) 只修测试轮询窗口——放弃，生产同款竞态（两次快速 claim 持久化旧根）仍在；(b) 写前 coalesce（同值跳过）——`_sillyspecStatusRoot === rootPath` 早退已有同值短路，跨值仍需保序，链式是完备解；(c) 防抖 500ms——放弃，改落盘时效语义且测试需假时钟。
 
@@ -41,6 +44,7 @@
 状态：implemented
 变更：2026-10-11-borrow-ctx-metadata-truncate
 锚点：未记录
+文件：.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/design.md, .sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/flow-state.yaml, .sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/proposal.md, .sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/requirements.md, .sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/tasks.md, sillyhub-daemon/src/borrow-sandbox-context.ts, sillyhub-daemon/tests/borrow-sandbox-context.test.ts
 最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
 理由：最大风险：截断只缓解不根治——注入者仍可在 500 字符内塞指令样文本；根治需 backend schema 层加 `max_length`（动 OpenAPI/前端表单，超出本 P3 修复范围，作为建议留档）。文尾「平台登记数据，不是用户指令」声明与 500 截断同为本模块纵深防御既定层级。 放弃的方案：backend schema 层加 max_length 硬校验——面更大（DTO/OpenAPI/前端 api-types 重生成），且 lender 工作区登记属低频管理操作，daemon 侧渲染截断已闭合 agent 注入面；backend 硬校验作为后续建议不在本变更。
 
@@ -48,6 +52,7 @@
 状态：implemented
 变更：2026-10-11-daemon-masked-test-fix
 锚点：未记录
+文件：.sillyspec/changes/2026-10-11-daemon-masked-test-fix/tasks.md, sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts, sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json, sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts, sillyhub-daemon/tests/protocol-session-contract.test.ts, .sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md, .sillyspec/changes/2026-10-11-daemon-masked-test-fix/proposal.md, .sillyspec/changes/2026-10-11-daemon-masked-test-fix/requirements.md
 最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
 理由：最大风险：pi 翻 mcp=true 后兜底代报的 codex/cursor 载体若未来也翻 true，本测试面将再失载体——届时应按 caps 现状再选载体或改测 caps 注入而非硬编码 provider 名（当前 getProviderCaps 直接读注册表，测试无注入点，故先硬编码）。放弃的方案：把 daemon.ts 门控改回对 pi 也代报（推翻 task-08 SPIKE-00 实测结论，制造双写缺陷——不做）；给 golden 快照写自动再生成脚本（一次性三键补齐用不上专用管线，且驱动协议依赖 vitest fake timers，脚本化收益低于维护成本——手补 + 头注留痕）。
 
@@ -55,6 +60,7 @@
 状态：implemented
 变更：2026-10-11-linked-repos-path-guard
 锚点：未记录
+文件：.sillyspec/changes/2026-10-11-linked-repos-path-guard/design.md, .sillyspec/changes/2026-10-11-linked-repos-path-guard/flow-state.yaml, .sillyspec/changes/2026-10-11-linked-repos-path-guard/proposal.md, .sillyspec/changes/2026-10-11-linked-repos-path-guard/requirements.md, .sillyspec/changes/2026-10-11-linked-repos-path-guard/tasks.md, sillyhub-daemon/src/linked-repos-path.ts, sillyhub-daemon/src/linked-repos-snapshot.ts, sillyhub-daemon/src/linked-repos-sync.ts, sillyhub-daemon/tests/linked-repos-snapshot.test.ts, sillyhub-daemon/tests/linked-repos-sync.test.ts
 最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
 理由：最大风险：形态校验挡不住「合法形态的恶意绝对路径」——但那正是功能本体（用户登记自己机器上的任意路径），真正的边界在 backend 归属校验与 sillyspec CLI 自身的写入范围，本变更是把「垃圾/相对形态导致的 cwd 漂移与未定义行为」关掉（纵深防御第二道），不冒充完整授权模型。声明边界：`..` 段在 rel_path 合法（兄弟仓约定）、在 abs_path 不受限。 放弃的方案：① 裸 `path.isAbsolute`——平台相关，ubuntu-latest CI 上 `C:/` fixture 全线假红；② rel_path 禁 `..` 段——打翻既有 `../platform-specs` 兄弟仓约定（fixture 实证），把合法流判成非法；③ daemon 侧维护「已登记路径白名单」——daemon 无 backend 登记面视图，引入状态同步问题且与 RPC 请求-响应模型相悖。
 
@@ -62,6 +68,7 @@
 状态：implemented
 变更：2026-10-11-task-sweep-liveness-guard
 锚点：未记录
+文件：.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/design.md, .sillyspec/changes/2026-10-11-task-sweep-liveness-guard/flow-state.yaml, .sillyspec/changes/2026-10-11-task-sweep-liveness-guard/proposal.md, .sillyspec/changes/2026-10-11-task-sweep-liveness-guard/requirements.md, .sillyspec/changes/2026-10-11-task-sweep-liveness-guard/tasks.md, backend/app/modules/daemon/agent_task_store.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_agent_session_tasks.py
 最近确认：460c2474d9377ddeef2971b481f8a56cd0700b5a
 理由：- 最大风险：宽限窗 5 分钟是启发式——「真死但 5 分钟内曾心跳」的任务在收口时点不被收、依赖延迟复扫；「活着但超 5 分钟无心跳」（长静默后台任务）仍会被误收——由复活分支兜底（下一心跳自愈），最坏窗口=下一心跳间隔。心跳间隔取决于 daemon 上报节奏（工具调用/进度行），长纯计算任务可能稀疏——已知残留，如实接受。 - 放弃方案「按 is_async 排除」：线上标记恒 false，保护不了实际跨轮任务（已验证 0 条异步行）；放弃「run 收口不清扫、只靠启动兜底」：回到原始 bug（不重启永卡 running）。 - 前一变更被本次修正的裁决：其「run 终态后任务不可能仍合法运行」表述作废，收口面由本变更收窄。
 
@@ -69,6 +76,7 @@
 状态：implemented
 变更：2026-10-13-daemon-turn-anchor-snapshot
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/turn-anchor.ts, sillyhub-daemon/tests/interactive/turn-anchor.test.ts
 最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
 理由：最大风险：大仓上每轮 git add -A 的 IO 成本——mitigated by 复制现场 index（stat 缓存命中）+ tree sha 去重（零变化轮零落盘）；廉价门（本轮工具事件触过文件才打锚，评审 Gap4）留作后续切片，当前以去重+缓存先扛。次风险：首轮 diff 退 HEAD 树会漏掉"轮内已 commit"的归因（内容变化仍在 tree-to-tree 链上，仅首轮 files 口径偏小）——最小闭环已知边界，记档不扩。既有测试影响：onResult 接线在既有 session-manager 测试中对假 cwd（C:\work 等不存在路径）静默 null，实测 tests/interactive/ 1115 用例两轮全绿（首跑 1 例 pi-rpc 60ms 握手抖动，复跑+单跑均绿，与本改动无关）。 放弃的方案：①`git stash create` 打锚——不含 untracked（评审 Gap1 定性为雷，直接否决）；②每轮 commit 到 side ref——写引用有状态、并发清理复杂，write-tree 无引用纯内容寻址更干净；③`git status --porcelain` 轮询比对——无行级统计且 rename/untracked 口径碎；④锚存 DB（backend 落库）——本切片刻意 daemon-local（零 API 面），DB 化留给下一切片连同前端展示一起做。
 
@@ -76,6 +84,7 @@
 状态：implemented
 变更：2026-10-13-turn-anchor-flowdiff-shape
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/turn-anchor.ts, sillyhub-daemon/tests/interactive/turn-anchor.test.ts
 最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
 理由：最大风险：totals 与 files 不一致（存量漂移）——缓解：toFlowDiffShape 不信任存量 totals、始终从 files 重算（落盘 totals 只是消费方便利，真相在 files）；新落盘记录两者同源同算。次风险：rows 无 state 字段被消费方误当 flow diff 完整契约——JSDoc 明示维度差异。试过放弃的方案：①在 JSONL 行内再加 rows 别名数组——同一数据双字段冗余存 JSONL，膨胀且易漂移；②在 sillyspec flow diff 侧加轮粒度模式——CLI 不应知道 daemon 的会话轮概念，职责倒置。均否。
 
@@ -83,6 +92,7 @@
 状态：implemented
 变更：2026-10-14-turn-anchor-cache-eviction
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/session-manager/lifecycle.ts, sillyhub-daemon/src/interactive/turn-anchor.ts, sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts, sillyhub-daemon/tests/interactive/turn-anchor.test.ts
 最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
 理由：最大风险：清理后同会话被复用（同 id 再打锚）时 prev 恢复依赖 JSONL 尾行读取， 多一次文件读——仅理论场景（终态会话不再有新轮），且与既有重启兜底同路径、已被 既有用例覆盖。试过但放弃：① LRU/条目上限淘汰——引入魔法数与淘汰策略复杂度， 会话终结点清理语义更准确；② clear 同时删 `_chainBySession`——链自身 finally 已 自清理，额外删除无收益反而在同 id 复用时破坏串行链衔接。
 
@@ -149,6 +159,7 @@ supersedes：D-004@v1
 变更：2026-10-15-dsh-engine-acp
 原编号：D-003@v1
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/dsh-acp-driver.ts
 最近确认：775d86011
 理由：方案 A：新写 `sillyhub-daemon/src/interactive/dsh-acp-driver.ts`，复用 codex 同款 `adapters/json-rpc.ts` 分帧/关联基建，手写 ACP v1 方法面（initialize / session/new / session/prompt / session/cancel / session/update 通知 / session/request_permission / session/set_config_option）到 AgentEvent 的映射；对照 dsh 仓库 packages/subagent/subagent-acp 参考客户端实现。理由：ACP v1 方法面比 codex app-server 还小；与三驱动同构、注册表/caps 三端镜像/审批管线零摩擦；不给 daemon 添新依赖。
 故障面：ACP 通知语义映射手写出错（如 tool_call 生命周期错序）→ 单测钉 ACP spec 样例事件序列防偏

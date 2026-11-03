@@ -7,6 +7,7 @@
 变更：2026-10-15-pseudo-domain-migration
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/provider_caps.py, backend/app/modules/agent/tests/test_provider_caps_alignment.py, backend/app/modules/daemon/group/service/helpers.py, backend/app/modules/daemon/group/service/messages.py, backend/app/modules/daemon/group/service/shadow.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_group_attachment_gate.py, backend/openapi.json, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/daemon/runtimes.ts, frontend/src/lib/provider-caps.ts, sillyhub-daemon/scripts/gen-provider-caps.mjs, sillyhub-daemon/src/agent-detector.ts, sillyhub-daemon/src/api-types.ts, sillyhub-daemon/src/dsh-settings.ts, sillyhub-daemon/src/interactive/dsh-acp-driver.ts, sillyhub-daemon/src/interactive/dsh-acp-events.ts
 最近确认：4b034a03ce257a51d95c741e3ead072ed6427410
 理由：最大风险：主域机械裁决的错分（如 ci-recurrence-guard 横断变更落 frontend_components 而非 CI 语义域）——接受：规则与触达路由同源（判定集含 frontend_components 时注入必达），横断变更多域命中下无唯一正确解；人工改判两处已在案。次风险：6 条无变更条目主题判域 daemon 属人工判断——留痕可复议。第三风险：坏段/重复段修复属数据手术——归档真相源核验+段字节级操作+validate ok+git 留痕四重保护。放弃方案：①按条目语义逐条人工判域（436 条不可行）；②保持 unmapped 只设基线消音（用户明示迁真域）；③重蒸馏迁移（归档源改不动）。
 
@@ -15,6 +16,7 @@
 变更：2026-10-15-workspace-session-agent-only
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, backend/app/modules/agent/provider_caps.py, backend/app/modules/agent/tests/test_provider_caps_alignment.py, backend/app/modules/daemon/group/service/delegation_notice.py, backend/app/modules/daemon/group/service/helpers.py, backend/app/modules/daemon/group/service/messages.py, backend/app/modules/daemon/group/service/shadow.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_group_attachment_gate.py, backend/app/modules/daemon/tests/test_group_bridge_projection.py, backend/openapi.json, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx, frontend/src/app/m/workspaces/[id]/sessions/page.tsx
 最近确认：add1712b21ebc572ce84ff4e2436ed07500aba54
 理由：**风险（已接受并留了出口）**： 1. 绑定机器离线/不可见时用户「无路可走」——本设计砍掉机器列表（需求要求），但空态文案给出两条恢复路径（启动 daemon / 去工作区页重绑定）。若实测反馈需要临时换机器，后续可在空态加「换机器」降级入口（本期不做，避免破坏「不选机器」语义）。 2. 门户/悬浮宿主沿用非工作区路径的旧直带逻辑未动，两套直带条件并存（工作区=agent 即可，非工作区=machineId+agent）——已在代码注释与 FR-04 显式声明，防后人误「统一」。 **试过但放弃的方案**： - 只改工作区 scope 页、不动全局门户的工作区分组 → 同一动作在不同入口表现不一致，用户会认为「有的地方还要选机器」。 - 后端支持「只传 workspace_id + provider，由后端按 binding 派发机器」→ 改动面扩到后端 placement/inject_gates/契约/gen:types，且前端仍需知道「哪台机器在线」才能给空态指引；本期前端解析 binding 已足够，后端零改动。 - 绑定模式保留「机器」只读展示 + 展开可换机器 → 与「不应该选择机器信息」直接冲突，且增加状态机复杂度。
 
@@ -23,6 +25,7 @@
 变更：2026-10-15-assets-graph-depth
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx, frontend/src/components/changes/detail/change-assets-graph.tsx
 最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
 理由：- 风险一：深度 2-3 切片节点数可能超 FORCE_NODE_LIMIT=200——GraphCanvas 既有 >200 静态分环降级自动兜住（2026-10-15-graph-type-cluster 语义），组件无需新增护栏；可达性上 depth 3 大仓可能秒级耗时，keepPreviousData 已保证切换期间有内容可看。 - 风险二：keepPreviousData 期间 counts 文案显示旧切片计数——数据到达即原位刷新，短暂陈旧可接受（与 changes 列表页同语义）。 - 试过放弃：①Select 下拉选深度——卡头横向空间紧张，三档 chips 一眼可达（图谱页用 Select 是因为表单还有 sub/edges 多控件，此处只有 depth 一维）；②把 depth 做成资产卡 props 传下来——深度是图谱分区内部交互态，与资产卡取数无关，上提徒增传参链。
 
@@ -31,6 +34,7 @@
 变更：2026-10-16-proto-pipeline-discoverability
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/multi-agent-platform/scan/CONVENTIONS.md
 最近确认：0e5d3f3b0b49be367746945232dc5ac7a0cb70c3
 理由：- 风险1：CONVENTIONS.md 全量重扫覆盖指针节。对策：接受（重扫由人触发且低频；local.yaml 登记位与注释永不丢失，是持久底座）。 - 风险2：YAML 手写缩进错导致解析失败回落未登记态。对策：FR-03 以 readUiPrototypeForm 实测登记成功为验收；失败即修。 - 死路：考虑过把两份规约复制落档到本图 scan 面——放弃：双源必漂移（PROTOTYPE.md 是活文档）；指针优于副本。
 
@@ -47,6 +51,7 @@
 变更：2026-10-16-archived-files-tab
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx, frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx, frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx, frontend/src/components/changes/detail/change-files-panel.tsx, frontend/src/components/changes/detail/change-overview-side.tsx, frontend/src/components/changes/detail/change-tabs.tsx
 最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
 理由：- 风险：归档态恢复「文件与对账」后，范围对账卡在归档态显示降级信息（指路「产出 · 归档留档」）——与用户诉求（归档留档不展示 spec 文档全貌）不冲突：卡内有降级说明，文件树与预览照常可用。 - 试过放弃：仅对归档隐藏「范围对账」保留文件树——放弃：对账与文件树同属一卡拆开会造成半空卡，且用户诉求未要求拆。 - 死路：无（改动面小：visibleTabs 单函数 + page.tsx 挂载条件 + 信息栏入口文案）。
 
@@ -55,6 +60,7 @@
 变更：2026-10-15-session-turn-completion-semantics
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/hooks/__tests__/use-session-liveness.test.ts, frontend/src/hooks/use-session-liveness.ts, frontend/src/lib/session-completed-unread.ts
 最近确认：fcd4a40489512f45d8e646965833e5e7c13e400b
 理由：最大风险：轮次完成依赖活性数据链（daemon 自发现日志 → tailer 推导 → 推送落库 → 前端 30s 轮询），链路断则「跑完无绿点无通知」依旧——用户阿里云实测正是此现象，属部署/数据面问题，本变更不解决链路本身（已在交付说明给服务器排查清单：工作台总览卡有无活性行 → 判别上报链断 vs 关联断）。放弃的方案：a) 给 idle 设时间窗（如 N 小时内算「刚完成」）——引入魔法数且窗口内重复渲染绿点语义含混，改用点击清除的确定性语义；b) 保留红角标只加绿角标——同一行两枚角标且语义重叠（「回来看看」vs「执行完成」是同一事件），用户明确要绿色完成语义；c) 把完成检测全收进面板（连活性转移也面板算）——面板需自维护活性 prevState 副本，与 hook 的 prevState 键双源漂移，不如 hook 单处检测。
 
@@ -63,6 +69,7 @@
 变更：2026-10-16-session-run-status-realtime
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_sessions_list_run_status.py, backend/openapi.json, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
 最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
 理由：最大风险：run 状态回写时机依赖 daemon 回传（run 终态经 daemon RPC/清扫收敛落库）——daemon 半死时 run 可能滞留 running（转圈不停）。缓解：既有 lease 超时/清扫机制兜底收敛；且终态权威（ended/failed）与活性兜底信号不受影响。放弃的方案：a) 按用户最初设想做「交互触发按需查询 daemon 推导」——需要新 RPC + daemon 在线，平台派发会话本就有后端权威 run 状态，绕远路；保留为本地会话未来的可选增强。b) 前端单独拉每会话 run 列表端点——N+1 请求放大，列表批量注入一条 SQL 更优。c) run 状态直接写进 AgentSession.status 列——混淆会话生命周期与轮次执行两层语义（一轮跑完会话仍 active），动 ORM 需迁移。
 
@@ -71,6 +78,7 @@
 变更：2026-10-15-server-logs-dockerfile-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, .zcode/skills/deploy-to-server/SKILL.md, backend/Dockerfile, backend/app/core/logging.py, backend/tests/test_server_log_filer.py, docs/releases/2026-10-16-007-2b1b58796.md
 最近确认：145bd757934b3ecdf4dc33f855f937b1000cb9f8
 理由：最大风险：已部署的服务器若以 bind-mount 覆盖 /data（宿主目录属 root），镜像内 chown 不生效——预建目录会被挂载遮蔽，仍可能权限被拒；此时降级警告（修复②）会在容器日志里明示原因，按日志处置（宿主侧 chown 或配 log_dir 指向可写路径）。放弃的方案：改 docker-compose 加 volume 挂载日志目录——引入部署编排变更且服务器侧需手工迁移，超出「镜像自包含」修复边界（如需持久化日志到宿主，后续独立变更处理）。
 
@@ -79,6 +87,7 @@
 变更：2026-10-16-deploy-convergence-guard
 原编号：D-001@v1
 锚点：未记录
+文件：.zcode/skills/deploy-to-server/SKILL.md, deploy/scripts/build-and-save.sh
 最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
 理由：最大风险：闸门挡不住「两个会话都从 main 打包、先后部署」的时序互覆（后部署者覆盖先部署者——若两者都是 main 且后者更旧则仍回退）。兜底：§0 的部署后 commit_sha 核对能立即发现；彻底解（部署互斥/登记表）留待需要更多实证后做。放弃的方案：a) 只改 skill 文档不加脚本闸——事故证明纯约定无效（并行会话各行其是），机械闸必须；b) 部署登记文件 .last-deploy 比对——需要 load-and-up.sh 也改+跨会话写同一文件，复杂度高于本次 thin 边界，列为后续。
 
@@ -87,6 +96,7 @@
 变更：2026-10-16-change-files-sync-result
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/change.md, .sillyspec/docs/SillyHub/modules/frontend_components.md, .sillyspec/docs/SillyHub/modules/frontend_lib.md, .sillyspec/docs/backend/modules/change.md, .sillyspec/docs/multi-agent-platform/flows/auth-flow.md, .sillyspec/docs/multi-agent-platform/modules/deploy.md, .zcode/skills/deploy-to-server/SKILL.md, backend/app/modules/change/router.py, backend/app/modules/change/schema.py, backend/app/modules/change/tests/test_files_refresh_sync.py, backend/openapi.json, docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md, frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx, frontend/src/components/change-file-tree.tsx, frontend/src/lib/__tests__/change-file-sync.test.ts, frontend/src/lib/api-types.ts, frontend/src/lib/change-file-sync.ts, frontend/src/lib/change-files.ts, sillyhub-daemon/src/api-types.ts
 最近确认：7ca3e7ba66d5d065715a08ea885d064b2617e3e9
 理由：- 最大风险：15s 预算让「刷新」在同步窗口内最长等 15s（原 3s 秒回旧数据）——用「等待换正确」；极端大仓首同步 >15s 仍会超时，但 daemon 侧继续完成、防抖 TTL 内重点秒回新数据（有明确降级路径，不卡死）。若未来实测普遍 >15s，应改异步推送而非继续加预算（本变更未做，留作后续观察项）。 - 死路（已否决，勿复潮）：fire-and-forget + 前端二次刷新启发式（2026-10-13 D-006@v1）；新增显式 POST 同步端点（D-007@v1）；「继续 3s 只补日志」——治不了「刷不到」主诉，只增排障信息，不采。 - 运维同根因（服务器属主漂移致 spec-sync 500）属部署面，已由 ops 修复 + deploy skill 探针守护，代码面不做属主自动修补（越权面）。
 
@@ -95,6 +105,7 @@
 变更：2026-10-16-agent-session-field-pin-sync
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/tests/test_agent_session_model.py
 最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
 理由：最大风险：钉子与真实模型再次漂移（后续给 agent_sessions 加列的人再次漏更）——护栏恰是本钉子自身（届时实测门会再拦，按本次同款流程补钉即可，local.yaml 豁免仅作过渡不长期留存）。曾考虑的替代方案：把字段集断言放宽为"包含关键列子集"以降低维护成本——放弃：钉子的价值恰在精确集，放宽即失去"未登记列变更"的探测能力。
 
@@ -103,6 +114,7 @@
 变更：2026-10-16-daemon-pull-antiresurrect
 原编号：D-001@v1
 锚点：未记录
+文件：sillyhub-daemon/src/spec-sync.ts, sillyhub-daemon/tests/pull-antiresurrect.test.ts
 最近确认：056cff30397de0c5001874901cbbe03d6319df65
 理由：- 最大风险：**误抑制**（用户删除后又在秒级窗口手工恢复同名文件，pull_start 现算的抑制集会把 bundle 版本挡掉）——与 CLI 同构接受（窗口极窄，且有 restoreDeleted/env 显式恢复通道兜底）。 - 次风险：manifest 长期失真（如历史版本缓存含已不在同步面的路径）导致抑制面偏大——已用 `isUploadExcludedPath` 同口径过滤 + 「删除上行成功自然衰减」收敛；且只影响 pull 恢复面，不损伤任何现存文件。 - 首版缺口（独立评审 P2 实证，已修复）：首版只读 manifest、落地重建不并回被抑制行——delete op 生成条件「缓存有/盘面无」随重建断裂，抑制只活一个 pull 周期，第二次自动 pull 复活照旧。修复：落地重建时并回被抑制行（FR-04 持久性语义），新增第二次 pull 持久性测试断言。 - 试过但放弃：①改 `extractTar` 加 skip 参数（侵入面大、in-place 兜底仍需补刀）→ 放弃，改为解包后对命中路径 rm（两路径统一、签名不动）；②在 `hasUnsyncedLocalChanges` 加删除检测（pending/mtime 信号反推）→ 放弃，删除检测本质需要基线快照，重复造 manifest 已有的能力且动既有判定函数风险更高；③照搬 CLI 在 rm 前读基线文件的形态 → 放弃，daemon 的 manifest 缓存已是等价基线且生命周期管理（pull/push 双点回写）更完备。
 
@@ -111,6 +123,7 @@
 变更：2026-10-16-change-center-back-keeps-list-state
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/change/tests/test_title_backfill.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
 最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
 理由：- **风险①（已知取舍）**：`history.length > 1` 判定在「从站外页点链接进详情」场景会 back 回站外页——内部工具场景罕见，且符合浏览器标准「返回」语义；Next 14.2.5 的 history.state 无可靠栈深标记（idx 为 Next 15+ 字段），无法精确判定「上一条是否本站」， 接受该取舍。 - **风险②**：原生 replaceState 后浏览器「后退」退出列表（不回溯列表内翻页历史）——与 改造前行为一致（useState 翻页本就不产生历史条目），非行为退化；URL 与 UI 的瞬时不一致 仅出现在列表页内按浏览器后退的瞬间（随即整页离开列表），用户实证范围内不可见。 - **死路 A（放弃）**：router.replace 写回——每次翻页触发 RSC 导航请求（页面是 server component 树根），快速翻页产生请求风暴且可能互相竞态。 - **死路 B（放弃）**：sessionStorage 记「最后列表 URL」——多标签页隐式共享面、SSR hydration 需要挂载后二次渲染切 href，复杂度高于收益。 - **死路 C（放弃）**：详情页 URL 反向携带列表 query——污染详情 URL（分享/收藏语义脏）， 且从工作区首页等非列表入口进详情时无 query 可带。
 
@@ -119,6 +132,7 @@
 变更：2026-10-16-change-title-condense-backfill
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/backend/modules/change.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/change/router.py, backend/app/modules/change/schema.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_rename_title.py, backend/app/modules/change/tests/test_title_normalization.py, backend/app/modules/change/title_backfill.py, backend/app/modules/change/title_norm.py, backend/app/modules/platform_sync/service.py, backend/app/modules/platform_sync/tests/test_change_deleted_guard.py, backend/openapi.json, backend/scripts/backfill_change_titles.py, docs/sillyspec/active-pitfalls.md, docs/sillyspec/change-title-not-readable.md, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/lib/api-types.ts
 最近确认：26271e914c9bd670faf2da32ab0851025c5e6598
 理由：最大风险：提炼结果语义跑偏（标点切断点选错把句子切成病句）。缓解：强边界（句读完整处）优先、必须带 [10,30] 内取首个边界、本仓实证坏样本全部进单测人工核过产出；且 title 只是展示面，错了可由人工改名端点（FR-05/06）随时纠正——这也是补改名能力的动机：提炼是兜底自动化，最终命名权在人。 试过放弃的方案：(a) 在前端展示层动态截 title——治标不治数据，详情页/搜索/通知等其余消费面仍旧烂，弃；(b) 回填脚本去工作区盘上重读 proposal.md 取动机——读盘逻辑与 reparse 职责重叠且工作区可能已迁移/不可达，description 列已是同源提取结果，弃；(c) 放宽收养守卫让 CLI 短标题覆盖平台已有语义标题——动 2026-09-30-title-adopt-clobber-guard 的防回翻语义，影响面大，存量修复不需要它，弃；(d) 复活 change:update 权限做改名——该权限 2026-10-08 刚因零消费被清理，改名复用删除端点已验证的 owner OR CHANGE_ARCHIVE 三元组（与用户点名组完全一致），弃。
 
@@ -127,6 +141,7 @@
 变更：2026-10-16-change-center-delete-back-keeps-state
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
 最近确认：7da2c5633e9545629ed1e8967bbeba405e4a1055
 理由：- **风险①（已知取舍）**：history.length>1 判定在「从站外页进详情后删除」场景 back 回 站外页——与上一变更 BackToListLink 同款取舍（Next 14.2.5 无栈深标记，内部工具罕见， 标准返回语义），接受。 - **风险②（已知取舍）**：bfcache 恢复路径下列表数据短暂陈旧（已删行可能闪现一帧，随后 focus refetch 收敛）——跨 document 无法主动失效，与现状删除行为一致，非本变更引入。 - **风险③**：钳回与 URL 写回的时序——真实路径下进详情前列表 URL 已是超界态 （如 ？page=5，上一变更写回 effect 落的），back/整页载入挂载后写回首跑同址跳过； 数据到达后钳回 setPage(4) 再写回 ？page=4，URL 一次翻转、终态正确，窗口小于首查 往返时长，接受。（评审 P3 修正：原稿误写为挂载写回先落 ？page=5——挂载首跑同址 跳过，不存在该额外动作。） - **死路 A（放弃）**：详情页删除后 push 带 query 的列表 URL——详情页不知道来路列表的 tab/page（无 channel），伪造默认状态等于维持现状 bug。 - **死路 B（放弃）**：删除后一律回第 1 页——用户在归档区第 5 页连续清理时每次被甩回 首页，体验差且与「返回保状态」诉求相悖。
 
@@ -143,6 +158,7 @@
 变更：2026-10-16-knowledge-module-card
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/_module-map.yaml, .sillyspec/docs/SillyHub/modules/sillyspec.md
 最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
 理由：最大风险：`_module-map.yaml` 头部标注 generator: sillyspec-scan——后续重跑 scan 若全量重生成可能冲掉手改条目；缓解：文件头同时注明「可手动修改」，scan 为 advisory 流程（人工确认后才落盘），且本条目 paths 是 scan 无法推导的规范资产域（scan 只扫代码路径），冲突概率低。死路：手工把 3 条 FR 剪切粘贴到新文件并自行重编号——已放弃，违反迁域不换号铁律（ID 是绑定/supersede 链寻址键），且伪域文件清理状态（清空 vs 移除）手搬无法与 CLI 的 fr-index 幂等提炼状态机对齐。
 
@@ -151,6 +167,7 @@
 变更：2026-10-16-decision-pill-no-workspace
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-16-006-9b5485fb0.md, frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：256aa6feb2c4349f3d4a1b513e94fb9fa5fddd0e
 理由：最大风险：无（渲染条件放宽面极小——待决策 pill 自带三类全空渲染 null 的显隐门）。放弃的方案：给老会话回填 workspace_id（数据修复面大且改变会话归属语义，否决——显隐不应依赖归属字段完整性）。
 
@@ -159,6 +176,7 @@
 变更：2026-10-17-audit-risk-followup
 原编号：D-001@v1
 锚点：未记录
+文件：docs/sillyspec/active-pitfalls.md, docs/sillyspec/finished/tick-timing-squash-blindspot.md, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/__tests__/logout-storage.test.ts, frontend/src/lib/logout-storage.ts, sillyhub-daemon/src/interactive/session-store-persistence.ts, sillyhub-daemon/src/interactive/zcode-app-server-driver.ts, sillyhub-daemon/src/spec-sync.ts, sillyhub-daemon/tests/interactive/session-store-persistence.test.ts, sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts, sillyhub-daemon/tests/pull-antiresurrect.test.ts
 最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
 理由：最大风险：FR-04 时机后移后，pre_swap 至抑制应用之间若「已删」文件被重建，落地的是 bundle 旧内容（覆盖重建内容）——但重建内容已经 pre_swap 在服务器留底、下跳心跳拉齐自愈，无净丢失，与既有「窗口写入」语义一致，非新引入风险。试过但放弃：在抑制应用处对「窗口内重建」做内容级区分（bundle 旧内容 vs 重建内容择优保留）——需缓存窗口内写入快照并做内容合并，复杂度与收益不成比例。CLI 仓（sillyspec da8d2449 同构移植）的同类残余窗口留待后续变更同构收口。
 
@@ -167,6 +185,7 @@
 变更：2026-10-17-zcode-provider-config-shape
 原编号：D-001@v1
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/zcode-app-server-driver.ts, sillyhub-daemon/src/interactive/zcode-events.ts, sillyhub-daemon/src/zcode-settings.ts, sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts, sillyhub-daemon/tests/interactive/zcode-events.test.ts, sillyhub-daemon/tests/zcode-settings.test.ts
 最近确认：40217abbd7f2a0d0cac4d6af1e0f784f68e21689
 理由：最大风险：引擎版本演进改目录推送时序或 setModel schema（如将来允许字符串/免 reasoningLevel）——60s 窗口与 levels 提取按当前实证形状钉死，引擎升级需回归（MIN_VERSIONS zcode (0,16,9) 已有版本门兜底）。已试并放弃：裸 setModel 兜底重试（引擎对象路径缺 reasoningLevel 恒拒，重试无意义）；setModel 前置到会话空闲期后台执行（engine 默认模型不保证等于平台路由模型，turn 1 可能脱路由——保持阻塞确定性优先）。
 
@@ -175,6 +194,7 @@
 变更：2026-10-17-dsh-rc2-protocol-fix
 原编号：D-001@v1
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/dsh-acp-driver.ts, sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
 最近确认：162dbfefd8fa71afb10e792dc493c59dfaae4c0b
 理由：最大风险：dsh 后续 rc.x 再改 schema（alpha 通道本质）——非致命降级兜底使其退化为「默认模型 + warn」而非会话死亡；overlay（llm-pi-ai 路由）对 rc.2 的适配是独立后续任务（与本修复解耦）。已放弃：版本回 pin（npm latest 即 rc.2，next 线 0.2.1-rc.1 同代 schema，无更稳旧版可退）。
 
@@ -183,6 +203,7 @@
 变更：2026-10-17-dsh-rc2-routing-restore
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, sillyhub-daemon/src/dsh-settings.ts, sillyhub-daemon/src/interactive/dsh-acp-driver.ts, sillyhub-daemon/tests/dsh-settings.test.ts, sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
 最近确认：3fe545c63a4538a83f96a965c92579982bd388e9
 理由：最大风险：dsh 下个版本再改 compatProfile/valueId 形状——探针脚本 + configOptions 运行时可观测（模型目录出现/消失一目了然），回归成本低。已放弃：保留 compat 块仅修正漂移字段（rc.2 schema 字段集未文档化，逐字段试探成本高于整块去除——catalog 默认值由引擎按 api 协议自动补齐，语义无损）。
 
@@ -191,6 +212,7 @@
 变更：2026-10-17-session-replay-pingpong-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/stores/session.test.ts, frontend/src/stores/session.ts
 最近确认：ec360c91bacb3ba997a8249f7c3e6d015d2f3e78
 理由：最大风险：比较漏判让乒乓换个字段复活。user 若未来从扁平对象演化为嵌套可变对象，现行「键排序后序列化」只对顶层键排序、不递归——需升级为递归 canonical（或改存单调版本号比对），session.test.ts 的键序用例会先红提示。 放弃的方案：①自定义 storage 包装层做写前去重——改动所有落盘路径，风险大于收益；②比较完整信封原始字符串——两端内存 user 对象键序不同会令字符串恒不等，乒乓换字段复活；③给 (dashboard)/layout 的 fetchMe 加节流——只治标，每秒 10+ 次 setItem 的写盘风暴仍在。
 
@@ -199,6 +221,7 @@
 变更：2026-10-17-session-envelope-rev-stale-guard
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/stores/session.test.ts, frontend/src/stores/session.ts
 最近确认：166ea374aaa46cc0045c43bb4cb71a25e87063fa
 理由：最大风险：rev 分叉后同 rev 异内容互相覆盖出现「状态回摆」——分析后不成立：等 rev 内容比对必收敛到后写盘值，且真实 token 变更前总有一次网络往返（续票/登录），窗口内双写概率趋零；即便发生也是一次往返内自愈，非环。 放弃的方案：①用 Date.now() 时间戳做序——同机时钟看似可行，但测试确定性与「用户回拨系统时间」边缘不可控，计数器更简单；②在 persist 外再包自定义 storage 做写前去重——改动所有落盘路径，风险大于收益；③维持现状只记风险——幽灵复活虽罕见但后果（看似已登出实则持有撤销会话）难排查，趁 P3 记忆新鲜收口。
 
@@ -207,6 +230,7 @@
 变更：2026-10-18-audit-log-redact-yaml-quote
 原编号：D-001@v1
 锚点：未记录
+文件：docs/sillyspec/active-pitfalls.md, docs/sillyspec/finished/archive-half-state-location-stuck-active.md, sillyhub-daemon/src/dsh-settings.ts, sillyhub-daemon/src/interactive/zcode-app-server-driver.ts, sillyhub-daemon/tests/dsh-settings.test.ts, sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
 最近确认：60f8d9e41e2ccb9446325a0679f0fb6a5ec2c31e
 理由：最大风险：userinfo 打码正则漏形态。正则取 `scheme://` 后不含 `/`、`@`、空白的第一段为 userinfo（覆盖 `user` 与 `user:pass`）；用户名含 URL 编码 `%40` 时不匹配、原样输出——残余暴露面收窄但未归零（与 KEY/TOKEN 整值红action 的严格度差异在函数注释声明）。已放弃方案：a) PROXY 键整值 `<redacted>`——丢 host 诊断价值，与该日志存留目的冲突；b) YAML 双引号 + JSON.stringify 转义——对控制字符更严但转义面大，无需求支撑。
 
@@ -215,6 +239,7 @@
 变更：2026-10-18-change-type-git-conventional
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/change/parser.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_parser.py, backend/app/modules/change/tests/test_reparse_guard.py, frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx, frontend/src/components/changes/detail/change-overview-side.tsx, scripts/backfill_commit_type.py
 最近确认：261a333678e8722856b7120606385f52e31e8579
 理由：最大风险：提交归属误判。两类实证坑已堵——① 跨变更引用（提交信息正文提及评审 出处变更 key）：按「信息中**最后一个** key 形态 token」归属，不按出现过即归属； ② CLI 基线检查点提交 `sillyspec: baseline checkpoint for <key> …` 的 `sillyspec:` 撞 conventional 前缀正则：类型白名单（feat/fix/perf/refactor/test/docs/style/ build/ci/chore/revert）外一律不认。残余面：变更唯一提及在 release-notes 类提交 里 → 归 docs（可接受，此类变更本就是文档面）；老变更提交不带 key（215 个 no_match）→ 不猜不写，保持现状显示。 试过放弃：A. 平台侧解析 timeline.md 提交锚——主提交只有裸哈希无标题，判不出 fix（实证：session-envelope 会错判 docs）；B. 标题/动机关键词推导——「防迟到旧值 覆盖」类中文概括无稳定关键词，猜错比不猜伤害大；C. 新增平台端点直写类型——要动 鉴权/审计面，而 spec-sync 镜像通道现成且 reparse 已消费该目录。
 
@@ -223,6 +248,7 @@
 变更：2026-10-18-change-list-type-filter
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/change/router.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_change_lineage_filter.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/components/changes/commit-type-chip.tsx, frontend/src/components/changes/detail/change-overview-side.tsx, frontend/src/lib/changes.ts
 最近确认：857d8af461ea4aa3705016087c3d9124105a3180
 理由：最大风险：筛选值集与展示映射漂移（feat↔feature 口径在后端 aliases、前端 COMMIT_TYPE_DISPLAY 两处维护）。缓解：两端各有测试钉（后端 feat 等价命中用例 / 前端 feature→feat 显示用例），且值集注释互指对方为权威。残余面：TYPE_OPTIONS 未 列 ci/revert/quick（防下拉过长），后端白名单仍可筛——深链手输 URL 可用，下拉不可 选，属有意取舍。 试过放弃：A. 类型筛选复用 lineage 的「全局集合→SQL IN」两阶段——类型是列值非 投影字段，直接 where 即可，无需两阶段；B. 前端本地过滤——total/分页会错 （pending_review_only gap② 前车之鉴），必须服务端筛。
 
@@ -231,6 +257,7 @@
 变更：2026-10-16-session-pill-dock-drag
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_api_format.py, backend/app/modules/llm_provider/tests/test_fetch_models.py, docs/releases/2026-10-20-004-cd6aa49.md
 最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
 理由：最大风险：拖拽与点击手势冲突（按住 pill 移动一点算点击还是拖拽）。口径=位移阈值 6px（小于阈值放行 click）+ 松手后 250ms 吞 click 时间窗（比布尔位稳：拖出元素外松手 click 不触发，布尔位会误吞下一次真点击）——两者均沿用悬浮球实测过的先例。 试过但放弃：a) pointer capture 实现拖拽——jsdom 无实现（测试不可达）且 capture 会劫持 click 目标破坏 pill 点击；b) 拖动过程每次 setPos 都持久化——localStorage 高频写（悬浮球现状），改为松手单点写；c) 保留 hover 双触发——用户明确要求纯点击防误触；d) 沿用挂载点 absolute 容器改竖排——拖不出面板且受祖先裁剪，改 portal body fixed。
 
@@ -239,6 +266,7 @@
 变更：2026-10-16-provider-switch-transcript-sanitize
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-20-005-6fa3a31.md, frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx, frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts, frontend/src/components/llm-providers/llm-provider-form.tsx, frontend/src/config/llmProviderPresets.ts
 最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
 理由：- **最大风险**：把「工具块」降级成 text 块会改变历史的结构语义（模型看到的是一次纯文本陈述而非工具调用）。 影响面评估：本次实证的私有块 `input` 为空、价值全在结果文本里，文本形态保留了全部信息，且优于 「换供应商后该会话永久 400」。 - **死路 1（放弃）**：请求期代理改写——需要 daemon 代理全部 anthropic 流量，性能/安全/越权面不可控。 - **死路 2（放弃）**：直接删除脏块所在记录——会打断 `uuid`/`parentUuid` 链，CLI resume 可能失配； 改为「替换成 text、记录条数不变」。 - **死路 3（放弃）**：直接删私有块、结果文本丢弃——丢上下文且无必要，文本化成本更低。 - **遗留（明确不在本变更范围）**：本机默认会话 + 用户手改宿主机 `~/.claude/settings.json` 换档的路径， 平台无任何变更信号可挂钩，自动化清洗不覆盖；本变更以「分类器可读提示 + 一次性修复实证（task-02）」 兜底，后续如需自动覆盖需单独立项（涉及平台是否代管宿主配置的取舍）。
 
@@ -247,6 +275,7 @@
 变更：2026-10-19-host-settings-live-reload
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/coordinator.py, backend/app/modules/agent/tests/test_coordinator_approval_signal.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/run_sync/service/publish.py, backend/app/modules/daemon/run_sync/service/submit_commit.py, backend/app/modules/daemon/run_sync/service/submit_steps.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py, backend/app/modules/daemon/tests/test_session_events_cross.py, backend/app/modules/daemon/tests/test_session_list_live_signal.py, backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py, frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：e5a2c7ee31881d2d20c3f831c729ca01c07a81e5
 理由：- **最大风险**：换档瞬间的批量重载会让所有本机默认会话引擎各重启一次（每个约 1-3s、各会话独立 并行）；正在等用户输入的会话无感（下一轮才用新引擎），运行中会话延迟到轮边界。可接受——比 「模型烙死 + 跨供应商 400」轻得多；且有关闭阀。 - **风险 2**：若用户以非 cc-switch 方式频繁改 settings.json 的 env 块（如脚本），会周期性触发重载。 去抖（两拍一致）+ 3s 节拍已把频率压到「真实变化」粒度；重载本身幂等无害。 - **死路 1（放弃）**：daemon 注入 env 覆盖模型/网关——平台不知道宿主档位语义，且实验实证 settings 的 base_url 本来就每轮热生效，注入反而制造新的钉。 - **死路 2（放弃）**：fs.watch（事件式）——Windows 下 cc-switch 若走替换写会掉 watch/漏事件， 还需目录级 watch 兜底；轮询+指纹在 2-6KB 文件上成本可忽略且行为确定（跨平台一致性优先， CLAUDE.md 规则 13）。 - **死路 3（放弃）**：只做 UI 提示不改行为——用户已明确要免手动处理。 - **遗留（明确不在本变更范围）**：宿主机档位变化对「运行中那一轮」仍不生效（轮边界语义，与平台内 切供应商一致）；`/model` 钉在重载后清零属预期副作用（正是解钉手段）。
 
@@ -255,6 +284,7 @@
 变更：2026-10-19-host-settings-reload-latency
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/git-log/__tests__/file-tree.test.tsx, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts, sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
 最近确认：ee8bc717b7b00bcc4e78a5e1da5788638735b776
 理由：- **最大风险**：空转读文件频率 ×3（每秒读 2-6KB + JSON 解析）。量级可忽略（单核微秒级）， 定时器仍 unref；接受。 - **风险 2**：重载风暴更密（用户连续快速换档时，每 2 秒可触发一波）。上一变更已论证 per-session 串行 + 覆盖写幂等承载得住；去抖两拍本身就是节流。 - **死路（放弃）**：去抖单拍化（见做法概述）；fs.watch（同上变更死路 2）。 - **遗留**：UI 可感知提示（切换时平台界面出 notice）需 daemon→backend→frontend 三端契约 （新端点 + SSE 帧 + 类型再生成），本变更明确不做，留待单独立项。
 
@@ -263,6 +293,7 @@
 变更：2026-10-19-assets-audit-expand-toggle
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx
 最近确认：c86998d373e27dba83a1ff8c4e7ed39924cad0c8
 理由：最大风险：展开 180 条时卡片自然高度变得很长——但这是六组统一形态的设计决定（design.md「自然高度 + 展开全部」取代内滚），其它组同样如此，本修复不改该决定。试过但不做：给清单恢复组内滚动/固定高度——正是 2026-10-15 改版明确否掉的旧形态（多内滚小窗是「乱」的主要来源），回退会造成 audit 组与其它五组形态分裂。
 
@@ -271,6 +302,7 @@
 变更：2026-10-19-shared-agent-onboarding-hint
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/session-panel-platform-shared.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：fc51c25c69c3ea98a401554b486d58d256156be4
 理由：最大风险：把「机器数据加载中」误判为「无机器」而错误默认选中——以 `data != null` 守卫消除（loading/error 均 undefined → 门控 false）。 试过放弃的方案：①复用 `machines` prop 判定——无 loading 语义有误判窗口，且依赖门户传参形态，放弃；②把引导提示塞进 SessionConfigBar 内部——该组件是会话内配置面（真会话/预会话共用），预会话引导属页面语义，改共享组件还会扩大既有测试面，放弃。
 
@@ -279,6 +311,7 @@
 变更：2026-10-19-hide-shared-profile-in-session
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
 最近确认：4d992afc3f615222da8f0017cd75303fd4777cf8
 理由：最大风险：真会话隐藏后，用户想在中途把普通会话「升级」为共享智能体会话无入口——这是刻意边界（共享智能体环境是创建时服务端强制的钉定+约束，中途切入既然后端也不会生效，隐藏正是对齐真实语义）；需要共享环境应新建会话。放弃的方案：①按名称过滤——用户明确指出名称不可靠，必须按 active 列表 id；②提升到机器/智能体选择层——改动面与 thin 不匹配（见做法概述）。
 
@@ -287,6 +320,7 @@
 变更：2026-10-19-platform-auto-commit-type
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/change/parser.py, backend/app/modules/change/tests/test_parser.py
 最近确认：44f12324e768fad638b278a57a46073d566cdbd6
 理由：最大风险：timeline 口径与 git 口径分歧（27%）造成「同类变更不同来源类型不同」的 观感。缓解：生产链路上每变更只有一种来源生效（有回填 → flow-state 优先；无回填 → timeline），不存在同一行两口径交替覆盖；分歧样本语义核验 timeline 不劣（git 口径 会被后补提交带偏）。watcher 盲窗导致锚缺失 → None 回落不猜。 试过放弃：A. 排除工件性 scope（docs(spec)/chore(archive)）提升一致率——实验发现 分歧主因是口径哲学非工件噪音，且 git 对照口径本身含噪，不值得为对齐一个含噪基准 加规则；B. daemon 控制命令通道（平台下发 git 提取命令）——覆盖面更全但异步回传 + 离线重试复杂度高一个量级，留作中期备选；C. 等 sillyspec CLI flow done 写类型—— 用户明确不改 CLI，平台侧自闭环。
 
@@ -295,6 +329,7 @@
 变更：2026-10-19-change-list-created-sort
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/change.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_change_lineage_filter.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
 最近确认：e935e8c671e20cda72d65ea44ebbe9adb65b0d47
 理由：风险：默认排序变化改变用户既有习惯（最近活动 → 创建时间）——正是用户主动要求， 非回归。created_at 与 updated_at 在 reparse 回填 mtime 时的差异：created_at 是 建行时刻（CLI 创建顺序），语义即用户诉求。放弃方案：改后端缺省值——会波及全部 不传 sort 的调用方（change-autolink 等），契约面无谓扩大。
 
@@ -311,6 +346,7 @@
 变更：2026-10-19-knowledge-search-build-switch
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/backend/modules/knowledge.md, backend/app/core/config.py, backend/app/main.py, backend/app/modules/knowledge/router.py, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/search.py, backend/app/modules/knowledge/tests/test_knowledge_search.py, backend/app/modules/translate/__init__.py, backend/app/modules/translate/chunking.py, backend/app/modules/translate/engine.py, backend/app/modules/translate/router.py, backend/app/modules/translate/schema.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/__init__.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_router.py, backend/app/modules/translate/tests/test_service.py, backend/app/modules/translate/translate_worker.py, backend/pyproject.toml
 最近确认：54a1e8db39d4d8ac991d645e2942a370d146e4ff
 理由：- 风险①：默认值写错（如 False）会让所有部署静默失去懒建库。对策：默认 True + FR-02 用例③显式回归「缺省=仍建库」。 - 风险②：`reason="index_not_built"` 语义与 `model_ready=False` 的既有口径（「语义模型不可用」）有细微偏移——此处模型可能可用但索引缺失。裁决：沿用该字段（schema 注释已写「model_ready=False + results 纯词面 + reason 带因」的 fail-soft 语义，reason 词表扩一个值），文档同步说明。 - 风险③：关闭时跳过差量 sync，state 行存在但指纹过期的 ws 会静默服务陈旧索引。这是显式交付边界：禁建库服务器的索引新鲜度职责移交外部预建机器（known-issues 运维解既有口径），服务器端不做部分嵌入（部分嵌入=重新打开容器内嵌入门）。 - 风险④：无索引词面降级每次搜索全语料 scan（文件读放大）。裁决：可接受——仅发生在「未预建的 ws + 禁建库服务器」组合，本就是运维例外态；量级 ~百文件（生产实证 108 md/7 ws），且 DB 异常降级路径已是同款实现先例。 - 放弃方案A：开关关闭时对无索引 ws 返回空结果（不词面降级）——搜索完全不可用，违背「搜索永不 5xx/可查」的既有设计底线，放弃。 - 放弃方案B：per-workspace 建库白名单（哪些 ws 允许容器内建）——配置面与运维模型复杂化（known-issues 口径是「建库一律外部机器」，全局开关即够），放弃。
 
@@ -319,6 +355,7 @@
 变更：2026-10-19-thinking-zh-translate
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/backend/modules/knowledge.changelog.md, .sillyspec/docs/backend/modules/knowledge.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, backend/app/core/config.py, backend/app/main.py, backend/app/modules/knowledge/router.py, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/search.py, backend/app/modules/knowledge/tests/test_knowledge_search.py, backend/app/modules/translate/README.md, backend/app/modules/translate/__init__.py, backend/app/modules/translate/chunking.py, backend/app/modules/translate/engine.py, backend/app/modules/translate/router.py, backend/app/modules/translate/schema.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/__init__.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_router.py
 最近确认：bfa6357537da5377966ec9d747dc47fbd9e53709
 理由：最大风险：**opus-mt en→zh 对技术思考文本的翻译质量一般**（2020 年代模型，专有名词/代码混杂句式偶有生硬）——预期是「能看懂大意」而非信达雅；缓解：代码块/URL/行内代码保护不送翻（减少破坏面），「显示原文」一键可退。若后续要更好质量，模型 repo 是配置项可换（如更大 ct2 模型），接口契约不变。 次要风险：①模型首用下载 ~100-150MB，离线/弱网环境不可达——TRANSLATE_MODEL_DIR 预置 + fail-soft 已覆盖，Docker 预烤文档化；②ctranslate2 依赖体积（wheel 数十 MB）——后端镜像可接受，Dockerfile 是 lock-less 安装直接生效；③摘要翻译对「前 500 字符截断处恰在句中」的边界——截断到最近句界再送翻，避免半句译文。 试过放弃的方案：浏览器端 transformers.js（性能不可接受，见做法概述）；argos-translate（Python 包管理器下载源不可配镜像、版本锁死，不如直接 ct2）；译文落库（违反「原文是审计真相源」原则且膨胀存储，缓存层已足够）；SSE 流式逐 delta 翻译（80 字符/120ms 的增量粒度翻译必产生请求风暴与重复推理，折叠默认态根本不需要实时译文——按需模式把负载降 2-3 个数量级）。
 
@@ -327,6 +364,7 @@
 变更：2026-10-19-translate-live-verify
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py
 最近确认：ffd511d4eb260046f3803cfa16492f4e0e55a0a7
 理由：最大风险：第三方个人仓库（jiangzhuo9357）可能失联/删除——缓解：TRANSLATE_MODEL_REPO env 可换任意 ct2 仓库、TRANSLATE_MODEL_DIR 指本地目录彻底离线、README 预烤文档已覆盖。放弃的方案：`ooeoeo/opus-mt-en-zh-ct2-float16`（float16 权重 CPU 推理不友好，且无必要）；本地 ct2-transformers-converter 自行转换 Helsinki-NLP/opus-mt-en-zh（需装 torch ~200MB，重且慢于直接用现成 int8 转换）。
 
@@ -335,6 +373,7 @@
 变更：2026-10-19-knowledge-build-switch-rollout
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/knowledge.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py, deploy/.env.example, docs/releases/2026-10-19-013-d789317d.md
 最近确认：cb7394b3637b8bab1e1d746dbb2454c658bb6e85
 理由：- 风险①：镜像重建卷入并行会话的在途提交（构建用工作树快照，非 HEAD）——已核：构建起始 ≈7e9c795ef，其后提交均为前端/测试/文档/存档面（发布记录显式注记）。对策：构建前确认工作树解并记录快照锚。 - 风险②：后端新镜像携带未在生产验证过的 pgvector 迁移 + translate 新功能——本地平台本就是验证环境（数据可清空口径），迁移 fail-closed 设计自带护栏；translate 有 37 测试 + 评审。接受。 - 风险③：部署记录 seq 与并行会话的记录取号竞争（同用 next-release-seq.sh）——取号 22 立即落盘；若并发同号，后写者可据文件核对修正（留待观察）。 - 风险④：未建索引词面降级每次搜索全语料扫描（热查 2.9-15.1s 抖动）——设计期已裁决可接受（运维例外态）；本次实测数据佐证并如实记录，未触发超时螺旋即满足底线。 - 放弃方案A：仅 restart backend 不重建镜像——新镜像才是开关生效前提（代码在镜像内），否决。 - 放弃方案B：同时重建 frontend——本次范围仅后端开关落地；前端翻译 UI 部署归后续前端部署，避免扩大爆炸半径。
 
@@ -343,6 +382,7 @@
 变更：2026-10-19-change-assets-cross-repo-repos
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/knowledge.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/core/config.py, backend/app/modules/change/assets.py, backend/app/modules/change/schema.py, backend/app/modules/change/tests/test_assets.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py, backend/openapi.json, deploy/.env.example, docs/releases/2026-10-19-013-d789317d.md, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/files/structured-views.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
 最近确认：9043c1a83f53bb4bcd5fd05fe3fd8529a5c0132d
 理由：最大风险：读侧新增字段被误读成「主仓统计的一部分」——已在资产卡显式区分「主仓 patch / 跨仓各仓」并对 totals 不做相加。另一个风险是每次 assets 读取需解析可能数 MB 的 change-patch.json（repos 正文在场时），但既有实现本就整文件 JSON.parse 提取 files，增量可接受；如后续成为热点再做流式/缓存。放弃方案：①后端把 patch 正文一起回传给前端做切片——单仓正文 3.5MB 且会重复传输，违背「元数据进卡片、正文走全屏预览」的既有分工；②按仓切片端点（A2）——本次不需要，留待卡内直接看 diff 的需求出现再加。
 
@@ -351,6 +391,7 @@
 变更：2026-10-19-cross-repo-patch-slicing
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/change/assets.py, backend/app/modules/change/router.py, backend/app/modules/change/schema.py, backend/app/modules/change/tests/test_assets.py, backend/openapi.json, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/changes.ts, sillyhub-daemon/src/api-types.ts
 最近确认：2b87056a6bd73e6dfa932232adec16c5bde2415b
 理由：最大风险：`file_list` 从 patch 头解析（而非独立清单字段），若 CLI 未来改 patch 格式（如 no-prefix diff）清单会静默变空——投影是 best-effory 展示面，切片命中与否仍有 note 兜底，可接受。放弃方案：①CLI 在冻结件里新增独立 repos[].files 字段——要跨仓改冻结契约且需 CLI 发版协同，解析现有内联正文零协同即可达成同一效果；②未知 repo 键抛 422 白名单——与端点「读不到留档是展示面降级」的既有语义冲突，且无安全面收益；③前端自行拉全量 change-patch.json 解析清单——4MB 传输只为拿文件名，浪费且受 content 端点截断限制。
 
@@ -359,6 +400,7 @@
 变更：2026-10-19-preview-card-empty-turn-fix
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-19-013-205a79f71.md, docs/releases/2026-10-19-014-5b9c2ce4c.md, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx, frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts, frontend/src/components/daemon/session-panel/preview-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：99f758c6f7d64b6bc36a05a1aead5a30a42389aa
 理由：最大风险：判定把「有内容但零摘要」的轮误收敛成不可见（例如仅 tool 通道日志的轮）。防护：started_at 有值即排除（tool-only 轮必然派发过引擎），摘要双空 + error_code 空 + started_at 空三条件同时成立才收敛；失败族/活跃族显式排除并有单测锁定。次风险：历史数据存在 started_at 缺失的正常轮（字段后补）——实测当前库正常轮 started_at 均有值；若真出现，该轮退化为不可见（无预览卡），导航刻度仍可跳转，属可接受降级。放弃方案：①后端大纲剔除纯切换轮——会导致全局轮号重排（seq 权威序），导航与轮次徽章全部错位，否决；②仅把卡片改置灰不可点——丢失配置行的档案/引擎信息且刷新前后形态仍不一致，否决；③大纲挂载后失效重拉（消除 stale outline）——治标不治本（拉到新大纲后死卡依旧），且本次透传方案已让两态一致，留作后续独立评估。
 
@@ -367,6 +409,7 @@
 变更：2026-10-20-backfill-dryrun-log-scrub
 原编号：D-001@v1
 锚点：未记录
+文件：scripts/backfill_commit_type.py, sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
 最近确认：3490518aa9925709efdbf3880a441593fb04d89f
 理由：最大风险：已习惯旧口径（裸跑即写）的使用者肌肉记忆被翻转——首次 `--apply` 忘带 `--yes` 得到退出码 2。缓解：docstring 用法段与 `--yes` 报错信息都给出明确指引；且 261a33367 提交信息记载本仓已回填完毕（复跑应全 unchanged），日常无人需要再跑 `--apply`。 试过但放弃的方案：① 交互式确认提示（裸跑问 y/N）——破坏可脚本化性，CI/批处理无法应答，flag 门（`--yes`）是 backfill_change_titles.py 已验证先例；② 连同 :187 env 键日志一并删除——该行已脱敏且承载 provider 路由排障信息，删除超出审查发现的事实面。
 
@@ -375,6 +418,7 @@
 变更：2026-10-20-root-ruff-config
 原编号：D-001@v1
 锚点：未记录
+文件：ruff.toml, scripts/check-assertion-surfaces.py, scripts/scan-drift-check.py, scripts/test_scan_drift_check.py
 最近确认：978336829578f84f9c18d7ded93c25ce05f432da
 理由：最大风险：格式化 `check-assertion-surfaces.py`（pre-commit assertion-surfaces 闸门脚本）与 `scan-drift-check.py`（local.yaml scan:check 命令）——若重排意外破坏行为会卡全仓提交。缓解：ruff format 是纯空白/换行重排（无 token 变换），交付前闸门实跑 + test_scan_drift_check 用例回归 + diff 逐行核对仅空白类变化。 试过但放弃的方案：① 只改钩子建议文案按路径分流——治标：钩子仍按 88 裁根级文件，与任何手动 backend-cwd format 依旧不一致，且文案分支逻辑要进 pre-commit config 维护；② 根 ruff.toml 配齐 backend 全套 lint select——放弃：会瞬间扩大根级存量 lint 面（UP/SIM/N 等规则对存量 scripts 文件的未知违规），本变更范围膨胀，与「修行宽拉锯」的目标无关；③ 升级 ruff 至支持项目级多配置合并的版本——放弃：工具链版本变更影响面远大于本缺口，且 0.15.14 双入口数值同源后已无矛盾。
 
@@ -391,6 +435,7 @@
 变更：2026-10-20-conflict-platform-archive
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/sillyspec_compare.py, backend/app/modules/daemon/tests/test_sillyspec_compare.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_conflict_local_archive.py, backend/conftest.py, docs/releases/2026-10-20-001-e94cc6e8e.md, docs/sillyspec/active-pitfalls.md, docs/sillyspec/finished/2026-10-19-sillyspec-v3.33.1-rewrites-agents-md-deletes-claude-md.md, frontend/src/components/changes/__tests__/conflict-compare-modal.test.tsx, frontend/src/components/changes/conflict-compare-modal.tsx
 最近确认：ffab0aa2e9dafa7c1fa67528d15f08941d4ee87b
 理由：最大风险：details_json 膨胀——三重帽兜底（32000 字符/文件、512KB 总量停存内容、300 条目），上限与一次冲突推送的请求体同量级（推送本身已携带这些 content），不放大既有存储压力。次风险：留档内容是**冲突时点**快照，机器侧后续演进不反映——横幅文案明示，且这恰是排障需要的时点证据。 试过但放弃的方案：①服务端 upsert 时经 daemon RPC 抓记录快照——时序必竞态（机器记录由 CLI 收到响应后落盘）+ Workspace 无 instance 绑定（无从寻址机器）；②平台行携带记录 label 驱动对比——只修名口径不修记录死亡，10-16 已用 full-tree 兜底覆盖记录活着场景；③机器离线/超时（504 家族）也回退留档——前端对比按钮对离线机器本就禁用，需求面（坑文）只覆盖记录缺失态，维持四臂文案现状，超范围不做。
 
@@ -399,6 +444,7 @@
 变更：2026-10-20-session-error-visibility
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-20-003-50dfdf2.md, frontend/src/components/agent-log/__tests__/run-error-item.test.tsx, frontend/src/components/agent-log/run-error-item.tsx, frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：6f2fe0baf5d63d5a078e96a39670a5543a7c9bfe
 理由：最大风险：把真打断误报为失败（ql-20260918-003 曾专门修过反方向——打断被渲染成「轮次失败」的误导）。对策：升级条件严格限定 buildErrorLogItem 返回非 null（模型错误键存在才非 null），error_detail 空的真打断零触碰；FR-03 零回归用例钉住。 试过放弃的方案：① 后端拆新 error_code（如 interactive_model_failed）——需 backend+daemon+前端三方发版且存量 run 无法重写，放弃；② RunErrorItem 默认展开完整 raw——raw 可达数千字符（实测 404 HTML 全文），撑爆消息流，改为首行截断摘要 + 折叠全文。
 
@@ -407,6 +453,7 @@
 变更：2026-10-20-codex-requires-openai-auth
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-20-003-50dfdf2.md, frontend/src/components/agent-log/__tests__/run-error-item.test.tsx, frontend/src/components/agent-log/run-error-item.tsx, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, sillyhub-daemon/src/codex-settings.ts, sillyhub-daemon/tests/codex-settings.test.ts, sillyhub-daemon/tests/provider-injection-smoke.integ.test.ts
 最近确认：409315def4b848f950771392b7be388068c7304f
 理由：最大风险：`requires_openai_auth` 是 codex CLI 的非 stability-guaranteed 配置键（cc-switch 生产配置与官方智谱接入文档均在用，当前 CLI 0.162.0 实测有效），未来 codex 大版本若更名/移除该键，症状回归为「不发认证 → 断流」——与 wire_api="chat" 被移除的先例同类。缓解：daemon 已有版本基线注记惯例（R-03），本变更在常量注释处注明 CLI 基线与实测依据；升级 codex 基线时冒烟面覆盖。 试过但放弃的方案： - 改走 openai_chat/litellm 代理通道（零代码）：模型选择退化为 usr-<uid>-<pid> 路由键、链路多 hub+LiteLLM 两跳，且该通道对 codex 从未被真实验证过（30 天零成功 run）；放弃。 - base_url 层面绕过（如要求用户把 key 拼进 URL）：bigmodel 不支持 URL 内嵌 key，且 key 进 URL 有日志泄漏面；放弃。 - 供应商配置面透传任意 provider 表键（settings_config 加 codex 专属段）：配置面扩大、需要 backend+daemon 双端改动，超出本次最小修复面；如未来需要 per-provider 差异键再立变更。
 
@@ -415,6 +462,7 @@
 变更：2026-10-20-codex-models-fetch-candidates
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_api_format.py, backend/app/modules/llm_provider/tests/test_fetch_models.py, docs/releases/2026-10-20-004-cd6aa49.md
 最近确认：aa64d06245f0473307dc8ea88dfc9dd46c871e9a
 理由：最大风险：追加候选使「全候选 404」场景多一次上游请求（每条 models 拉取至多多 1 次 GET），对中转站限流面略增——量级可忽略（手动触发的低频操作）。次风险：`base+"/models"` 对某些会把 `/models` 当模型名路由的网关返回 200 非 models JSON——`_parse_models_response` 已有「body 不可解析/缺 data 字段 → AllFailed」兜底，不会误报成功。 试过但放弃的方案： - 按 provider 名/域名特判端点（如 bigmodel → /api/paas/v4/models）：vendor 分支进 service，维护面差、新供应商每次都要改代码；放弃。 - 前端对 codex 条目隐藏拉取按钮：不解决根因，且智谱/OpenCode 端点本就支持拉取；放弃。
 
@@ -423,6 +471,7 @@
 变更：2026-10-20-preset-engine-endpoint
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-20-005-6fa3a31.md, frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx, frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts, frontend/src/components/llm-providers/llm-provider-form.tsx, frontend/src/config/llmProviderPresets.ts
 最近确认：bc88187dcee54e94289c2fcc742a802ffef45c00
 理由：最大风险：自动取消 Claude 勾选对「我就想同一条都勾上」的用户是强制收敛——但该组合保存后 Claude 与 Codex 必有一侧拿到错端点（今日三次实证），表单放行等于制造坏配置；notice 明示原因与出路（另建一条），属正确性优先。次风险：applyPreset 按当前勾选分派，用户先点预设后改勾选时形态可能与其预期不符——勾选联动会把形态拉回与勾选一致的状态，自愈。 试过但放弃的方案： - 预设拆成两条（OpenCode Go Codex 单列）：选择器条目翻倍且用户需自己判断选哪条，约束仍不可见；放弃。 - 保存时后端校验拦截坏组合（base_url 对勾选引擎不可达）：后端无法静态判定端点协议支持（需真实请求），动态探测成本高且时序不适配；放弃（表单联动前置收敛更便宜）。
 
@@ -431,6 +480,7 @@
 变更：2026-10-20-session-status-live-sync
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/coordinator.py, backend/app/modules/agent/tests/test_coordinator_approval_signal.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/run_sync/service/publish.py, backend/app/modules/daemon/run_sync/service/submit_commit.py, backend/app/modules/daemon/run_sync/service/submit_steps.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py, backend/app/modules/daemon/tests/test_session_events_cross.py, backend/app/modules/daemon/tests/test_session_list_live_signal.py, backend/app/modules/daemon/tests/test_submit_messages_no_overwrite_terminal.py, frontend/src/components/daemon/__tests__/session-panel-approval-list-refresh.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：59007127f0d130be7ea5e131f4f61154806d37a0
 理由：最大风险：信号频率放大列表查询负载——每个 run 生命周期新增约 3~5 个信号（创建/激活/审批对/终态），每个信号触发一次列表 refetch（limit=500 窗口函数查询）。评估：10s 轮询本来就执行同款查询，事件驱动只是把「定时查」变「变化时查」，稳态总频率不升反降；且 400ms 去抖把轮内密集信号合并。若极端高频会话（自动化连续注入）仍显负载，后续可加信号侧节流（不在本变更范围）。 试过但放弃的方案： - 前端 turn_started/全事件扇出 onSessionListRefresh——只覆盖当前打开的会话，其他会话（列表里未打开的）状态变化仍瞎；且每轮多次 invalidate 无谓压力。放弃，改为后端信号根治（覆盖全部会话）+ 仅审批边沿本地兜底。 - 列表轮询间隔调小（10s→2s）——治标：全静默 30s 退化和「变化时查」语义都没解决，纯增加空转查询。放弃。 - 把 current_run_status 塞进 per-session SSE 频道让前端本地合成列表状态——前端需要为未打开会话维持订阅/状态机，复杂度大增；哑信号+refetch 复用既有链路，改动面最小。放弃。
 
@@ -439,6 +489,7 @@
 变更：2026-10-21-gitlog-quotepath-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/git-log/__tests__/file-tree.test.tsx, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts, sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
 最近确认：5bbb1a830ca0bee507747635b639a3be0ac85947
 理由：答：死路①（已试已弃）：改用 `git show --numstat -z` 按 NUL 切分原文路径——`-z` 在 `git show`（log 族）语境同时是「提交分隔符」语义，与 `--pretty=format:` 混用行为含混，且需重写 numstat 两段式分区解析，相对 `-c core.quotepath=false` + 解码兜底无额外收益，弃。风险①：路径含非法 UTF-8 字节序列时 `Buffer.from(bytes).toString('utf8')` 产生 U+FFFD 替换符——防御性行为可接受（git 真实输出不会出现：路径字节即提交时的合法编码）。风险②：既有命令构造断言用例按 args 位置逐 token 断言（GL25/GL29/GL37/GL42/GL43/GL45），插入 `-c` 对后需同步更新索引——漏更即测试红，已列入 task-01 验证面。风险③：porcelain/diff 加 `quotepath=false` 后含换行的文件名仍被 git 强制引号包裹（控制字符恒转义），单行解析假设不破——decodeGitCQuote 同款规则保证。
 
@@ -447,6 +498,7 @@
 变更：2026-10-21-overview-card-mainflow-scan
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/components/git-log/__tests__/file-tree.test.tsx, frontend/src/components/workspace/__tests__/changes-overview-card.test.tsx, frontend/src/components/workspace/changes-overview-card.tsx, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts, sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
 最近确认：23c936e92bf7871cd0ea0edba46cdf5387e49079
 理由：答：最大风险：既有测试与潜在快照对「六段管线」的隐含依赖——已定位唯一断言面（本组件测试 213-217 行 scan aria 断言）同步更新，全仓 grep 无其他组件消费本卡 MAIN_STAGES（组件内常量未导出）。次要风险：旧 daemon 采集值（CLI 未升级机器）下 thin 变更暂显 brainstorm 主管线——数据源升级自愈，非本变更面（依据：根因修复在 sillyspec 2026-10-21-overview-thin-stage，跨仓不在本冻结面）。放弃方案：①连带改移动端 stepper（mobile-change-detail STEPPER_STAGES 含 scan）与变更中心 `?? "scan"` 兜底——同根因但异仓异面，用户本轮只点名总览卡，扩面应由用户裁决，留后续候选；②改 CLI 侧让 envelope 附带阶段清单驱动前端渲染——过度设计，前端静态常量与 sillyspec MAIN_FLOW_ORDER 对齐即可，增契约无收益。
 
@@ -455,6 +507,7 @@
 变更：2026-10-21-gitlog-conflict-quotepath
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/host-fs-handler-git-log-quotepath.test.ts, sillyhub-daemon/tests/host-fs-handler-worktree.test.ts
 最近确认：21e877fc467eca703395f8b9d60dccfa4f67326d
 理由：答：风险①：`git diff --name-only` 输出按行切，文件名含字面换行仍会断行——但含控制字符的路径 git 恒强制 C 引号包裹（`\n` 被转义为字面 `\n` 两字符），单行假设不破，decodeGitCQuote 同款规则兜底（上变更风险③同机理，GL47 已实证）。风险②：`conflicts[].file` 语义变化对 backend converge_mission 的下游消费是修复性变化（原文路径才能 readFile），若存在依赖「转义形态」的下游断言需同步——检索 backend 侧对 conflicts 的消费为透传给 LLM 提示词，无形态依赖。死路①：不改 `_listConflictFiles` 改为 `git status --porcelain` 解析 U 态——porcelain 输出对特殊字符的引号规则随 `-z` 才关、解析面更大，弃。死路②：沿用上变更已弃的 `--numstat -z` 思路改 `-z`——name-only 的 `-z` 需改 NUL 切分且与既有行式解析不兼容，无收益，弃。
 
@@ -463,6 +516,7 @@
 变更：2026-10-21-mobile-scan-birth-cleanup
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/components/mobile/mobile-change-card.test.tsx, frontend/src/components/mobile/mobile-change-card.tsx, frontend/src/components/mobile/mobile-change-detail.test.tsx, frontend/src/components/mobile/mobile-change-detail.tsx
 最近确认：bbc224288e8daa873a122695fc50a3ad418d9ce7
 理由：答：最大风险：legacy scan 阶段值（2026-09-27 前创建且未推进的行）在移动端详情失去步骤条——实为与桌面一致的既有降级形态（收敛），且此类行本就停滞在出生阶段无步骤可看，风险可忽略。次要风险：兜底改 brainstorm 后 `current_stage=null` 行显「需求分析」可能被误读为「正在头脑风暴」——null 属平台镜像异常态（正常行恒有阶段），兜底只是防裸显，可接受。放弃方案：①保留 STEPPER_STAGES 别名仅删 scan 元素——留无谓别名不如直用 WORKFLOW_STAGES 单一源，防第三份副本再漂移；②连 ChangeStepBadge 的 scan 标签/色映射一并删——那是 legacy 值域映射，删了会让存量 scan 行裸显英文 'scan'，越界，弃。
 
@@ -471,6 +525,7 @@
 变更：2026-10-21-precommit-sandbox-entries
 原编号：D-001@v1
 锚点：未记录
+文件：backend/.pre-commit-config.yaml
 最近确认：8fc3178d3d66af22d19c6eeee234a863746fd512
 理由：答：风险①：uv 在 Low 子树若需下载依赖（根 .venv 缺失时）可能被沙箱网络策略拦——当前根环境已就绪（ql-20260923-006 实证根/backend uv env 同源可用），`.tmp/uv-cache` 重定向后无 profile 写，残余风险记为已知限制；真遇到时用户终端跑一次 hook 预热缓存即可。风险②：pre-push 两条保留 bash 包装，agent 会话内若手动触发 pre-push 仍会崩——推送属用户终端动作（流程纪律），不为其扩大改动面。死路①：icacls 改 `~/.cache` ACL——嵌套 token 根本不在 CodexSandboxUsers 组、写入拒绝在驱动白名单层而非 DACL，改了无效（探针实证），弃。死路②：削弱沙箱容器（改内核对象目录 ACL/降标签）恢复 msys 嵌套——动容器安全边界换取工具便利，方向性错误，弃。死路③：PRE_COMMIT_HOME 写入用户级环境变量——Low 子树只能写仓内路径，单值无法同时满足多仓，弃（按会话 `export PRE_COMMIT_HOME=$PWD/.tmp/pre-commit-home` 使用，已验证）。
 
@@ -487,6 +542,7 @@
 变更：2026-10-21-files-refresh-spinner
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/change-file-tree.tsx, frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
 最近确认：e88ffddb76486f445e8bdac23d437a22c39a8ebd
 理由：答：最大风险是双入口（按钮+错误重试）并发时转圈提前消失的反馈时机问题——影响仅视觉反馈、不涉数据，触发条件苛刻（错误态下双击两入口），接受不改计数器（复杂度不值）。放弃方案：① 给全局 `Button` 组件加通用 loading prop——影响全部消费面，远超本诉求；② 新增独立 POST 同步端点+按钮联动——已被 2026-10-13-change-files-refresh-sync D-007@v1 否决（GET 纯读语义 + 用户诉求是刷新动作本身带同步），不复潮。
 
@@ -495,6 +551,7 @@
 变更：2026-10-21-task-wakeup-restore
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx, frontend/src/components/change-file-tree.tsx, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-status-bar.tsx, frontend/src/components/daemon/turn-timeline.tsx, sillyhub-daemon/src/cli.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager/background-tasks.ts, sillyhub-daemon/src/interactive/session-manager/lifecycle.ts, sillyhub-daemon/src/interactive/session-manager/types.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
 最近确认：440f3fd244d4810e1f4fb0a30c875767cab088e3
 理由：答：最大风险是产品语义回退复发——本次恢复与 10-13 删除是同一取舍的正反对翻，为防「短任务噪音」复发，阈值门槛 + 0 关闭阀 + stopped 不唤醒三重降噪全部保留；若未来 claude 引擎在流式模式原生自续跑，会出现双轮，届时设 SILLYHUB_TASK_WAKEUP_QUIET_MS=0 一键关闭（[TASK_NOTIFICATION]/注入行可观测，当天可发现）。次要风险：未知帧降级桶（codex/cursor 未知事件映射 subtype='task_notification'）理论上可携带 task_id 进入唤醒判定——旧链六周共存无误触发记录（降级桶帧通常无 task_id，strOf 早退），恢复时保持原样不加新防线，避免为理论面扩表。死路：①「daemon 私推引擎流绕过 backend」——已否决，幽灵轮无审计无权限路由（$46 事故先例）；②「前端折叠系统行升级」——原裁定本变更不做，执行期用户改判（dsh「收到任务消息」形态实证后明确要求可见留痕），已并入 FR-06；③「local.yaml 阈值载体」——放弃改 env，理由见做法概述。
 
@@ -503,6 +560,7 @@
 变更：2026-10-21-archive-patch-repair
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
 最近确认：5c97d62770d4dddf8fa3d9ea833b8905f3cbd098
 理由：答：最大风险是手工修准与 CLI 未来版本的 schema 演进漂移——缓解：键集不变只修值、repair 为纯新增字段（后端投影对未知键 fail-open，schema.py 侧 assets 读取面已核），且 verdict 枚举已从后端权威源查证（`planned/unplanned/untouched`，schema.py:745），无需凭空造值。放弃方案：① 接受现状不动——平台卡面持续误导 + 未来 FR 归属按错误清单污染，且 review.json 的 git-diff 权威面在历史压扁后成孤儿引用，评估已否；② 只追加 repair-note 文件不动冻结件本体——半吊子修复，卡面照旧错，不解决用户可见面；③ CLI 官方通道重建——`flow` 子命令无重建能力（已归档注销）、`--reopen` 属厚流程阶段机、知识库无先例，通道不存在。仓内已有 `patch-reanchor` 命令（归档后锚点修复）先例，佐证归档后修复在该流程文化下是被认可的形态（本变更为其内容面扩展，手工执行）。
 
@@ -511,6 +569,7 @@
 变更：2026-10-21-spec-manifest-incremental
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/platform_sync/router.py, backend/app/modules/platform_sync/schema.py, backend/app/modules/platform_sync/service.py, backend/app/modules/platform_sync/tests/test_spec_sync.py, backend/app/modules/spec_workspace/model.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py, backend/app/modules/spec_workspace/tests/test_spec_version_and_init_synced.py, backend/app/modules/spec_workspace/tests/test_sync_incremental.py, backend/migrations/versions/20261021130000_spec_manifest_landing_version.py, backend/tests/test_align_platform_change_events_migration.py
 最近确认：5115487c570daf7efdcedd873932b50372333d36
 理由：最大风险：**未来新增清单写点漏盖章 → 增量流漏行**。缓解：四个写点（apply_ops / _write_spec_root 对齐 / soft_delete_change_dir / heal_manifest_tombstones）逐点内联盖章并带「2026-10-21」锚注释，模型列注释与各写点 docstring 均注明「新写点必须盖章」；增量端点语义上把 NULL 行排除（未盖章行不进增量流）反而是显式失败面——漏盖章表现为客户端漏看到该行，靠全量兜底可发现（CLI 侧将带定期全量对账，sillyspec 仓消费变更内做）。评审补强两处：heal 写点盖章（P2-1，原实现漏）与 get_manifest 先读版本后读行（P2-2，封 READ COMMITTED 双快照跳行窗口——多读行是幂等超集无害）。次风险：rename 软删使墓碑行累积增速略升（原来硬删的行现在留存）——与既有 delete op 墓碑同量级（月千级），且有 `landing_version` 后未来可做墓碑 GC，可接受。 放弃的方案：① 按 `version`（行级谱系）直接过滤——不同行计数不可比，语义错误。② `updated_at` 时间戳游标——时钟回拨/同秒多事务不可判定，且 DB 与应用时钟双源。③ ETag/If-None-Match 整体未变短路（无增量行）——只能省「无变化」场景，任何单行变化仍全量 2.2MB，治标不治本。④ 服务端缓存全量序列化按 spec_version 键控——省的是 0.9s 生成段，5s 传输段不动（带宽受限），收益不足。⑤ 只做响应瘦身（裁墓碑/字段）——上限 ~15%，不解决无界增长。
 
@@ -519,6 +578,7 @@
 变更：2026-10-21-session-git-branch
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/router/__init__.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/session/service/git_status.py, backend/openapi.json, backend/tests/modules/daemon/test_session_git_status.py, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/daemon/sessions.ts, sillyhub-daemon/src/api-types.ts
 最近确认：4f66ab1e2364cbdfeafb01bb48f3dec9c6d08b3a
 理由：最大风险：每 60s 轮询触发 daemon `git_status`（内含 `git fetch`，15s 超时）——remote 慢时轮询堆积。缓解：fetch 失败/超时在 daemon 内降级（fetch_error 字段），分支采集（本地 porcelain）不受阻；轮询仅前台可见时执行；多会话面板并开时按 sessionId 各自 queryKey 独立节流，最坏面=可见面板数×1 次/60s（与会话列表 10s 轮询同量级，可接受）。 试过放弃的方案：① 复用 `git_refs` RPC 推当前分支（head sha 与 refs/heads 匹配）——同 sha 多分支歧义 + detached 不可判，放弃；② daemon 新增轻量 `git_branch` RPC（免 fetch）——跨服务契约变更 + 旧 daemon method_not_found 兼容面，轻量变更不值得，放弃（若后续轮询负载实证过重再立项）；③ `git_gateway`（backend 本机 subprocess）查 worktree——worktree 物理位于 daemon 宿主时 backend 不可达，且 session cwd 语义就是 daemon 宿主路径，方向错，放弃。
 
@@ -543,6 +603,7 @@
 变更：2026-10-22-review-risk-fixes
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/.dockerignore, frontend/src/app/proto/session-redesign/page.tsx, sillyhub-daemon/src/event-loop-watch.ts, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/tests/event-loop-watch.test.ts, sillyhub-daemon/tests/host-fs-handler-git-log.test.ts
 最近确认：c975a003a577bfb5ce79a8445906f9f358939c82
 理由：最大风险：FR-04 用 codePoint 重组字面字符后，若输入字符串本身是坏 UTF-16（孤立代理项）产出坏字节——与修复前同样产生乱码但不会更差（防御性等价，且 git 输出不会给孤立代理）。放弃的方案：① 给 `/proto/**` 加 middleware 鉴权——D-010 故障面已登记为独立事项，本次不动鉴权语义（避免 proto 预览页依赖登录态改变 dev 评审工作流），以「数据不进产物/上下文」双层代替；② 把真实导出换成人造 fixture——违背 FR-frontend-018（dev 预览要真实会话观感），不做。
 
@@ -551,6 +612,7 @@
 变更：2026-10-22-daemon-snapshot-report-log
 原编号：D-001@v1
 锚点：未记录
+文件：.openclaw/skills/sillyspec-archive/SKILL.md, .openclaw/skills/sillyspec-auto/SKILL.md, .openclaw/skills/sillyspec-brainstorm/SKILL.md, .openclaw/skills/sillyspec-commit/SKILL.md, .openclaw/skills/sillyspec-continue/SKILL.md, .openclaw/skills/sillyspec-doctor/SKILL.md, .openclaw/skills/sillyspec-execute/SKILL.md, .openclaw/skills/sillyspec-explore/SKILL.md, .openclaw/skills/sillyspec-export/SKILL.md, .openclaw/skills/sillyspec-flow/SKILL.md, .openclaw/skills/sillyspec-init/SKILL.md, .openclaw/skills/sillyspec-knowledge/SKILL.md, .openclaw/skills/sillyspec-plan/SKILL.md, .openclaw/skills/sillyspec-propose/SKILL.md, .openclaw/skills/sillyspec-quick/SKILL.md, .openclaw/skills/sillyspec-resume/SKILL.md, .openclaw/skills/sillyspec-scan/SKILL.md, .openclaw/skills/sillyspec-state/SKILL.md, .openclaw/skills/sillyspec-status/SKILL.md, .openclaw/skills/sillyspec-verify/SKILL.md
 最近确认：e135cab86ae8863568b5e46d1957f661b38fa068
 理由：- **最大风险**：日志量。每轮上报 +1 行（一轮通常也就 1 行 `collected` + 1 行 `reported`），长会话是线性增长；`delivered` 走 info 级、`failed`/`dropped` 走 warn 级，`config.log_level` 调到 warn 时只留异常（正常轮静默），可观测性与噪声可按部署调。另一个风险是**日志不能证明后端落库**——`delivered` 只代表 HTTP 2xx，后端若在事务里 best-effort 吞掉写入仍会丢；故「reported=delivered 但页面无卡」这条仍要靠后端侧查 —— 本变更只把「采到没发」这一半的盲区补上，文档里写明这条边界。 - **试过但放弃**：①继续保留四个零散 `on_turn_snapshot_*` tag 并各自补字段——grep 时要记四个名字，且成功路径仍无 tag，配对不了；②把日志塞进采集器（`turn_file_changes_collected` 里带上报结果）——采集与上报分属两层（SessionManager vs Daemon），采集器拿不到上报结果，硬塞会把上报结果回灌进采集器接口（接口膨胀 + 循环依赖风险）；③用 `console.info` 直接打而不走 `_logger`——绕过 `log_level` 过滤，warn 级部署下也会刷屏。
 
@@ -559,6 +621,7 @@
 变更：2026-10-22-fix-translate-cjk-segments
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_service.py
 最近确认：779a0e3c8865c337e3c385d20482692a03e97199
 理由：- 风险：段级只按语言占比判定，中英混排在同一段内（如「这个方法用 `cache` 缓存」）仍会整段送翻，模型对段内少量中文可能仍有破坏——整段送翻是现有粒度的边界，彻底解决需句级切分（成本高、破坏块保真）；当前修复覆盖生产实测的「中文正文 + 代码块」形态。 - 风险：纯数字/符号段判定为不送翻，若模型本可处理（无意义）不影响；可接受。 - 放弃方案：直接调高整条 worthy 阈值。放弃理由：会让「英文正文夹中文」也整条跳过，损失正常翻译。 - 放弃方案：前端也做段级判定。放弃理由：后端是权威兜底，前端重复实现易漂移；整条通过时请求成本可接受。
 
@@ -567,6 +630,7 @@
 变更：2026-10-22-protect-cjk-source
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_service.py
 最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
 理由：- 风险：中文片段保护后，正文段可能被切碎（引号、空格、英文单词片段），块数上升、单块过短；模型对极短片段（如孤立的 `"` 引号）可能产出空串或原样。可接受——碎片不携带语义，且 `should_translate_segment` 对无字母/汉字段直接跳过。 - 风险：中英紧邻无空格（如「这个是chunk」）会出现中文保护段与英文正文段相邻，重组顺序仍保真；可接受。 - 风险：轻量模型对英文长句的翻译质量本身一般（本次复现中 `sillyspec decisions add` 被译成「愚蠢的决定添加」），属模型能力上限，不在本变更范围；如需质量提升应另行更换更大模型。 - 放弃方案：调高段级判定的中文占比阈值。放弃理由：中文引用只占句内小部分，占比阈值永远够不到，整段仍送翻。 - 放弃方案：译后清洗反斜杠。放弃理由：治标——中文引用已经被破坏，清洗无法恢复原文语义。
 
@@ -575,6 +639,7 @@
 变更：2026-10-21-task-wakeup-event-queue
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_service.py, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/message-queue-bar.tsx
 最近确认：e5dce012e35a102b4c8d37a364e2519df32483df
 理由：答：最大风险是唤醒条目操作能力收窄的争议——事件行不提供 ✕ 删除/⚡ 立即发送，用户若想丢弃一条待派发通知没有入口（现状 chip 有 ✕）。接受理由：通知是系统自治行为（派发由本轮结束自动触发、会话 interrupt 后立即派发），人工删除是伪需求；且后端删除端点对 task_wakeup 行的权限语义未经核实，前端先不给入口避免能力错配。若后续真有需求，单开小变更核实后端语义后补。死路：①「mid-turn steering 直注入活跃轮」——已否决，router 层 2026-09-20 起恒排队（steering 收敛到队列条 ⚡ 显式入口），为通知重开 steering 通道违背收敛裁定且打断用户可见的执行流；②「泛化 turn_trigger 段（schedule/channel/auto_resume 全分类学）」——本变更不做，呈现架构级泛化留独立变更；③「事件行移出 MessageQueueBar 独立组件」——放弃理由见做法概述。
 
@@ -583,6 +648,7 @@
 变更：2026-10-22-turn-trigger-generalize
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/deploy.md, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/trajectory/from-turn-views.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-status-bar.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：7338a61c878a5f33c1d1a0647cf900f2b71c14d1
 理由：答：最大风险是内容前缀检测的伪造/漂移面——用户手打 `[系统续跑` 或 `【影子直聊】` 开头会被误标来源行（不丢内容、仅标注错源）；daemon 模板文案改动会静默漏检。双向前缀为 daemon/后端单一源常量且有测试锁定（auto_resume.py 注释「单一源导出供测试锁定」），跨语言同步义务注释落在前端常量处；根治靠 Phase 2 metadata 驱动（设计已排期）。死路：①「run metadata 驱动分类」——Phase 1 放弃（装配签名穿透成本，见做法概述）；②「定时消息并入」——用户裁定留 Phase 2（派发侧无标记需后端动 scheduled_send）；③「每源独立段类型」——组合爆炸，设计对比稿已否决（A 案）；④「shadow/group 前导保留 preamble 段双呈现」——进度视图双卡（来源注入卡 + 触发行）冗余，已裁定触发行替代。
 
@@ -591,6 +657,7 @@
 变更：2026-10-22-askuser-card-inline
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：05c42dea444bb413efd0c2d6b0a7a9f53e8e0f9d
 理由：最大风险：内嵌后用户滚动到长日志深处时新提问卡不可见、错过提问。兜底不缺：①待决策 pill 定位还原保留（点击滚顶+ring 闪烁直达卡片）；②卡片仍在内容流最顶部，回到顶部即见；③输入栏输入轮由后端 permission 队列门控，不答则挂起不丢。 放弃的方案：a) 保留 sticky 但滚动时折叠成细条——复杂度与状态面增加，用户明确不要悬浮形态；b) 新卡到达时自动滚动定位到卡——会打断用户阅读长日志的当前位置，侵略性强，弃。
 
@@ -599,6 +666,7 @@
 变更：2026-10-22-turn-trigger-metadata-p2
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/scheduled_send.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/helpers.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/session/service/queue.py, backend/app/modules/daemon/tests/test_session_queue.py, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/lib/daemon/session-sse.ts
 最近确认：125f15809bfcba92270420feb915fffc88a8cec2
 理由：答：最大风险是盖戳覆盖群聊键的理论冲突——群聊链路未来若也需 turn_trigger 语义（群聊来源标注），合并序（trigger 覆盖 chain）会吞掉；现状群聊 turn_metadata 不含 turn_trigger 键（键空间不相交），风险登记不设防。次要风险：'schedule' 排队行 origin 若被用户伪造——busy 路径入队的 origin 由 _handle_busy_turn 参数派生（HTTP 注入端点不透传 turn_trigger），浏览器不可达，伪造面不存在。死路：①「run metadata 盖戳」（metadata_.auto_resume_of 同族）——放弃，前端时间线装配以日志行为输入、run metadata 需跨 API 关联穿透装配签名（Phase 1 已评估放弃）；②「前端按内容前缀识别 schedule」——定时消息派发是裸 user prompt 无标记，前缀方案要求派发侧改 prompt 内容（污染正文），metadata 盖戳零污染；③「排队行加新列」——origin 列同族语义复用即可，零迁移。
 
@@ -655,6 +723,7 @@
 变更：2026-10-21-agent-profile-slim-default
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/profile/router.py, backend/app/modules/agent/profile/service.py, backend/app/modules/agent/tests/test_profile_router.py, backend/app/modules/auth/model.py, backend/app/modules/daemon/group/service/shadow.py, backend/app/modules/daemon/session/service/inject_gates.py, backend/app/modules/daemon/tests/test_group_default_profile.py, backend/app/modules/daemon/tests/test_session_default_profile.py, backend/migrations/versions/20261021_user_default_agent_profile.py, backend/openapi.json, frontend/src/app/(dashboard)/agent-profiles/page.tsx, frontend/src/components/__tests__/agent-profile-form.test.tsx, frontend/src/components/agent-profile-form.tsx, frontend/src/components/agent-profile-select.tsx, frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx, frontend/src/components/agent-profile/agent-profile-card-grid.tsx, frontend/src/components/agent-profile/agent-profile-card.tsx, frontend/src/lib/agent-profiles.ts, frontend/src/lib/api-types.ts, sillyhub-daemon/src/daemon.ts
 最近确认：9458a48db2d349cf18861d098796265ca018fe31
 理由：最大风险：daemon prune 是删目录操作，误删会话工作区文件——缓解：复用既有 pruneSkillsToSubset（限定 `<workDir>/.claude/skills/` 基目录、跳过隐藏项与非目录、单条失败仅 warn），且仅 spawn 前置链执行一次；实测门覆盖 daemon 测试。次风险：空=清空语义对存量用户反直觉（选了空技能档案的默认档案会让会话没技能）——缓解：设默认交互处提示「该档案未勾选技能，设为默认后你的会话将不挂载技能」（前端文案警示）。 死路：①档案行级 is_default 列（仿供应商）——放弃：档案跨用户共享（workspace/platform 可见），行级标记会让甲的默认影响乙，必须用户级存储；②改通用 pickStrList 空数组语义——放弃：effectiveAllowedRoots 等多调用方依赖「空=不过滤」既有契约，新 strict 变体隔离影响面；③热切换会话技能重挂载——v1 不做：需 daemon 会话存活期重跑 link/prune 链，收益低复杂度高，记边界。
 
@@ -663,6 +732,7 @@
 变更：2026-10-21-provider-default-ui-hint
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/agent-profile/__tests__/agent-profile-card.test.tsx, frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/floating/floating-session-host.test.tsx, frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx, frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx, frontend/src/components/group-chat/__tests__/member-panel.test.tsx, frontend/src/components/group-chat/create-group-wizard.tsx, frontend/src/components/group-chat/member-panel.tsx, frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx, frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx, frontend/src/components/llm-providers/__tests__/usage-footer.test.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/components/sessions/session-config-bar.tsx, frontend/src/lib/api/__tests__/llm-providers.test.ts, frontend/src/lib/api/llm-providers.ts
 最近确认：01207058ca048f4015b4074b38e32f1e2bba4335
 理由：最大风险：历史轮 timeline 用当前默认名标注的轻微失真（默认改名后历史轮名跟着变）——已声明可接受（FR-02），优于现状「本机默认」的反向误导。死路：把默认名写进会话/轮快照（config_snapshot）——放弃：属后端改动且引入快照一致性维护，显示问题不值当。
 
@@ -671,6 +741,7 @@
 变更：2026-10-21-profile-default-prehint
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
 最近确认：9711e7721de76c3f71b59ac13d1bb63815c7ed53
 理由：最大风险：provisional 兜底项文案「不指定（默认：名）」与运行中「不指定（无人格）」语义并存，用户切换会话形态时文案变化——有依据（两态实际语义确实不同），非漂移。死路：把默认名显示进非 provisional 会话——放弃：该会话不会注入默认，显示即撒谎。
 
@@ -679,6 +750,7 @@
 变更：2026-10-22-agent-profile-modal-restyle
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-22-001-c68b0d4bc.md, docs/releases/2026-10-22-002-43f2423a8.md, frontend/src/app/globals.css, frontend/src/components/__tests__/agent-profile-form.test.tsx, frontend/src/components/agent-profile-form.tsx, frontend/src/lib/__tests__/agent-profiles.test.tsx, frontend/src/lib/agent-profiles.ts
 最近确认：2fef11f807db97a27cdbd0f4fb036d7030bf821c
 理由：最大风险：既有单测查询方式依赖旧 DOM（antd Checkbox.Group 的 label 结构），重构后需按新 DOM（芯片以 role=checkbox/aria-checked 暴露）调整查询手段——行为断言不变、只改查询方式，逐用例核对防止「改测试凑通过」。次风险：antd Modal title 传 ReactNode 后高度变化在不同视口的表现，靠实页三主题截图对照兜底。已放弃方案：①继续用 antd Checkbox.Group + options render 定制两行芯片（Group 布局受限、工具栏与三态联动要绕过 Group 自身 state，别扭且难测，放弃）；②全局滚动条主题化（影响面全站，超出本变更范围，收窄为作用域工具类，全局化留给后续独立变更）。
 
@@ -687,6 +759,7 @@
 变更：2026-10-22-agent-profile-edit-refresh
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, docs/releases/2026-10-22-002-43f2423a8.md, frontend/src/lib/__tests__/agent-profiles.test.tsx, frontend/src/lib/agent-profiles.ts
 最近确认：302ebb786c739b33837b2fda22f89141637412bb
 理由：风险极低（追加一次幂等失效调用）。已放弃方案：①在全局页给表单传 onSuccess 回调手动失效（页面层补丁，只修全局页一个消费面，工作区内页若他日复用同形态还会漏，且表单 props 要加口子；放弃）；②把四个 CRUD hook 全部补 mineList（delete/copy 的消费页列表桶本就正确，全局页复制/删除已有页面层手动失效覆盖，扩大面无实证收益；本变更不动）。
 
@@ -695,6 +768,7 @@
 变更：2026-10-22-merge-test-debt
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/tests/test_mission_session_id.py, backend/app/modules/knowledge/vector_router.py, backend/app/modules/session_attachment/router.py, sillyhub-daemon/tests/adapters/json-rpc.test.ts
 最近确认：457db3f86efa272c64aeacd06333aa538f3636ea
 理由：最大风险：文案中文化对依赖英文 message 做断言的下游测试造成破坏。已核查：全量 backend 套件除本变更修复的 3 红外无其它红（9058 绿），无测试 pin 这两句英文原文。放弃方案：把英文文案登记进 l10n 守卫的 `ALLOWED_ENGLISH` 白名单——放弃理由：这两条是面向用户的报错（403/413），项目惯例（守卫文档自述）是用户可见文案中文化，白名单是给机器码/专有名词的，走白名单会把该守卫的立规意图绕空。
 
@@ -703,6 +777,7 @@
 变更：2026-10-22-merge-regression-fixes
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/grants/tests/conftest.py, backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
 最近确认：c4a82ff0be9d18ad4cdaa333e43ff178b0007e8b
 理由：最大风险：扩容 metadata 闭包引入 users↔agent_profiles、workspaces↔agent_profiles 环——姊妹 conftest 已实证同形态可建表（SQLite 内存库 + to_metadata + create_all），本变更照抄该范式并在隔离复跑中验证 62 passed。放弃方案：给 agent_profiles 建仅含 id 列的 stub 表——放弃理由：stub 与真实表结构漂移会掩盖后续 FK 问题，纳入真实表闭包与姊妹模块一致、可维护。
 
@@ -711,6 +786,7 @@
 变更：2026-10-22-change-delete-session-history-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/agent.md, .sillyspec/docs/backend/modules/change.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/migrations.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, backend/app/modules/agent/model.py, backend/app/modules/agent/tests/test_agent_run_change_fk.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py, backend/migrations/versions/20261022100000_agent_run_change_set_null.py, backend/scripts/restore_lost_session_turns.py, backend/tests/test_align_platform_change_events_migration.py, backend/tests/test_restore_lost_session_turns.py, docs/releases/2026-10-22-005-c2832fd.md
 最近确认：a0af14684ac4433ef87f97e4f33906c9e5e9f6f4
 理由：最大风险：改为 SET NULL 后，被删 change 的执行 run 会保留但失去 change 归属；`_change_run_ids` 的无锚分支可能把这些 run 归到同会话其它 change，导致用量报表轻微漂移。缓解：仅在 change 物理删除（低概率）时发生，用量按 run 去重不重复计数；在 `agent.md`/`change.md` 文档登记该语义。 回灌格式风险：引擎 JSONL 与 daemon 线上上报格式存在细微差异，渲染可能不完全一致。缓解：严格对齐 `_persist_agent_event` 的 `[ASSISTANT]/[THINKING]/[TOOL_USE]/[TOOL_RESULT]` 前缀与 `metadata.agent_event` 形状；回灌行带 `restored_from` 标记，便于按 run id 回收；生产先 dry-run 再 apply。 迁移对账误伤：全局 `turn_count` 下调可能影响未知会话。缓解：只下调（`turn_count > expected`），expected 只统计有 user_input 日志的 run，`tool_report` 的 0 语义天然保留；迁移前备份 `agent_sessions`。 放弃方案 A：只把 reparse 里的 `session.delete` 改成逐条搬 run——路径多（reparse、占坑回滚、未来新增删除入口），漏一处就复发，不是根治。 放弃方案 B：把左栏轮数改为列表接口实时聚合 `count(runs)`——改动面大、每会话子查询性能风险，且会改变 `tool_report` 的 `turn_count=0` replay 语义；保留存储列 + 对账路径更稳。
 
@@ -719,6 +795,7 @@
 变更：2026-10-22-file-changes-card-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/frontend/modules/components-daemon.md, .sillyspec/docs/sillyhub-daemon/modules/interactive.md, frontend/e2e/proto-file-card.spec.ts, frontend/src/app/proto/session-file-changes/page.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-changes.ts, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/turn-file-changes-types.ts, sillyhub-daemon/src/interactive/turn-file-changes.ts, sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts, sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
 最近确认：c2a675686324f2ee56e0a3b2a7a5c5c27a1754b8
 理由：最大风险：慢盘上从 2 条 git 命令增至 3 条，首轮仍可能超时；但 `/mnt/` 基础预算提升 + 超时后自动升级 + 超时保留清单，使「超时后整卡空白」不再发生。另一个风险是「本轮改动」口径扩大：轮内 commit 的文件现在会出现，卡片数字可能比以前大——这是修复目标（以前漏报），需在发布说明中明确。 放弃方案 A：只调大 timeout——不解决轮内 commit 漏报与 numstat 超时丢清单。 放弃方案 B：只用 `git diff --name-status` 不跑 numstat——行数全变破折号，信息退化。 放弃方案 C：忽略文件读到真实行数——`/mnt/e` 上读文件比 git 更慢，且 untracked 可能很大；保持诚实破折号。 放弃方案 D：给卡片加「重新采集」按钮——需要新增 daemon RPC 与平台端点，超出本次修复面，留作后续。
 
@@ -727,6 +804,7 @@
 变更：2026-10-22-sillyspec-probe-db-missing-evict
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py, backend/openapi.json, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/attachment-refs.test.ts, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx, frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/scheduled-messages-bar.tsx, frontend/src/components/daemon/session-input-bar.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/__tests__/session-status-indicator.test.tsx, frontend/src/components/sessions/ctx-usage-bar.tsx
 最近确认：b01334c76b3644cff83b081c3942d73823c95f46
 理由：最大风险：把「暂时没 init 但马上要 init」的项目误淘汰——项目 init 后 workspace 重新 claim 会重新注册根，且淘汰阈值 3 次（默认采集间隔 + backoff）留了观察窗；误淘汰代价仅是面板暂缺该工作区数据，重新 claim 即恢复。 次要风险：CLI 未来在 db_missing 时改掉 stdout envelope 契约 → 解析不到 codes 回退既有 nonzero_exit 记账（降级不劣化）。 放弃方案 A：restore 时向平台批量核对工作区存活状态——boot 增加平台往返与失败面，且运行期删除的工作区仍会残留到下次重启，不如运行期连败淘汰直接。 放弃方案 B：CLI 侧 db_missing 改 exit 0——改机器接口语义，影响其他消费方，违反「CLI 零改动」。
 
@@ -735,6 +813,7 @@
 变更：2026-10-20-session-awaiting-answer-status
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py, backend/openapi.json, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx, frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx, frontend/src/components/daemon/message-queue-bar.tsx, frontend/src/components/daemon/scheduled-messages-bar.tsx, frontend/src/components/daemon/session-input-bar.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：c0dbab0121e933d6bbfec711f0839bec0c580290
 理由：最大风险：列表刷新频率下新增一次 IN 查询的负载。评估：与既有 owner_name/current_run_status/terminating_at 注入同构（同一查询函数内多次 IN 批查），单表 `idx_session_dialog_requests_status` + session_id 索引齐备；10s/30s 轮询与事件驱动共用的仍是同一次列表查询，增量成本可忽略。 另一风险：`dialog_kind` 语义扩容（如未来出现非「等用户回答」的持久化对话类型）会误显示问号——以「所有持久化 pending 对话即等用户回答」为当前契约（模型注释明示：普通 canUseTool 审批不落行，落行的都是 may wait indefinitely for a human answer）。若未来出现例外，在该注入点按 kind 白名单收窄即可，改动局部。 试过但放弃的方案： - 前端用 `fetchPendingDialogs`（workspace 聚合端点）在 portal 侧合并——portal 有 workspace/change/quicklog 三 scope，要各自请求+合并+多一轮轮询，且未打开会话也在左栏，聚合端点按 workspace 粒度不匹配行级展示。放弃。 - 复用活性 `blocked` 区分——blocked 是 tailer 10s 推导的通用「停住」态，无法区分等审批/等回答/其它阻塞，且本地 CLI 会话 30s 轮询下最坏 ~40s 才可见。放弃。 - 在 run 表加列——写路径多、语义错位（等待是对话请求状态而非 run 状态）。放弃。
 
@@ -743,6 +822,7 @@
 变更：2026-10-22-conversation-live-marquee
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/frontend/modules/components-sessions.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, .sillyspec/docs/sillyhub-daemon/modules/sillyspec-manager.md, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py, backend/openapi.json, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/app/globals.css, frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx, frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
 最近确认：0bc8e38f727cf2fe343cea748bf7cc493aa8c50e
 理由：- 最大风险：流式高频更新导致派生/重渲染成本。缓解：派生 `useMemo` 只依赖 `segments` 引用，条目上限 200；滚动由单条 rAF 直接写 `transform`，不触发 React 每帧 state 更新；组件 `memo` 隔离。 - 交互风险：跑马灯持续动效可能干扰阅读。缓解：单行低矮、低调配色、`aria-live="off"` 不打扰读屏；终态立即消失；用户上滚使轮尾离开视口时 IntersectionObserver 自动停表。 - 视觉风险：窄屏下超长工具参数撑破。缓解：条目等宽 13rem + `truncate` + `min-w-0`，轨道容器 `overflow-hidden`，整行不产生横向滚动。 - 动画正确性风险：轨道内容变化（新增条目）时目标位置需重算，否则最新条可能停不进视口。缓解：`entries` 变化即重算 target，只向更负方向推进、不回滚；首次挂载直接定位到最新。 - 放弃方案：① 吸底悬浮（用户明确选择"运行中轮末尾"）；② 多行信息牌 / 竖向事件流（用户选择单行横向跑马灯）；③ 每条思考 delta 都入队（会刷屏，改为按段 id 就地去重）；④ 复用「进度」视图的完整时间线（信息密度过高，违背"不必看清"的目标）；⑤ 固定节奏逐条停留 + 循环回放（用户裁决改为连续流动、不循环、只流到最新）。
 
@@ -751,6 +831,7 @@
 变更：2026-10-23-translate-budget-align
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/translate/engine.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_service.py, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts
 最近确认：3cdca075ab2d93060e02b6ef663af8d05165bde6
 理由：最大风险：修复 1 的「最坏块数」估算通常精确（前端单段块按 1800 硬切、`ceil(len/1000)` 是其上界），但**保护段碎裂**（单块内多个 <1000 可译 run 被保护段隔开，块数超 `ceil(len/1000)`）或长句贪心装箱形态下可能低估 >2 块——此时后端预算反超前端死线，前端先 abort（回退原文 + 60s 退避），重现 FR-01 要消除的误杀形态。降级边界已裁决：可接受——HTTP 断开不触发后端 `_on_crash`（不累计崩溃计数/不进 600s 退避），后端线程照常完成推理并写双层缓存，退避期满重试即命中缓存恢复；触发需单条内 ≥3 个保护段的罕见碎裂。修复 2 的风险是重构 `translate_items` 主编排引入回归——用既有 12 个 service 用例 + 新增乱序用例钉死全等断言。修复 3 改 `_reader` 签名是内部私有面，风险低。 放弃的方案：①后端预算封顶 20s 并缩批——放弃，直接推翻 e7ce2a101 的生产实测结论，重新引入满批误杀；②前端按「条数」而非「估算后端块数」算超时——放弃，前端块 1800>后端 1000，16 条最多膨胀 32 块，按条数算（57.5s）仍会被 97.5s 预算的后端合法超出；③engine `_stop` join 读线程——放弃，Windows 管道 EOF 交付时机不可控，join 可能阻塞崩溃恢复路径，队列构造时捕获以零等待达成同一隔离。
 
@@ -759,6 +840,7 @@
 变更：2026-10-23-semantic-color-scale-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/translate/engine.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_service.py, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/lib/__tests__/tailwind-semantic-colors.test.ts, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts, frontend/tailwind.config.ts, sillyhub-daemon/src/interactive/session-manager.ts
 最近确认：aeae93b1364ac8a3e84863afc939e3fd625da7ca
 理由：最大风险：`color-mix` 的混合比例是目测估算（10%/35%/50%），与传统 Tailwind amber-50/200/700 的观感存在细微差异；且低版本浏览器不支持 color-mix 时数字阶声明失效（项目既有 brand/slate 透明度已使用 color-mix，基线浏览器要求一致，不新增兼容风险）。缓解：700 档已按评审 P2 以 WCAG AA 复算把基色占比从 75% 降到 50%（两套浅色主题 × 三调色板对 bg-50 的最小对比度从 3.08:1 提升到 5.07:1，全部 ≥4.5:1），并以真实构建 + 对比度复算固化；若某档观感偏差大，后续调比例即可（单点改动）。 试过但放弃的方案： - 改调用点为 DEFAULT 单色（`bg-warning-500`→`bg-warning`）——只能救实心点，救不了徽章的「软底+描边+深字」三档设计，等于降级视觉；且要改两个组件多点，回归面更大。放弃。 - 在 globals.css 为三套主题各补 12 个分档变量——变量块膨胀 36 行且与「基色变量派生」的既有约定重复，主题新增/调整时需同步多处。放弃。 - 直接写死 Tailwind 默认 amber/red/cyan hex 阶——违反对照原型与「无硬编码色值」铁律，深色主题对比会失真。放弃。
 
@@ -767,6 +849,7 @@
 变更：2026-10-23-review-risk-fixes-2
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/turn-file-changes-types.ts, sillyhub-daemon/src/interactive/turn-file-changes.ts, sillyhub-daemon/src/sillyspec-manager.ts, sillyhub-daemon/tests/interactive/turn-file-changes.test.ts, sillyhub-daemon/tests/sillyspec-manager.test.ts
 最近确认：d5025964ba5f773353e8fbe92bcf4c07569660ea
 理由：最大风险：修复 1 的键控放宽使「同根换 wsId 重建但项目侧仍缺库」形态多付 3 拍探测（约 90s）才重新淘汰——对比旧形态的「永久静默停摆」，属可接受的有限成本。另按评审 P3 补披露：**多个活跃工作区同根且项目侧永久缺库**时，双方连败会交替互覆 Map 条目（ROOT→ws-a/ws-b），稳态退化为每轮约 1 次探测——这是双键判定的规定行为（每个 ws 各自重新计满连败才淘汰），warn 被 `_evictedSkipLogged` 封顶不刷屏，可接受。修复 2 的风险是重启链路遗漏（target 更新但未重启滚动）——`applyTarget` 是 target 更新的唯一入口，ensureScroll 挂其尾部即全覆盖，可见性恢复另有点位。修复 3 的回调是可选参数，漏传即静默（与旧一致），由 session-manager 唯一生产调用点接线兜住。修复 4 的退避策略对脏体与网络失败一视同仁——单次脏体触发 60s 退避略保守，但防风暴优先（与 engine_ready=false 同款口径）。 放弃的方案：①在 daemon.ts evict 回调里二次核对映射再放行——放弃，治标不治本：skip 表仍在 manager 侧裸根键控，legacy 单槽位路径不经过回调，竞态窗口仍在；②给 `TurnFileChangesReason` 加 `git_error` 枚举值——放弃，types 注释明令「固定枚举，禁止新增值——错误按事件命名，不造无依据枚举」，加值违反模块自身设计契约且牵动前端 reason 映射；③修复 2 用「追平后降频轮询（如 1fps 续排）」——放弃，仍是空转只是变慢，且引入与速度常量耦合的第二节拍；④修复 4 只兜 null 不退避——放弃，脏体通常意味着代理/网关异常，不退避会对异常源形成请求风暴。
 
@@ -775,6 +858,7 @@
 变更：2026-10-23-turn-file-diff-dialog
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts, sillyhub-daemon/src/interactive/session-manager.ts
 最近确认：c91a1d6c30d543016c1570e8bdc00cade0374987
 理由：答：最大风险是补丁配对覆盖率——subagent（Task 工具）内部的 Edit 日志带 parent_tool_use_id/depth 归属列，文件卡 numstat 归因不区分主/子代理；方案按「本轮全部日志（含子代理行）」配对，多出的补丁段照实展示（它们确实改了该文件），不做主/子过滤（过滤反而丢内容）。Write 新建文件的 structuredPatch 可能缺行号形态，parseStructuredPatch 对形状不符返回 null → 该段占位「补丁格式不可解析」，不伪造。 试过放弃的方案：① 给 daemon 快照 DTO 增加 patch 文本字段——放大 /runs 全量轮列表载荷（500 文件上限 × patch 体积），且历史轮无数据，放弃；② 新增 daemon `git diff baselineHead -- path` 端点实时重算——可覆盖 shell 归因行，但需 daemon HTTP 面 + backend 代理，且历史正确性妥协（后续轮改同一文件后 diff 不再是「本轮」内容），跨度超出本需求决策面，记为后续独立变更候选；③ 点击跳转 agent-log 视图——非弹窗形式，违背用户明示「弹窗形式」。
 
@@ -783,6 +867,7 @@
 变更：2026-10-22-askuser-dock-inputbar
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/ask-user-marker-card.test.tsx, frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx, frontend/src/components/daemon/__tests__/session-fork-lineage.test.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx, frontend/src/components/daemon/__tests__/turn-time-display.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-auto-resume-badge.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx, frontend/src/components/daemon/agent-replay-body.tsx, frontend/src/components/daemon/pending-dialog-dock.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
 最近确认：17f2273dc06c094cd830f77fce052c55e8606933
 理由：最大风险：pending 期间输入框不可用——用户想「先不答、先输入别的内容」没有入口。缓解：卡头最小化按钮保留，最小化后右下角胶囊可还原；pill 定位还原保留；且 pending permission 语义上本就阻塞 agent 轮次（先答后问语义），输入框被替换与队列语义一致。此边界为用户显式裁决（「替换底部的用户输入框（遮挡）」）。 次风险：SessionInputBar 重挂载丢内部局部态（光标/展开的菜单）——受控值全在父级，丢的只是瞬时 UI 态，可接受。放弃的方案：a) absolute 定位把卡覆盖在输入栏上（输入框仍挂载）——「遮挡」会露出输入栏残边、且输入栏仍可聚焦与「答题优先」语义矛盾，弃；b) 全部最小化时恢复输入框（需最小化状态上抛或受控化）——状态同步面增大、交互分叉（输入框出现/消失多一层条件），且「pending 期间不该发新消息」语义下价值低，弃；c) 保留 TurnTimeline 内渲染不动、仅用 CSS 把卡定位到输入区——跨组件定位（卡在滚动容器内、目标在容器外）需 hack（fixed/portal），脆弱，弃。
 
@@ -791,6 +876,7 @@
 变更：2026-10-23-marquee-item-detail
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, frontend/src/app/globals.css, frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：f4421724555649a61a85146556038565c84c0b3b
 理由：- 最大风险：条目内部滚动与轨道滚动叠加造成视觉噪声。缓解：只有 running 条目内部滚动（通常 1~3 条），完成条目静止；轨道速度仍按追赶距离自适应。 - 短文本循环重复感：用双份文本 + 固定窗口，文本很短时会出现重复片段；属纯感知场景的可接受取舍（用户不需要看清）。 - 时长准确性：thinking 为客户端观测时长，受挂载时机影响（边界已在上文披露）；工具/子代理使用段真实时刻，不伪造。 - 放弃方案：① 继续用 emoji 图标（用户明确要求项目 lucide 图标）；② JS 逐帧滚动内部文本（与轨道 rAF 叠加成本高，改用 CSS animation）；③ 用「当前时间 − 段 ts」填充历史思考耗时（会伪造，违反宁缺勿假）；④ 条目加交互展开（用户已裁决纯感知不交互）。
 
@@ -799,6 +885,7 @@
 变更：2026-10-23-marquee-ticker-speed
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/globals.css, sillyhub-daemon/src/network-info.ts, sillyhub-daemon/tests/network-info.test.ts
 最近确认：33645b42e6613df200997828141cff7eabdaafba
 理由：- 风险：速度过快时短文本重复感更明显；3s 为折中值，若仍不合适继续微调该单一常量即可。 - 放弃方案：按文本长度动态计算时长（需要测量宽度、增加 JS 复杂度，收益有限）；改轨道整体速度（用户只反馈条目内部滚动慢，轨道行为已被确认）。
 
@@ -807,6 +894,7 @@
 变更：2026-10-23-live-turn-meta-time
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/model.py, backend/app/modules/daemon/router/heartbeat.py, backend/app/modules/daemon/router/version.py, backend/app/modules/daemon/runtime/service.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/network_context.py, backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py, backend/tests/modules/daemon/test_network_context.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/chat/round-divider.tsx, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/__tests__/turn-time-display.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：475a8da2eec4b9e711dbd43e881244d506a474aa
 理由：最大风险：RoundDivider 是 memo 组件，detail 从 string（值相等可命中 memo）变为运行中轮每渲染新建的 React 元素 → 该轮 RoundDivider memo 恒 miss。评估：仅单条运行中轮受影响、RoundDivider 渲染成本极小（几个 span），且运行中轮本就随流式 delta 高频重渲染（tokens meta 同步变化），无可感差异；终态轮 detail 仍是 string，memo 命中率不变。 放弃方案：① 父级 TurnRow 持 interval 整体重算 metaDetail——每秒整轮重渲染，违反渲染经济铁律（FR-06 惯例，TurnStatusBar 注释明载 tick 不外溢），放弃；② 只改数据层（running → replyAt=null）——该位置整体消失，不满足「进行中显示实时走秒历时」的用户裁决，放弃；③ RoundDivider 开专用 liveElapsed prop——为单场景在共享组件上扩接口面，比向后兼容的类型放宽侵入更大，放弃。
 
@@ -815,6 +903,7 @@
 变更：2026-10-23-askuser-history-live-sync
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/core/client_ip.py, backend/app/modules/auth/router.py, backend/app/modules/daemon/model.py, backend/app/modules/daemon/router/heartbeat.py, backend/app/modules/daemon/router/version.py, backend/app/modules/daemon/runtime/service.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/network_context.py, backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py, backend/tests/modules/daemon/test_network_context.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
 最近确认：cd3a5746b656945ae7c55a801932582e1ba94d7d
 理由：最大风险：resolved 事件到达时后端答案落库与事件推送的时序竞态——若推送先于落库（理论窗口），重拉拿到的仍是 pending 态，记录短暂停留未更新，直到下一次事件/刷新兜底。评估可接受：backend 的 resolved 语义是"请求已收口"（落库后广播），实际窗口极小；且问答级频率下无重试风暴风险。 放弃的方案：a) 前端把 SSE 事件手工转 SessionDialogRead 增量 append/merge——resolved 事件不含 answers（SessionPermissionResolved 无答案字段），必须伪造或再查单条，且 id/created_at 等 REST 字段 SSE 缺失，拼装体与刷新后权威数据不一致（闪变）；b) 后端在 resolved 事件里加 answers 字段——动 SSE 契约+后端，改动面大且只解决 resolved 一半（request 到达仍需转换），违背"前端回显权威数据"原则；c) 轮询 dialogHistory——问答级频率用轮询浪费且延迟不可控。均弃。
 
@@ -823,6 +912,7 @@
 变更：2026-10-23-file-card-agent-grouping
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/network_context.py, backend/tests/modules/daemon/test_network_context.py, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：0ea7bf0d129c6dfba9a04915c83c36329bbfbbfd
 理由：答：最大风险是「本轮AGENT 0 个但 shell 很多」的形态——用户会先点开卡只看到空列表 + 按钮行，可能困惑；缓解：agent=0 时头部第一段显示「本轮AGENT 无直接文件编辑」（不渲染 +0 −0 假零），按钮行置顶显眼。次要风险：双段标题在一行 28px 内拥挤（长数字/窄面板），处理：两段间分隔符 + min-w-0 截断，两端 shrink-0。 试过放弃的方案：① daemon 侧给快照加「并行会话」独立归因（把 shell 再拆 command/parallel）——需要 mtime/进程级证据，daemon 现有采集拿不到可靠信号，放弃；② 前端按路径启发式猜并行会话（如 .sillyspec/ 前缀）——路径黑名单是伪归因，误伤用户业务文件，放弃；③ 两张独立卡片（agent 卡 + 其他卡）——把一个快照拆两张卡破坏「一轮一卡」的既有形态与测试锚，用户要的是卡内分组不是拆卡，放弃。
 
@@ -831,6 +921,7 @@
 变更：2026-10-23-session-input-clear-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/auth.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/agent/model.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/network_context.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/control.py, backend/app/modules/daemon/session/service/create.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/session/service/queue.py, backend/migrations/versions/20261023090100_add_queued_messages_network_context.py, backend/tests/modules/daemon/test_network_context.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
 最近确认：f4cceafeb72c4b28c56c69a96d4d642f2b5b87e0
 理由：- 最大风险：立即清空后「失败窗口期」用户误以为发送成功。缓解：失败路径既有 errorMsg/notify 提示（不变），且文本自动恢复到输入框。可接受。 - 放弃方案 A「发送时输入框转禁用+spinner 等响应」：不解决切换会话后的草稿残留，且阻塞连续输入，体验更差。 - 放弃方案 B「卸载 cleanup 里清草稿」：卸载时无法区分「发送在途」与「用户主动切走（草稿应保留）」，语义不可判定，死路。 - 放弃方案 C「dialog 模式（session-panel-dialog.tsx）同步修」：用户报障场景为会话页面（page 模式）；dialog 无测试覆盖基础，本变更不扩面，遗留同构问题已知并记录。 - 预会话「不回读草稿」牺牲了「预会话写一半切走再回来继续」场景：与「新建=全新开始」预期冲突时取后者（用户报障明确）；真会话草稿不受影响。
 
@@ -839,6 +930,7 @@
 变更：2026-10-23-marquee-motion-polish
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/network_context.py, backend/app/modules/daemon/session/service/inject.py, backend/openapi.json, backend/tests/modules/daemon/test_network_context.py, frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
 最近确认：997f1963fcc327dd57cce4cc431382d1c309270c
 理由：- 风险：流光调得过淡会“看不见”，过亮又会干扰；本版取 22% 宽 + blur + 6.5s 周期为柔和档，可在原型上继续微调。 - 速度曲线：最小速度 40px/s 保证不会出现长时间拖尾；上限 1600px/s 保证事件爆发仍能追平。 - 遮罩兼容性：同时写 `mask-image` 与 `-webkit-mask-image`；不支持时退化为无渐隐（不影响功能）。 - 放弃方案：① 纯指数缓动（尾巴过长、停止时间不可预期）；② 动态测量每条文本宽度调整滚动时长（收益有限、增加大量 observer）；③ 完全去掉流光（用户要“优化”而非“删除”）。
 
@@ -847,6 +939,7 @@
 变更：2026-10-23-diff-dialog-copy-fallback
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：f6b0aa43c19e5ea9fc198380a8a79e78ba0b8f47
 理由：答：最大风险是复制文本与 DiffView 视觉行的对齐预期——用户可能期望复制的内容可直接 `git apply`，但平台没有 hunk header（`@@ -a,b +c,d @@`）与文件头，纯前缀文本不能直接应用。缓解：按钮 label 与段标题明确语义（「复制该段 diff」），脚注保持「仅行级内容」表述；不伪造 header 是刻意选择。 试过放弃的方案：① 直接复制原始 edit_patch JSON——粘贴出去不可读且与脚注「完整内容」语义不符，放弃；② 给 diffRowsToText 拼造 unified header（用 rows 行号推 @ 头）——hunk 边界信息已丢（分隔伪行是视觉标记），拼造可能错位误导 git apply，放弃；③ 升级 DiffView 为内置复制（改共享组件签名）——DiffView 现有 5+ 消费方（agent-log 工具卡、daemon tool-args-detail）都有自己的复制兜底，改共享件会牵动面过大，本变更在弹窗消费侧挂按钮即可，放弃。
 
@@ -855,6 +948,7 @@
 变更：2026-10-23-diff-copy-p3-cleanup
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
 最近确认：e849e16ee3a34212c2abfd144b0503f6064b6b1d
 理由：答：最大风险是脚注文案过长挤压 85vh 弹窗的可视区——缓解：脚注保持 10.5px muted 两行内文案，追加在半句后而非独立段；若仍拥挤可后移为 tooltip（本变更不做，避免过度设计）。 试过放弃的方案：① 给 diffRowsToText 加缓存（Map by rows 引用）——rows 每段唯一且弹窗生命周期短，缓存无收益还增加清理面，放弃；② 改 CopyButton 共享组件加 builtin getText 优化——其 getText 已存在，无需改；③ 回改上一变更归档的 requirements 修正 FR-02 措辞——归档件冻结（审计真相），不回改历史文档，放弃。
 
@@ -863,6 +957,7 @@
 变更：2026-10-23-session-dialog-input-align
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/auth.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/__tests__/initial-window.test.ts, frontend/src/components/daemon/session-panel/initial-window.ts
 最近确认：2012a0426db5ce4e6f7307f847c4c1b18eb8deac
 理由：- 最大风险：立即清空后「失败窗口期」用户误以为发送成功。缓解：失败路径既有 errorMsg/notify（不变）且文本自动回填；与 page 模式同一口径。 - 放弃方案 A「只在 dialog 内部给 idle 态加 nonce/重挂载」：宿主已用 key 表达会话切换（`attachSession?.id ?? "live"`），再叠一层 nonce 会与宿主 key 语义重复；改由「idle 不回读草稿」直接消除残留来源，更小改动面。 - 放弃方案 B「dialog 与 page 合并为同一实现」：两模式 2334 行 vs 6163 行、渲染容器/队列 hook/SSE 生命周期不同（dialog 零 react-query、page 挂 react-query），合并属重构级改动，本次不扩面（记为长期项）。 - 放弃方案 C「失败恢复用 setInput(prompt) 无条件覆盖」：会吞掉用户在失败窗口期新输入的内容；与本仓 `handleInterrupt` 回退、page 版「仅空时回填」口径冲突。 - 明确边界（可接受）：`handleResend`（时间线失败卡「重新发送」）不走输入框语义，失败不把该轮 prompt 回填输入框——用户未在输入框输入该文本，回填属越权写；保持现状。 - 明确边界（可接受）：`cancelSched`/定时发送相关路径清空语义不变（`confirmSchedCreate` 保留原 trim 比对清空），定时创建成功不属「发送受理」，不回填。
 
@@ -871,6 +966,7 @@
 变更：2026-10-23-session-first-window-turn-align
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/auth.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/agent/model.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/network_context.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/control.py, backend/app/modules/daemon/session/service/create.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/session/service/queue.py, backend/migrations/versions/20261023090100_add_queued_messages_network_context.py
 最近确认：780bda6099858d50f9908ea6d9e308c2eb46b8ab
 理由：最大风险是首屏多一次 runs 快照与至多 9 次单轮直达拉取（1 次截断轮 + 最多 8 个更早轮候选**并行**，一个 RTT 批量；slim 截断传输）；预算 3000 行、单轮 2000 行、单次 8 轮三上限把最坏请求量与传输量同时锁死，短轮会话不会串行发数百次请求。切会话/卸载经 AbortSignal 立即取消在途补拉链。直达不完整/失败时整体回退底窗（不合并、不向前补拉），新增更早轮只在完整时采纳——两条路径都保证轮间无洞。放弃方案：① 直接调大 `HISTORY_PAGE_SIZE`——仍会在大轮上复现且无轮对齐；② 后端改日志接口做服务端自适应分页——最优雅但改动面跨前后端、影响所有消费方，留待后续；③ 首屏全量加载所有轮次——长会话传输不可控（500 轮 × 数千行）。
 
@@ -879,6 +975,7 @@
 变更：2026-10-23-skill-prune-git-safe
 原编号：D-001@v1
 锚点：未记录
+文件：sillyhub-daemon/src/skill-manager.ts, sillyhub-daemon/tests/skill-manager.test.ts, sillyhub-daemon/tests/task-runner.test.ts
 最近确认：dd0532e5d5ffdcb72e047c5a157a4bf4d4fa786a
 理由：答：最大风险是「裁剪失效感」——git 仓库里的技能目录不再被删，会话 agent 能看到（读到）全部仓库自带技能，超出会话勾选的技能面。定性：技能只是说明书文档，读取面放宽不改变工具权限面；且平台技能下线本就走「仓库提交」通道（2026-10-23 实证 b6f3114d9），daemon prune 对 git 仓的删除本就属于越权行为。缓解：`prune_skill_kept` 日志保留可观测。次风险：`git ls-files` 在超大仓的耗时——限定 pathspec `.claude/skills` 后输出量级为技能文件数（几十到几百行），15s 超时兜底，启动路径一次性可接受。 试过放弃的方案：①link 时打 marker 文件/命名约定——存量已 link 目录无 marker，需迁移清理，且 marker 本身又落在工作区（新污染），放弃；②workDir 是 git 仓则整体跳过 prune——判定太粗，daemon link 副本在 git 仓里（.gitignore 了 .claude/skills 的部署形态）也无法清理，放弃；③删除改移动到 daemon 回收站——仍改工作区，只解决可恢复不解决「不该动」，放弃；④把 `.claude/skills` 整体加 gitignore——动仓库契约、影响技能作为正式文件分发的既有形态，放弃。
 
@@ -887,6 +984,7 @@
 变更：2026-10-23-marquee-blank-track-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：d32d1a2b1f4f1d6bff5ad855aee08edf0e154678
 理由：- 风险：offset 补偿瞬间若测量宽度为 0（字体未加载/隐藏容器），step 回退 208，可能有一次轻微跳动；已在 clamp 与 rAF 缓出下弱化。 - 放弃方案：① 每次滑动直接重置 offset=base（画面会瞬移一条，不流畅）；② 无限保留历史条目（DOM 无界增长）；③ 用 CSS 循环轨道（无法满足“只到最新不循环”）。
 
@@ -895,6 +993,7 @@
 变更：2026-10-23-rename-ghost-pit-doc
 原编号：D-001@v1
 锚点：未记录
+文件：docs/sillyspec/finished/坑11-rename-弃名不落台账平台幽灵永挂.md
 最近确认：e24e1eb9da5f05b4950b595c8f33640034e3bf4d
 理由：最大风险：文档与 sillyspec 仓修复细节漂移（修复侧后续演进时本文可能滞后）。缓解：文档只记事故事实与修复锚点（变更名/提交哈希/一句话机制），不复刻实现细节，演进史归修复仓变更档案。死路：把修复代码也搬进本仓——跨仓重复实现无意义，放弃。
 
@@ -903,6 +1002,7 @@
 变更：2026-10-23-marquee-queue-window
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：bde8745c66dec2a3745f7cfdfaeff7d3708ea923
 理由：- 风险：窗口只有 12 条，用户无法在跑马灯回看更早事件。缓解：跑马灯定位是「感知」，完整过程在「进度」视图；12 条约 3 屏，滚动节奏足够。 - 窗口频繁滑动（每次新事件）：每次只前进一条且补偿平滑，视觉与性能均可接受；轨道总宽恒定，不累积。 - 放弃方案：① 保留 200 条（用户指出成本不必要）；② 只保留 10 条（12 条保留约 3 屏上下文，性能差异可忽略）；③ 用虚拟列表（12 条不需要）。
 
@@ -911,6 +1011,7 @@
 变更：2026-10-23-session-first-load-ux
 原编号：D-001@v1
 锚点：未记录
+文件：docs/sillyspec/active-pitfalls.md, docs/sillyspec/edit-patch-tool-use-id-missing.md, frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts, frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx, frontend/src/components/daemon/session-panel/initial-window-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：58cebf9df158804564dd87110c7673ef898a3703
 理由：最大风险：第二段 prepend 合并的轮块拼装正确性（锚点轮直达段与底窗同 run 跨块、#e 变体 key、游标推进条件）——缓解：合并逻辑提炼为纯函数（输入：已渲染 turns、底窗行集、adaptive 结果；输出：prepend 轮块数组 + 新游标），单测覆盖跨 run/同 run/空补拉/整体回退四种形态；沿用「加载更早」已验证的拼接语义而非新造。 已放弃方案： - 「底窗后立即建 SSE 流」：直达整轮可能带回底窗边界之外的行，cursor 语义需重推导（现版注释明确「游标不前进会重复拉取」），风险大于收益——建流时序保持不变。 - 「取消/砍掉 buildInitialWindow 恢复纯底窗」：回退 first-window-turn-align 的轮对齐目标（轮首被截的困惑回归），治标不治本。 - 「补拉自动连翻触顶翻页（maybeAutoFill 循环）替代直达链」：串行多页 RTT 比并行 8 轮慢，且首屏先闪半轮再补全跳变更丑。
 
@@ -919,6 +1020,7 @@
 变更：2026-10-23-marquee-thinking-fulltext
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, frontend/src/app/globals.css, frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts, frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx, frontend/src/components/daemon/session-panel/initial-window-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：092618dd5c0095a13d5e2646e92c1a5a826d42f7
 理由：- 风险：极长思考滚动时间较长；但跑马灯定位是感知，正文区有完整思考可读，窗口仅 12 条、DOM 文本量可控。 - 流式增长时文本宽度测量依赖 ResizeObserver / 文本变化 effect；浏览器布局稳定时跟随连续，极端情况下可能有一次轻微追赶。 - 速度按文字宽度与距离自适应（220~900px/s）：流式爆发时能跟上，稀疏时慢速流动。 - 放弃方案：① 保留 64 字截断（用户明确要全文）；② CSS 无限循环动画（用户明确禁止循环）；③ 到达末尾直接停住不跟随（思考仍在流式增长时会被落在旧位置，用户明确要求跟随）。
 
@@ -927,6 +1029,7 @@
 变更：2026-10-23-diff-dialog-pairing-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, docs/sillyspec/active-pitfalls.md, docs/sillyspec/edit-patch-tool-use-id-missing.md, frontend/src/app/globals.css, frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts, frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx, frontend/src/components/daemon/session-panel/initial-window-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：ea5e7eb64b9bf39787f9d8b2ba1870c240086cee
 理由：答：最大风险是「无 id 且同轨多悬置时补丁显示率下降」——诚实丢弃，用户看到无补丁说明。定性：错内容比没内容危害大；且①恢复 metadata 键后真实链路绝大多数补丁走精确配对，②只在极旧/异常数据上兜底。次风险：`metadata.agent_event` 在新轨未落库的历史行上缺失 → 回落顶层 slim 键；两者都缺 → ②同轨唯一悬置。均已如实降级、不伪造。 试过放弃的方案：①只改②回退「就近最近悬置」（首版实现，评审否决）——未发现①从未生效的真根因，且串行假设不成立于后台子代理并行形态，会把 A 的补丁挂到 B 名下；②悬置>1 一律丢弃但不修①——真实链路仍全落②，串行轮也可能因悬空而大面积丢段，放弃；③按「补丁内容文件路径启发式」猜归属（structuredPatch 不带路径，伪归因，放弃）；④弹窗列出「本轮全部无主补丁」转嫁用户（弹窗语义劣化，放弃）。
 
@@ -935,6 +1038,7 @@
 变更：2026-10-23-watchdog-steering-guard
 原编号：D-001@v1
 锚点：未记录
+文件：sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/session-manager/turn-control.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
 最近确认：8e6a6b644c3481a47ec381533ce4422fcc9b64d7
 理由：答： - 最大风险：`observedRunIds` 无界增长。用 256 上限 FIFO 驱逐；单个 UUID 约 36 字节，单会话上限约 9KB。 - 风险：同 runId inject 跳过 stale-reset 后，若 backend 重启导致旧 turn 已死但 currentRunId 残留，会不会永远不收敛？不会：该形态下不会布防看门狗，但 backend 的 pending run 300 秒清扫仍兜底；且真正的「新 run 被吞」runId 与残留 currentRunId 不同，仍会正常布防。 - 放弃方案：只提高 60 秒/90 秒阈值。治标不治本，长 turn + 慢模型仍会命中，且会延迟真僵尸轮的收敛。 - 放弃方案：在看门狗触发时再检查 `lastTurnEventAt`。此时错误布防已经发生，根因在布防前；前置守卫比事后补救更可靠。
 
@@ -943,6 +1047,7 @@
 变更：2026-10-23-knowledge-scope-maintenance
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/knowledge/parser.py, backend/app/modules/knowledge/router.py, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/service.py, backend/app/modules/knowledge/tests/test_scope_maintenance.py, backend/app/modules/knowledge/writer.py, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx, frontend/src/components/knowledge/__tests__/scope-maintain-dialog.test.tsx, frontend/src/components/knowledge/entry-card-list.tsx, frontend/src/components/knowledge/scope-maintain-dialog.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/knowledge.ts, sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/session-manager/turn-control.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/interactive/turn-start-watchdog.test.ts
 最近确认：80f9dd90355be5253439d049cadcd771baf88c09
 理由：风险=节定位歧义（同名 heading 重复）导致改错节——对策：多义直接 422 并要求唯一 heading；marker 只在该节范围内增删，绝不触碰其他节。放弃：整文件 content 替换式维护（丢其他节编辑并发、无结构校验）；文件级 scope（无法表达节级语义）。
 
@@ -951,6 +1056,7 @@
 变更：2026-10-24-close-run-quota-fallback
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py
 最近确认：92bbf833e5595acbe7617b6bd61ad6f25c9fc748
 理由：答：最大风险是**误报**——把非限额失败标成 quota_exceeded。缓解：双重锚定（必须同时含 429 状态码与限额关键词，正则逐条对齐 classifier.ts 规则 1），且 429 语义即 Too Many Requests、配限额关键词才定 quota（纯 429 落 rate_limited 的情形本方案不推断、保持现状）；实测 9-04/10-23 两批真实限额文本均稳定命中。次风险：推断规则的维护漂移（daemon 侧改文案后端不知道）——注释钉死对齐源路径，daemon classifier 改动时须同步（评审检查点）。 试过但放弃的方案：① 前端兜底（失败卡渲染时翻时间线日志找 API Error 行）——前端拿不到结构化 run 日志查询入口，且 error_detail 为空时 buildSystemFailureItem 只吃 error_code/failure_summary 两参，跨组件翻日志链路重、auto_resume（后端读 error_detail）完全受益不到，放弃。② 后端复制 daemon 全类型分类规则——双源维护面大，auth/timeout 等类型文本特征弱误报高，收窄为 quota 专项（理由见做法概述）。③ 只升级 daemon 不改后端——那台机器不归本平台代码库管，升级排期不可控，且未来任何机器的 daemon 版本倒挂都会复发，后端兜底是对部署倒置的结构性防御。
 
@@ -959,6 +1065,7 @@
 变更：2026-10-24-pi-edit-patch-synth
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/turn-timeline.tsx, sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts, sillyhub-daemon/src/interactive/pi-events.ts, sillyhub-daemon/tests/interactive/pi-edit-patch-synth.test.ts
 最近确认：4d07114b353e26c3c2462eebf3133b4cff03ac55
 理由：答：最大风险是 **oldStart 行号的近似性**——块替换前面的内容有他源改动时，累积偏移算出的旧行号有偏差（diff 内容仍真实，行号标注可能偏几行）。缓解：jsdoc 披露；newStart（新文件行号，弹窗主体信息）由实盘定位恒精确。次风险：入参登记打破 pi-events 零状态设计——登记面收敛为 call_id→args 单 Map、轮内生命周期、容量上限，复杂度受控。 试过放弃的方案：①daemon 在 tool_use 时刻读旧文件、end 时刻读新文件算真 diff——旁路观察与工具执行竞态（start 到 end 间他源改动会被误算入该工具），且 pi 工具在 driver 外执行、时序不可靠，放弃；②解析 pi 结果文本中的路径与块数——结果无内容无行号，解析只得元数据无 diff 体，放弃；③前端从 tool_call 入参自行渲染（A+ 方案）——不改 daemon 但弹窗要做第二套渲染（write 全文视图/edit 块视图），且每会话拉全量 tool_call 入参放大 payload，放弃（用户已裁决走根治）；④放宽前端 parseStructuredPatch 行号可空——动 claude 轨道共用解析器，回归面大，放弃。
 
@@ -967,6 +1074,7 @@
 变更：2026-10-22-trajectory-context-jump
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py, frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts, frontend/src/components/daemon/trajectory/__tests__/trajectory-redesign.test.tsx, frontend/src/components/daemon/trajectory/build-trajectory.ts, frontend/src/components/daemon/trajectory/from-turn-views.ts, frontend/src/components/daemon/trajectory/trajectory-ledger.tsx, frontend/src/components/daemon/trajectory/trajectory-view-model.ts, frontend/src/components/daemon/turn-timeline.tsx, sillyhub-daemon/src/interactive/pi-edit-patch-synth.ts
 最近确认：bbe1bbf6ba02b08fa3ef2bf7a5558d94f4d026ff
 理由：风险：`scrollIntoView` effect 在流式更新（新行追加）时可能把用户正在阅读的位置拉走——限定为「selectedRowId 变化时」触发（非滚动容器内容变化），与旧实现同口径。放弃的方案：让 TurnCatalog 直接操作轨迹 DOM（跨组件 querySelector）——耦合 DOM 结构且绕过选中状态机；放弃 imperative ref 暴露滚动方法——受控信号 + 选中 effect 已够用，少一条命令式通道。
 
@@ -975,6 +1083,7 @@
 变更：2026-10-24-backend-mem-limit-raise
 原编号：D-001@v1
 锚点：未记录
+文件：deploy/docker-compose.yml
 最近确认：0a3e4ee1ab582ce08c68a988d7da3697f3436448
 理由：最大风险：若后续再引入第三类常驻模型 worker 或批量推理峰值再涨，2500m 仍可能触顶——但 cgroup OOM 兜底行为不变（杀 worker 保主进程），且宿主 7.5G 对 2500m 上限仍有 3G+ 安全边际，风险可控。放弃的方案：①worker 拆独立 sidecar 容器（治本但改部署管线与进程拓扑，改动面大，超出本次决策范围）；②调小嵌入/翻译批上限（治标：压峰不治底，主进程+单 worker 稳态仍贴 1100m 顶，且推理延迟恶化）；③不设 mem_limit（失去 OOM 隔离，宿主与其它容器暴露在被挤爆风险下）。
 
@@ -983,6 +1092,7 @@
 变更：2026-10-24-trajectory-context-rows
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/trajectory/__tests__/from-turn-views.test.ts, frontend/src/components/daemon/trajectory/from-turn-views.ts
 最近确认：b1d1ed8ee47ffcd26dba1175753a470e3caf08e9
 理由：风险：turn_trigger 含「用户亲笔来源标注」类（shadow_chat/group_chat/schedule，contentHidden=false）——它们也显示为「上下文」行。接受：dsh 同款形态（触发源即 context 行），且行摘要有原文，用户可辨识；如需区分可后续按 trigger 字段细分。放弃的方案：继续用 processItems.system_event 作数据源——DB 实证该路径近乎恒空，修不动；为注入信息新增后端 channel——跨端大改，本平台注入已有 turn_trigger 承载，无需新通道。
 
@@ -991,6 +1101,7 @@
 变更：2026-10-23-marquee-awaiting-indicator
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：0fa5913d2e4444e1dc0f9a6f01469da91a958814
 理由：- 风险：1s interval 在等待期间每秒触发一次组件重渲染；列表仅 12+1 条，成本可忽略，且只在等待态运行。 - 等待条目出现/消失使轨道宽度变化一条，target 单调规则下推进连续，短暂右端空档可接受（与真实事件到达通常几乎同时）。 - 放弃方案：① 从后端/daemon 发心跳事件（跨服务改动，收益不成比例）；② 用状态条文案兜底（已有「当前活动」但不持续、也无法区分等待与执行）；③ 等待条目参与 entries 队列（会污染窗口滑动与去重语义）。
 
@@ -999,6 +1110,7 @@
 变更：2026-10-25-marquee-subagent-outer-only
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：c596944e9698db5bfd828734cc1958b27b36ba61
 理由：- 风险：startedAt 为历史挂钟时间时，挂载即显示已运行很久的时长——这是真实时长（attach 场景），符合预期；缺省客户端起点在重挂载后偏短（既有披露边界）。 - 1s tick 每秒重渲染列表（13 条）——与等待条目共用同一 tick，成本可忽略。 - 放弃方案：① 外部保留内部消息但折叠（用户明确外部只要容器信息）；② 为 running 条目单独每条一个 interval（多条 running 时多 interval，统一 tick 更省）；③ 子代理卡片内再加跑马灯（重复信息，卡片已有完整过程行）。
 
@@ -1007,6 +1119,7 @@
 变更：2026-10-25-subagent-card-unify-panel
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/session-panel-dialog-subagent-drawer.test.tsx, frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：2e0ff863327ec51edee4eb034e54adfaaeb1db5e
 理由：- 风险：无 Provider 宿主（回放体、悬浮助手）失去子代理详情入口——头部信息仍完整，完整过程可去「进度」视图看；属用户裁决的统一取舍（已声明边界）。 - Drawer 覆盖在弹窗内容上而非并排：弹窗宽度有限（约 60vw~90vw），固定右栏会把消息流压到不可用；浮层是移动端已验证的同构方案。 - 放弃方案：① dialog 内固定右栏（布局压缩严重）；② 保留内联展开作为无 Provider 回退（用户明确要求去掉）；③ 把 page 右栏整套抽出共享 hook（改动面大，dialog 仅需 Drawer 出口，复制 20 行状态更小）。
 
@@ -1015,6 +1128,7 @@
 变更：2026-10-25-session-tab-visual-unify
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx, frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx, frontend/src/components/daemon/session-change-files-hover.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：17f1dfc084703c7d72c86a4c5d44eb1099c5794f
 理由：风险：DialogQaBlock 去 ml-9 后对话视图 ❓ 块左缘与其它 agent 段对齐（视觉位置变化，属统一的预期部分）；进度视图提问卡不再展示全部 options 选中态（信息量下降，用户裁决优先统一形态）；类名锁定的测试断言需逐个同步，漏改会假红。 放弃方案一：进度视图保留 AskUserToolCard（保留全部 options / 选中态展示）——用户明确裁决「优先使用对话的」，且问答块已含问题+回答主信息，弃。 放弃方案二：宽度用固定像素上限（如 max-w-[880px]）——「整行宽度 − 120px」语义要求随容器宽度自适应（弹窗版/整页版/移动端容器宽度不同），固定值会在窄容器下越界，弃。
 
@@ -1023,6 +1137,7 @@
 变更：2026-10-25-askuser-keyword-overkill-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-log-sanitize.ts
 最近确认：e283fed09505c71f36ac96dc6ec1d237a80b08c0
 理由：- 最大风险：放开 `[ASSISTANT]` 正文后，若存在「正文含该词且确实该丢」的历史行形态被误放行。排查生产库全量形态分布后排除：含词行仅四类（user_input 提示词——不经 classifySessionLog；[TOOL_USE] 文本行/tool_call JSON——维持丢弃；[ASSISTANT] 正文——正是要恢复的；compaction 摘要行——其丢弃由 compact 前缀分支另行处理，且本就不进对话正文）。 - 试过但放弃的方案 ①：直接删除 318 行（丢 [TOOL_USE]/tool_call 的兜底全部交给既有规则）。放弃理由：tool_call AskUserQuestion JSON 行当前也被 318 行丢弃，删除会让它落到 tool_use 段映射，过程视图新增 AskUser 工具行——与 DialogQaBlock 提问卡双画（前一轮变更刚统一的单画形态回归），行为漂移面大。 - 试过但放弃的方案 ②：按 `"tool"\s*:\s*"AskUserQuestion"` 正则精确匹配 JSON 行。放弃理由：daemon JSON 序列化空格形态不稳定（生产库实测两种形态并存），匹配脆弱；「正文前缀行豁免」一刀切更简单且对未知形态保守（非前缀行维持旧行为）。
 
@@ -1031,6 +1146,7 @@
 变更：2026-10-25-marquee-inactive-awaiting-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-segment-views.tsx
 最近确认：3a1f4551fb083eb1cd2ef1ec56438fdcadf60c13
 理由：- 风险：子代理运行中但内部全部工具完成时（等 LLM），等待条目照常显示——这正是期望行为（子代理还在跑）。 - 放弃方案：① 终态卡片不渲染内嵌流动条（用户要求框内持续展示内部过程，只是不要假等待）；② 等待条目由宿主自行渲染（重复逻辑）。
 
@@ -1039,6 +1155,7 @@
 变更：2026-10-23-pre-session-draft-persist
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, frontend/src/components/daemon/__tests__/session-panel-draft-scope.test.tsx, frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
 最近确认：b83d2f2da7b9f30541f9b80b1bb7311d27462be0
 理由：- **本变更显式反转前序裁决**（须记 decisions 新版本取代）：`2026-10-23-session-input-clear-fix` FR-04「预会话恒空白、新建即弃稿」与 `2026-10-23-session-dialog-input-align` FR-04「idle 恒空白」。复潮条件已满足——用户实测后显式要求保留（本次 --input 原话）。两处被反转用例（「同一入口重进：输入框恒空白」「同 workspaceId 重开 dialog：恒空白」）就地改写为恢复语义，防口径漂移。 - 最大风险：清空后「组件卸载早于写 effect」丢清空事件 → 回来回显旧 AAA。评估：写 effect 在 input 变化的 commit 后同步 flush，用户「清空→切走」是人手两个操作，时间上必然晚于 effect 执行；唯一理论窗口是程序化清空（无）与清空后同 tick 卸载（无此路径）。风险可接受，FR-02 用例锁定。 - 放弃方案 A「预会话卸载钩子里补写草稿」：为不存在的窗口加防御，卸载钩子读 state 闭包易踩过期值（前序变更已知陷阱），不引入。 - 放弃方案 B「把预会话草稿并到每入口一个 sessionStorage」：用户明确要求刷新（新标签/重开浏览器）也保留，sessionStorage 不满足。 - 放弃方案 C「回读时同时回显 @ 联想/附件」：草稿键只存文本（R-7 语义），附件与 @ 绑定需重选是既有裁决，不扩scope。 - 明确边界（可接受）：同一入口的预会话草稿不区分「哪个用户意图」——只要没发送，重进就恢复；用户想丢弃就清空（FR-02 即为此设计）。 - 明确边界（可接受）：预会话草稿无 TTL（会话草稿同款），残留量级 = 入口数 × 一条文本。
 
@@ -1047,6 +1164,7 @@
 变更：2026-10-25-marquee-awaiting-real-data
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：6cfbdbe137fdb12b2a8829192a79c454cd394a5f
 理由：- 风险：本机与服务器时钟偏差使等待时长有几秒误差——感知级展示可接受；如需精确可后续由 daemon 推等待起点事件（跨服务改动，本次不做）。 - 等待期间 token 不再增长（tokens 事件随日志批次到达，等待期无新批次）——显示的是"本轮已消耗"快照，语义如实。 - 放弃方案：① daemon 新增"API 请求开始"心跳事件（跨服务改动大，收益秒级）；② 等待条目显示 ctx 环（已有轮头状态条展示，避免重复）；③ 前端轮询 usage 接口（无谓请求）。
 
@@ -1055,6 +1173,7 @@
 变更：2026-10-25-session-git-worktree-root
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/session/service/git_status.py, backend/openapi.json, backend/tests/modules/daemon/test_session_git_status.py, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/daemon/sessions.ts, sillyhub-daemon/src/api-types.ts
 最近确认：02a41abacd68fef103b96a0e005733cccc0566bc
 理由：最大风险：探测层多一次 RPC（stat 5s）加在每轮 60s 轮询上——离线场景先 stat 失败（静默 miss，≈即时）再 git_status 502，延迟增加可忽略；正常场景 stat 是本地文件 lstat，毫秒级。次风险：current_change_id 有值但 agent 实际已 apply 回主仓继续干、worktree 未清理——探测命中显示工作树分支（非 agent 实际工作目录），语义偏差存在但方向正确（该 change 的隔离环境分支正是用户关心的），接受为显式边界（收口评审裁决）。 试过放弃的方案：① 从会话日志 stdout 文本解析 agent 输出的 worktree 路径——自然语言解析脆弱、覆盖率不可控，放弃；② daemon 侧实时跟踪 agent 进程 cwd——agent 的 cd 是 harness Bash 内 shell 状态，外部进程不可见，机制上不可行，放弃；③ sillyspec worktree create/apply 时回调平台 API 登记——跨系统契约变更（CLI/npm 包 + daemon + backend 三端），且存量已创建的 worktree 无登记回填，重；留作后续正路（平台 worktree 注册表），本变更先零侵入探测。
 
@@ -1063,6 +1182,7 @@
 变更：2026-10-25-fe-build-unblock
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/daemon/session-panel/page-helpers.tsx
 最近确认：a632a37e3975ae0bf31c92290078a9fbede8ce2a
 理由：风险可忽略：`?.` 与 `?? null` 在 i>0 且元素必存在的构造下与原 `.whoLine` 等值。试过放弃的方案：把测试 opts 类型改为 LlmProviderRead[]（需 import + 464/504 fixture 补齐必填字段，改动面扩大且可能引出 agent_kinds 类新错）——放弃，取 never[] 边界断言最小面。
 
@@ -1071,6 +1191,7 @@
 变更：2026-10-26-worktree-group-collapse
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx, frontend/src/components/git-log/worktree-changes-card.tsx
 最近确认：01714da0c91b515bd6e12b0c4a02ae2cc9ae2401
 理由：最大风险：默认收起后用户找不到 untracked/ignored 内容——已用收起态头行计数（N 个文件/N 项）+ 旋转箭头提示可展开缓解。试过放弃：把三组并成 Tab 切换（放弃——破坏三组同屏对照，IDEA 参照形态就是纵向分组树）。
 
@@ -1087,6 +1208,7 @@
 变更：2026-10-26-config-staged-all-states
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
 最近确认：23e594809cead8633de53663204401d5a0458413
 理由：答：最大风险是「运行中点选即暂存」与后端忙轮排队语义的行为差异认知——旧语义「运行中受理即排队、本轮结束生效」改为「点选无任何后端动作、下一条消息才生效」，若用户在运行中点选后期望「本轮结束就换供应商（不发消息）」则不满足（需发送一条消息才生效）。此为用户明确指令（全部不触发轮次），接受该语义；运行中点选的 toast/提示已随 D-001 静默，控件值变化即反馈。 放弃的方案：①运行中点选仍即时 POST 但要求后端不建轮——需后端新增「无轮切换」通道，改动面大且与「发送时生效」的统一模型冲突；②模型下拉单独传暂存供应商 prop——比组件内派生 displayProviderId 多一条 props 通道，无收益。
 
@@ -1095,6 +1217,7 @@
 变更：2026-10-26-turn-phase-prod-fix
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/network_context.py, backend/tests/modules/daemon/test_network_context.py, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/session-manager/turn-control.ts, sillyhub-daemon/src/turn-phase-observability.ts, sillyhub-daemon/tests/turn-phase-observability.test.ts
 最近确认：f8d6db60af6d40416709c57f4719802dbc28ace5
 理由：最大风险：观测部署后证据指向的根因超出 daemon 仓（如 backend SSE 某条件下丢弃）——静态证据已基本排除该向（delivered 可显示证明同信封类型可通），若仍发生则范围扩至 backend 转发链，任务面相应扩。放弃的方案：①盲改可疑点（静态五项排除后命中率低且不可证伪）；②前端超时兜底假阶段（掩盖问题，违反 FR-02 禁绕过）；③上报改同步阻塞换可见性（违反不阻塞主链路语义）。
 
@@ -1103,6 +1226,7 @@
 变更：2026-10-26-subagent-card-width-unify
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/components/daemon/__tests__/task-line-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
 最近确认：79ceac488b490ddecf30feb415b76ef4788d59bf
 理由：- 风险：既有测试若有锁定 `w-full self-stretch` 全宽形态的断言会假红（预计无——宽度断言只锁 TextSegmentView 的 calc 限宽）；视觉上子代理卡右缘留白变化属统一预期。 - 放弃方案一：连 TurnLiveMarquee bar 变体（`w-[min(100%,52rem)]` 胶囊条）一并统一——它是独立胶囊形态非信息块，用户未点名，避免面扩大，弃（如需另行变更）。 - 放弃方案二：限宽类抽公共常量（如 SEG_MAX_W）——Tailwind JIT 扫描需要完整类名字面量，抽常量会丢样式，必须保持字面量类名，弃。
 
@@ -1111,6 +1235,7 @@
 变更：2026-10-26-subagent-task-meta-restore
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, frontend/src/components/daemon/__tests__/task-line-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
 最近确认：5eca947cd15ca5a45a62ff94e1600fdc8e968ec3
 理由：- 风险：①悬挂 Map 在 asAssembled 收窄视图构造点若漏 transfer 会断链（悬挂后恰逢收窄再回填的窗口）——实现时 transferAssemblerInternals 必须同步携带（改动点已列）；②tool_use 建段点有两处（顶层新建 + stub 合并）漏一处则该路径悬挂不回填——测试覆盖 stub 先于 TASK 行形态。③进程退出导致的真僵尸任务（daemon 无终态信号，快照表无记录）本变更**不治**——卡片将统一显示"后台运行中"走秒（一致但仍在走），终态补写属 daemon 侧独立缺陷，建议另立变更（生产 06:22:43 进程退出实证）。 - 放弃方案一：治 DB 排序（backend 落库加二级排序键 seq）——动后端且存量行已乱序，历史数据救不回，前端防御普适，弃。 - 放弃方案二：tool_result 配对处加 taskAsync 豁免（不翻终态）——元数据回填后 metaStatus 优先级已压住显示，配对层再加豁免会让"真完成（同步 Agent）"与"回执（async）"歧义化（回执文本判定脆弱），收益低风险高，弃（endedAt 污染由 FR-02 显示优先级兜住）。 - 放弃方案三：一并修 [TOOL_USE] stdout 行与 tool_call 行双段并存（tool:uuid 孤儿段）——独立缺陷（显示为普通工具行，非本诉求主因），改动面涉及双行合并语义，超 thin 范围，弃（design 记录在案，后续另立）。
 
@@ -1119,6 +1244,7 @@
 变更：2026-10-26-ws-evict-close
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/tests/test_ws_hub.py, backend/app/modules/daemon/ws_hub.py
 最近确认：97d4780904d3f99be61dc78d641f6e34ee291707
 理由：答：最大风险是 `close` 的 await 在 socket 极端僵死时理论上可悬挂——但 Starlette 的 close 仅向 ASGI 协议层投递 close 消息（不走网络层关闭握手），uvicorn 侧对死 transport 的投递立即返回或抛错，与同文件 `connect()` 替换路径 `await existing.close(code=4000, ...)` 的既有先例风险面完全一致（该先例运行至今无事故），故不加超时、保持同款写法。已试放弃的方案：daemon 侧「HTTP 心跳正常但 WS 长期无下行 → 主动重连」看门狗——协议改动大、需 daemon 发版铺开才生效，且 backend 单侧修复到位后该缺陷类不再产生，留作后续纵深防御候选（另立变更）。
 
@@ -1127,6 +1253,7 @@
 变更：2026-10-26-ci-red-to-green
 原编号：D-001@v1
 锚点：未记录
+文件：.github/workflows/e2e-ci.yml, backend/app/modules/daemon/tests/test_machine_sillyspec.py, docs/releases/2026-10-26-004-f1e476a90.md, frontend/e2e/proto-file-card.spec.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/explorer/__tests__/file-explorer-git-status.test.tsx, frontend/vitest.config.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-kind-dispatch.test.ts, sillyhub-daemon/tests/daemon-status-root-persistence.test.ts, sillyhub-daemon/tests/interactive/session-thinking-level.test.ts, sillyhub-daemon/tests/interactive/task-lifecycle.test.ts, sillyhub-daemon/tests/spec-transport-tar-sync/daemon-interactive-spec-sync.test.ts
 最近确认：fa5a6fe1108b468f037a94263c1adb76f2e62dc6
 理由：- **最大风险**：daemon 源码 try/catch 加固若吞掉本应上抛的错误——已核对 reportTurnPhase 唯一职责是 fire-and-forget 上报（后端 POST），失败本就设计为不可见（D-009 + 2026-10-26-turn-phase-prod-fix 观测首警兜底），吞同步异常不改变任何业务承诺；且加固后被影响测试断言的是「create 被调用」「pull 被调用」，不依赖上报失败外溢。 - **断言收窄的掩盖风险**：task-lifecycle 过滤收窄可能掩盖未来真实旁路消息污染——对策：收窄精确到 `type==='turn_phase_report'`（不放宽为白名单制），TASK 行数/形状断言原样保留。 - **importOriginal 风险**：真实 spec-sync.js 顶层执行若未来引入副作用（如启动定时器）会进测试——记为已知取舍，当前顶层纯声明（已核对 export 清单）。 - **试过放弃的方案**：① 给 SessionManager deps 增加独立 `onTurnPhaseReport` 回调取代带内 `turn_phase_report` 消息——属 2026-10-26-session-stage-progress D-013④ 已定桥协议的重构，超出本修复变更范围且要动 archived 变更的契约，放弃；② frontend 删/跳过 5 个慢文件——掩盖手法，违反 FR-03「不得删断言」，放弃；③ backend-ci 撞顶再抬 timeout-minutes 到 60——治标，若无挂死实证不先动，留待 FR-04 判定。
 
@@ -1135,6 +1262,7 @@
 变更：2026-10-27-mobile-chat-dense
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/globals.css
 最近确认：a4987c1728d6233de670f91f7d87214d28de3811
 理由：最大风险：13px 若仍偏大/偏小需再调——参数集中在该块一处，回调成本一行。放弃的方案：改组件内 Tailwind 类（需在各组件加 mobile 分支 prop，改动面 5+ 文件）——CSS 数值变更走既有元素级通道一处收口更稳；下调至 12px 紧凑档底线——用户仅说「小点」，13px 相对 14px 保守回调一档，避免一步到底过小再回调。
 
@@ -1143,6 +1271,7 @@
 变更：2026-10-27-mobile-chat-visual-round2
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/service/helpers.py, backend/app/modules/daemon/tests/test_session_queue.py, frontend/src/app/globals.css, frontend/src/app/m/workspaces/[id]/sessions/page.tsx, frontend/src/components/chat/round-divider.tsx, frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx, frontend/src/components/daemon/session-panel/scheduled-send.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/components/mobile/mobile-tab-bar.test.tsx, frontend/src/components/mobile/mobile-tab-bar.tsx, frontend/src/components/mobile/mobile-top-bar.tsx, frontend/src/components/sessions/session-config-bar.tsx, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager/background-tasks.ts, sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/session-manager/types.ts, sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
 最近确认：a758f2707ab5d0ddade35f7fdd7bb1de93dbb25d
 理由：最大风险：玻璃半透明在深色/花哨内容上滚动时对比度下降——bg-card/75+blur-md 是透明度与模糊的平衡点（穿行内容呈朦胧块非清晰透字），真机不满意可一行调参（/75→/85 或 blur-md→lg）。放弃的方案：①直接改组件内 max-w 类（两挂点+PC 要分支判断，CSS 一处覆盖更稳）；②输入区外框也玻璃化（非悬浮层，无穿行内容只有色差，无视觉收益）；③两面板收进 Drawer（⋯ 菜单开关已够轻，Drawer 交互重）。
 
@@ -1151,6 +1280,7 @@
 变更：2026-10-27-scheduled-send-attachments
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/service/helpers.py, backend/app/modules/daemon/tests/test_session_queue.py, frontend/src/app/globals.css, frontend/src/app/m/workspaces/[id]/sessions/page.tsx, frontend/src/components/chat/round-divider.tsx, frontend/src/components/daemon/__tests__/session-panel-dialog-scheduled-attachments.test.tsx, frontend/src/components/daemon/session-panel/scheduled-send.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/components/mobile/mobile-tab-bar.test.tsx, frontend/src/components/mobile/mobile-tab-bar.tsx, frontend/src/components/mobile/mobile-top-bar.tsx, frontend/src/components/sessions/session-config-bar.tsx, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager/background-tasks.ts, sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/interactive/session-manager/types.ts, sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
 最近确认：c2d6111ec3d0c98ee7bd96054eaa91fc0a24f734
 理由：- 最大风险：**附件 chips 残留或误清的观感回归**——清理时机若用全清（clear）会误伤用户在创建窗口期新上传的附件。缓解：按本次携带 id 精确过滤（onSendSettled 同款 `prev.filter`），meta 镜像逐 id delete；新增测试断言「部分删除后只清剩余」。 - 次要风险：空文本+附件定时属行为放宽，用户可能误建无上下文的定时消息——后端既有附件豁免口径（D-7 看图说话）已覆盖该形态的合法性，与普通发送/忙轮排队一致，不额外设限。 - 试过放弃的方案：①定时弹窗内做独立附件上传入口——上传管线与 UI 重复建设，且与既有交互叙事冲突（弹窗说明「请先在输入框写好要发送的内容」，入口语义是「把输入框现有内容定时发出去」），放弃；②只修 page 模式——dialog 模式同缺口，双模式必须同修否则口径分裂（两处 confirmSchedCreate 历史上就是成对复制维护）。
 
@@ -1159,6 +1289,7 @@
 变更：2026-10-27-task-wakeup-precision-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/change/binding.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_session_changes_endpoint.py, backend/app/modules/change/tests/test_spec_binding.py, backend/app/modules/daemon/session/service/helpers.py, backend/app/modules/daemon/tests/test_session_queue.py, frontend/src/app/globals.css, frontend/src/app/m/workspaces/[id]/sessions/page.tsx, frontend/src/components/chat/round-divider.tsx, frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx, frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
 最近确认：4dc531554f19e0cb3ed0561f06e4d4c979375f8f
 理由：- 最大风险：**既有测试与生产行为的隐性依赖**——现有唤醒用例（如「61s completed 注入恰一次」）的 task_started 构造不带 tool_use 元数据，新判据下走「信息不足兜底」路径，行为恰好不变；但若未来有用例显式构造 meta 而期望旧行为，会静默走新分支。缓解：新增用例显式覆盖三态（true/false/undefined），并在 WARN 日志中标注判定来源，行为可观测可归因。 - 次要风险：Bash 纳入 meta 登记后 `[TASK_STARTED]` 的 task_name 兜底路径变化（meta.taskName 对 Bash = description，与帧 description 同值）——无行为差异，但 `[TASK_STARTED]` 落行量不变（仅 meta Map 增条目），内存开销可忽略（会话终态清理）。 - 试过放弃的方案：①以「tool_result 同轮配对」为判据（最本质）——需跨事件流追踪 result 与轮次绑定关系，改动面与回归面远超本变更体量，放弃；②以「任务名/命令特征」启发式判断——脆弱且不可解释，放弃；③backend 正则只认新文案——混版本窗口功能退化，改为兼容双文案。
 
@@ -1167,6 +1298,7 @@
 变更：2026-10-27-task-wakeup-inject-retry
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/change.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/change/binding.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_session_changes_endpoint.py, backend/app/modules/change/tests/test_spec_binding.py, backend/app/modules/daemon/session/service/helpers.py, backend/app/modules/daemon/tests/test_session_queue.py, docs/releases/2026-10-27-003-4597eab86.md, docs/sillyspec/finished/target-files-worktree-docs-mismatch.md, frontend/src/app/globals.css, frontend/src/app/m/workspaces/[id]/sessions/page.tsx
 最近确认：41c8d228b7f4e1cd6fffa667deaa9316cab005fa
 理由：- **最大风险**：重试造成的重复唤醒轮（首注入实际成功但响应丢失时）。缓解：后端忙轮合并恒≤1 条 + prompt 防重执行指令；空闲期重复轮为纯汇报轮，成本可容忍。 - **次风险**：env 覆写错误计划（如全 0 列表）导致重试风暴——解析层非正整数项忽略、默认计划兜底；止血开关 `=0` 一键回旧行为。 - **放弃的方案**：B/C 两方向（理由见上问评估）；「WS onConnected 立即重试一轮」（recover 链先例）——需挂 WS 连接回调穿层接线，收益（最快场景省 ≤5s）不配复杂度，退避首档 5s 已够短；TRACE 刷屏曾考虑在 daemon.ts 拦截点把 `notePhaseEmit` 挪到 first_event 防重 Set 判定之后——只治桥侧半边，emit 侧（events.ts 每 envelope）仍刷，防重做进 helper 一处治两侧。
 
@@ -1175,6 +1307,7 @@
 变更：2026-10-27-mobile-chat-visual-round3
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx, frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx, frontend/src/components/chat/__tests__/round-divider.test.tsx, frontend/src/components/chat/round-divider.tsx, frontend/src/components/daemon/session-panel/index.tsx, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/mobile/mobile-session-list.tsx
 最近确认：3266725e5f931c7b00101b1d1bff2c36ceaf6fa1
 理由：最大风险：truncate 超长省略会把尾部信息（如 tok/s）截掉——已通过 mobile 不渲染 detail 优先省出宽度，极端长仍省略属可接受降级（完整信息在轮内详情可见）。放弃的方案：①轮次信息收进可点展开（交互重，分隔行本意是轻量锚点）；②返回钮用 router.back（深链进入会退出站点，显式路由恒可达）；③状态标 mobile 自建简化词表（与 PC 两套词表必漂移，直接消费单一源函数才是「同款」的正解）。
 
@@ -1183,6 +1316,7 @@
 变更：2026-10-27-session-input-spacing-tighten
 原编号：D-001@v1
 锚点：未记录
+文件：docs/releases/2026-10-27-004-7ee3e33e8.md, frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx, frontend/src/components/daemon/session-input-bar.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：644631ac24e0d0e40c35d12fe5ab1bc0dca19dd5
 理由：最大风险：@联想浮层与 textarea 垂直对齐漂移——已通过 overlayClassName 镜像同步改消除，并由 draft-scope 回归用例兜底。试过放弃：按用户片段字面把 py-2/py-5 上下全删——会让消息顶行贴边/输入框过扁，按用户片段「只有下内边距」的口径改为只去下保上（pt-5/pt-2），更贴近其真实意图（收紧消息区与输入区之间的空隙）。
 
@@ -1191,6 +1325,7 @@
 变更：2026-10-27-mobile-chat-visual-round4
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/main.py, backend/app/modules/spec_workspace/drift_probe.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py, frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-status-bar.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
 最近确认：0069bb234ffa70ccfba04426ca885095484926fc
 理由：最大风险：seg-width-cap 类被未来新块遗忘挂载（回到散装限宽）——已由测试断言锚（6 用例锚 seg-width-cap）+ globals.css 注释声明单一源约束。放弃的方案：①13 处逐个加 mobile prop 分支（组件改动 13 处×两行 vs 一次类替换+CSS 两行）；②all 视图保留 TurnStatusBadge 仅调样式近似（用户明确「统一用对话的」，两套组件近似必再漂移，正解是删旧用同组件）。
 
@@ -1199,6 +1334,7 @@
 变更：2026-10-27-netdata-prod-monitoring
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/frontend/modules/components-daemon.changelog.md, .sillyspec/docs/frontend/modules/components-daemon.md, .sillyspec/docs/frontend/modules/styles.changelog.md, .sillyspec/docs/frontend/modules/test-utils.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/deploy.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/main.py, backend/app/modules/spec_workspace/drift_probe.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/spec_workspace/tests/test_archive_scoped_reparse.py, frontend/src/app/globals.css, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：089bc22e66afdf4baaa3f8036510f98e4c82b116
 理由：答：最大风险是公网暴露——Netdata 面板无认证，若监听公网网卡且安全组放行即等于把全机指标公开。对策双保险：① 服务端只绑 127.0.0.1（应用层兜底，配置错误也不出网）；② 验收时从办公网实测 19999 不可达。次级风险：资源占用——官方口径约 1~5% 单核 + 100~400MB 内存，服务器余量 5.9G 内存，可接受；磁盘默认分层库上限约 1~2G，盘余 41G，可接受。试过但放弃的方案：① apt 装 Ubuntu 仓库版（v1.44 老旧，UI/容器插件弱于 stable 通道现版）；② Netdata Cloud 云端汇总（指标出网，与自托管诉求冲突）；③ 安全组放行 19999 限源 IP（家宽出口 IP 漂移，维护成本高且误配置即暴露，不如 SSH 隧道零暴露）；④ Prometheus+Grafana（运维成本高，单机秒级现场场景过重）。
 
@@ -1207,6 +1343,7 @@
 变更：2026-10-27-sessions-panes-gap-remove
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, frontend/src/components/sessions/sessions-portal.tsx
 最近确认：9b33461733ece7d17dd5becad05889d0bf9f9012
 理由：最大风险：两栏贴合后视觉过挤（无 12px 呼吸位）——属用户点名的有意收紧，把手 6px 条仍在场提供视觉分隔；不满意可一行回补。试过放弃：把 gap-3 降为 gap-1.5 折中——用户原话是「去掉」，按字面执行不折中。
 
@@ -1215,6 +1352,7 @@
 变更：2026-10-27-sessions-total-and-status-filter
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/read_model.py, backend/app/modules/daemon/tests/test_session_history.py, backend/openapi.json, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/mobile/mobile-session-list.test.tsx, frontend/src/components/mobile/mobile-session-list.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts, frontend/src/lib/daemon/session-lists.ts
 最近确认：9c86c078c5c3d91ea63cd439d1137a079a07a6a7
 理由：- 最大风险：PC 端 SessionListPanel 体量大（~2500 行）且测试面广，「活跃→在线」改名与组内 10 条收敛可能波及既有断言文案——改动严格限定 STATUS_OPTIONS 命名 + 截断常量与在线豁免逻辑，跑该组件既有测试全量核对（该文件属本变更触及面，非全量测试）。 - 试过放弃的方案：① 后端 limit 放宽到 le=2000 让前端拉全量——放大量级敏感查询（q 搜索/links 子查询）且治标不治本（5000 条时再截），放弃；② 新增独立统计端点 GET /sessions/status-counts——多一次往返与一个 openapi 面，而 status_counts 与列表同过滤口径天然同源，并入列表响应更稳，放弃；③ 手机端 chips 计数用客户端样本估算——515>500 时计数错（正是本次要修的病根），放弃。 - 遗留已知边界：全工作区在线会话数 >500 时「在线全显」仍受单次拉取上限约束（status_group 过滤后的命中集本身 ≤limit）——不另做聚合翻页，计数仍真实（status_counts 不受 limit 影响）。
 
@@ -1223,6 +1361,7 @@
 变更：2026-10-27-task-parser-md-check-fallback
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/task/parser.py, backend/app/modules/task/tests/test_parser.py
 最近确认：4816e3611244550fc2e97be15e7049d7dbf10665
 理由：最大风险：卡片 frontmatter 显式写了 `status: draft`（人工想强制 draft）的场景会被误回退为 done——已靠键存在性区分（显式 draft 优先于勾选态）消除；残留面是极旧的卡写了 status 但语义与勾选冲突（未见实例，reparse 幂等可观察）。放弃方案：①改 CLI 让 task-tick 同步写 TaskCard frontmatter status——跨工具改动（sillyspec CLI），平台侧修不动上游，且 TaskCard 是执行卡非状态源的模板约定会被打破；②reparse 后置覆盖（先解析卡再用 tasks.md 覆盖同 key）——与「卡片富信息优先」docstring 声明正面冲突且丢显式 status 语义，不如解析内回退干净。
 
@@ -1231,6 +1370,7 @@
 变更：2026-10-28-knowledge-hits-cli-direct
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/router.py, backend/app/modules/agent/tests/test_agent_sessions_include_ended.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_change_sessions_cap.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/tests/test_sessions_list_filters.py, backend/app/modules/platform_sync/router.py, backend/app/modules/platform_sync/tests/test_hits_cli_direct.py, backend/app/modules/session_attachment/service.py, backend/app/modules/session_attachment/tests/test_capability.py, backend/openapi.json, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
 最近确认：21104e0be0f0336e046643a4253d49a138840e52
 理由：最大风险：**shpsync_ 令牌的写面扩大**——此前 shpsync_ 只开放 spec 同步族端点，本变更新增一个遥测接收端点。缓解：端点只写不读（不返回任何既有数据，回执仅计数）、复用 ingest 宽容语义（坏行跳过不炸）、且遥测数据本就来自令牌持有方自己的仓库执行期——伪造收益仅污染自己 workspace 的遥测统计。次风险：CLI 侧（另仓变更）直报失败的静默面——由 best-effort 语义 + 本地文件必写 + daemon 兜底三层覆盖（前序变更 D-001）。 试过但放弃的方案： - **扩展现有 hits/batch 端点兼容 shpsync_**（require_permission 加分轨分支）：破坏四轨分轨铁律（patterns.md#四轨鉴权——shpsync_ 与用户轨混开鉴权分支正是分轨设计要防的形态），且该端点 query 显式 workspace_id 与令牌派生两来源冲突； - **CLI 走用户 JWT**（platform.token 换用户令牌）：platform connect 发的就是 shpsync_ 同步令牌（绑定 workspace 的长寿命令牌），CLI 无用户登录态可持有，改造成本远超新增端点； - **daemon 代转**（CLI 不直报、等 daemon 周期上行）：即维持现状断流形态，已被用户拍板否决（要实时性主通道）。
 
@@ -1239,6 +1379,7 @@
 变更：2026-10-28-change-detail-sessions-source-fix
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/backend/modules/change.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/platform_sync.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/agent/router.py, backend/app/modules/agent/tests/test_agent_sessions_include_ended.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_change_sessions_cap.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/tests/test_sessions_list_filters.py, backend/app/modules/platform_sync/router.py, backend/app/modules/platform_sync/tests/test_hits_cli_direct.py, backend/app/modules/session_attachment/service.py, backend/app/modules/session_attachment/tests/test_capability.py, backend/openapi.json, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx
 最近确认：849706364deefb92a01024ae3ea2f72abdc6fde9
 理由：最大风险：substr 64→512 放宽后单行拉回字节量增大（数百会话列表请求时放大），但 512B×N 远小于原 TOAST 全文口径，且仅标题子查询路径。评审 P1（已修复）：daemon 自愈回写 healed 原样超 title_fallback 列宽 String(64) 会使 PG 列表 500——回写截 [:64] 对齐列宽，防回归测试钉死（写回值长度断言双方言可判）。已放弃方案：① SQL 侧正则剥离（PG regexp_replace 与 SQLite 方言分叉，违反双方言约束）；② 重算存量 title_fallback 列（需迁移+回填，把小修复撑大，读侧清洗可达同显示效果）。
 
@@ -1247,6 +1388,7 @@
 变更：2026-10-28-cgroup-v2-watermark-fix
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/spec_workspace/drift_probe.py, backend/app/modules/spec_workspace/tests/test_memory_watermark.py
 最近确认：19b14831150ba84a4e522925f5223fe05507323e
 理由：最大风险：混合挂载形态（v2 无限制 `max` 且 v1 文件同时在）会回退用 v1 limit 算水位——语义上仍是「存在某限制」，方向安全，且该形态实际不存在于统一层级宿主。试过放弃的方案：为 `max` 字面量加显式分支返回哨兵值——放弃，因为现有 ValueError 落回路径已得到正确终态（None 跳过），加分支只增加状态面。
 
@@ -1255,6 +1397,7 @@
 变更：2026-10-28-bg-scan-tailread-eviction
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/session-log-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-model-retry-gating.test.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-status-bar.tsx, frontend/src/components/daemon/turn-timeline.tsx, sillyhub-daemon/src/agent-event-schema.ts, sillyhub-daemon/src/bg-task-scan.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/claude-events.ts, sillyhub-daemon/src/interactive/session-manager/events.ts, sillyhub-daemon/src/types.ts, sillyhub-daemon/tests/bg-task-scan.test.ts, sillyhub-daemon/tests/interactive/claude-events.test.ts, sillyhub-daemon/tests/interactive/session-manager-status-dispatch.test.ts
 最近确认：6239db2300df4672b57ee50eb8da500d04ffd4b8
 理由：最大风险：淘汰可见集若因发现链瞬时抖动漏掉在产路径，会误删其幂等基线导致终态重报——backend 侧已声明重复上报无害（同值信号），且 discoverLivenessWatchTargets(rescan:false) 完全由内存 spawn 记录推导、无 fs 抖动面，风险可控。试过放弃的方案：①内层 Map 加条目级 TTL/LRU——放弃，会话存活期内条目本就该保留（幂等基线），TTL 反而制造重报；②保留 size>200 阈值门——放弃，每轮 O(n) 核对在 60s 节奏下成本可忽略，阈值门只是把正确性修复重新变成条件触发。
 
@@ -1263,6 +1406,7 @@
 变更：2026-10-28-reparse-trigger-tests-realign
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py
 最近确认：00df74b42338c5d02a9cb23a385ce07761fe66e8
 理由：最大风险：若 60629d2bb 实为回归（测试才是对的），本变更会把回归固化为契约——已用四点证据排除（docstring 决策落痕、-S 唯一引入、新契约测试全过含归档翻转端到端、生产实证 OOM 治理动机）；且归档区 delete 的行删除能力由 scoped 覆盖（test_archive_scoped_reparse.py 锁定翻转），旧「全量」口径无独有能力。放弃方案：改实现回旧口径——直接违背 D-004/D-007 的 OOM 治理目标（全量重扫是内存峰值主源），否决。
 
@@ -1287,6 +1431,7 @@
 变更：2026-10-28-release-record-generator
 原编号：D-001@v1
 锚点：未记录
+文件：deploy/scripts/gen-release-record.sh
 最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
 理由：答：最大风险是脚本生成的 frontmatter 与平台解析器实际口径仍有隐性偏差（YAML 方言、字段类型）——对策：生成后自检 + 沙箱产物对照平台口径逐字段核对（task-03），并以 seq48（claude-code 手写、平台判 valid）作对照样本。 放弃方案： - A（脚本内自算 seq）：next-release-seq.sh 是 2026-10-18 固化的单一取号源，双实现必漂移——放弃，改为调用。 - B（走 API 取锚点）：生产 token 不可用（bootstrap 密码失配 401），且 skill 明文「不可达则看本地记录」——放弃 API 路径，本地文件推导为准。 - C（生成器直接 scp 同步服务器）：同步属部署收尾动作、依赖 ssh key 与时机，塞进生成器会让「写记录」与「部署收尾」耦合（本地流程也会被迫碰 ssh）——放弃，生成器只打印指引，同步仍由 deploy-to-server 流程执行。
 
@@ -1295,6 +1440,7 @@
 变更：2026-10-28-session-list-loadmore-fetch
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx
 最近确认：b9949cdbf7ab26e95b30b7016ce90fb6c4f3390d
 理由：最大风险：组内点击触网拉回的 20 条可能不属于该组（进其它组），该组本次点击 只见本地展开的行——与「无限加载」心智一致（列表整体在生长、按钮可重点）， 可接受。放弃的方案：组内按钮完全等价树底部入口（点击只触网不本地展开，等 响应回来组内才多行）——本地明明还有隐藏行却等网络，慢且浪费；选「本地展开 + 并行触网」组合。
 
@@ -1303,6 +1449,7 @@
 变更：2026-10-29-floating-scope-loadmore-fix
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx
 最近确认：43ac7dba92d02e2eb927bcea86cf41a7fb28d09b
 理由：最大风险：稳定键漏拼某个标识字段——某分支字段未进键，则该字段变化不触发清空（旧口径附加段泄漏进新视图）。对策：键构造与类型判别联合同文件同居（类型加字段时函数在同文件可被 tsc 联合收窄错误立即暴露）+ 纯函数四分支键唯一性用例钉死。放弃的方案：①floating-session-host 侧 `useMemo` 包 scope——只修一个调用入口，未来新调用方内联传参复发；且 `lockedRuntime` 若引用不稳定 useMemo 依赖仍需二次防御，不如消费端标量化根本。②effect 依赖改 `scope?.kind` 仅判 kind——同 kind 不同 id 切换漏清（FR-02 场景），不可行。
 
@@ -1311,6 +1458,7 @@
 变更：2026-10-29-edit-diff-stat-badge
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/agent-log/__tests__/tool-diff.test.tsx, frontend/src/components/agent-log/tool-diff.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/diff-stat-badge.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-segment-views.tsx
 最近确认：5e89be8febddf3883db1e01c22bccb6ef5572af9
 理由：- 最大风险：大 patch（数千行）重复解析开销。缓解：跑马灯条目窗口上限 12 条、派生发生在 deriveLiveMarqueeEntries 纯函数内（段引用变化才重算，React memo 链既有）；ToolRowView 侧 useMemo 按 editPatch 字符串缓存。实测面量级（单文件 patch 数百行）无虞。 - 已放弃方案 a：用 hunk 头 oldLines/newLines 直接相加（省一轮遍历）——Write 覆盖写等场景 hunk 头与 lines 实际前缀可能不一致，且与展开区行级 diff（按行前缀渲染）不同源，会造成两处口径漂移。 - 已放弃方案 b：daemon 侧预计算统计随事件下发——多一层协议与 api-types 改动，前端已有全量数据，本变更不需要。 - 已知边界：zcode 引擎交互链路 edit_patch 暂缺（providers.ts 标记「structuredPatch 未验证」）→ 该引擎下按 FR-03 不伪造口径自然不显示徽标，引擎侧后续补齐数据后零改动自然点亮，不在本变更范围。
 
@@ -1319,6 +1467,7 @@
 变更：2026-10-30-task-resume-revive-notify-retry
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/agent_task_store.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/tests/test_agent_session_tasks.py, backend/app/modules/daemon/tests/test_agent_task_status_payload.py, backend/openapi.json, frontend/src/components/daemon/__tests__/agent-task-card-lifecycle.test.tsx, frontend/src/components/daemon/agent-task-store.ts, frontend/src/lib/api-types.ts, frontend/src/lib/daemon/session-sse.ts, sillyhub-daemon/src/agent-task-notify-retry.ts, sillyhub-daemon/src/api-types.ts, sillyhub-daemon/src/cli.ts, sillyhub-daemon/src/hub-client.ts, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager/background-tasks.ts, sillyhub-daemon/src/interactive/session-manager/types.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/agent-task-notify-retry.test.ts, sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
 最近确认：fe76ef065bf68f74d521fccc6c1247973c1eed65
 理由：- **最大风险**：SDK 续唤时是否可靠重发 task_started 未实证（CLI 转录不记 system 帧、daemon.log 无注册日志；归一化器注释已知「SDK 重放 task_started」形态存在）。若 SDK 对某些续唤路径不重发帧，resumed 信号源缺失，运行期显示失真仍在——本变更保证「SDK 重发时全链路通」，不声称覆盖引擎不发信号的场景（引擎契约限制，如实声明）。 - **试过放弃：时间阈值启发式复活**（终态后 N 秒外 running 视为续唤）——task-sweep-liveness-guard 历史否决同型，时间猜测必误判长任务/跨轮任务，不复活。 - **重试风暴风险**：上限 3 次 + 指数退避 + 仅 5xx/网络错误触发；4xx 即刻放弃。502 实测场景（平台网关故障时段）多事件并发各退避，最坏 4 次请求/事件，可接受。
 
@@ -1327,6 +1476,7 @@
 变更：2026-10-30-marquee-awaiting-loop-scroll
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：eb94bc69497eac507f7004ada494a41873de3ea6
 理由：- 最大风险：jsdom 无真实布局，回卷视觉正确性（无缝、无空白）无法在单测里直接验证，只能靠纯函数 wrapLoopOffset/loopScrollWidth + 双份 DOM 结构断言覆盖；上线后需在真实页面肉眼确认一轮循环（视觉证据 visual-evidence.md 记录）。 - 评审 P2（短文本相位露白，turn-live-marquee.tsx loopScrollWidth 锚点）已实装修复：一份文字 ≤ 窗口宽时不起滚、静止显示开头（等待初期无 token 数据的常态阶段），文本增长超窗后自然起滚；48px 轮间隔空隙经过窗口属跑马灯轮次分隔的常态运动空白，非静止死白。 - 放弃方案 ①（单份文本滚到末尾后直接跳回开头继续）：末尾贴右缘时跳变突兀，且若滚过末尾继续左移，窗口右侧必然出现空白区段——正是用户本次抱怨的现象，故必须双份拼接。 - 放弃方案 ②（用户最初提议：删掉 inline-block class）：span 退回 display:inline 后 CSS transform 对 inline 非替换元素不生效，滚动"悄悄失效"，属碰巧坏掉式修法、代码意图不明，被否。 - 放弃方案 ③（所有 running 条目统一改循环）：thinking 流式文本持续增长，"循环一轮"与"跟随新末尾"语义冲突（慢速下一轮极长且内容一直在变），保持 once 模式；仅每秒变化、内容收敛的 marquee-awaiting 条目改 loop。 - 残留风险：文本每秒变化时周期宽度微变，回卷点可能有 1-2px 抖动；双份文本使 ticker DOM 文本量翻倍（单条目 <1KB 量级，无性能面问题）。
 
@@ -1335,6 +1485,7 @@
 变更：2026-10-30-quota-error-visible
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：fe96adb720f84d5d4273565f87343d8cdec5bb7b
 理由：最大风险是误判「重试后成功但无最终文本」的轮次。已用两道门收窄：① 只看最后一条 `[ASSISTANT]` 行（`[MODEL_RETRY]` 协议行不匹配错误特征词，直接放行）；② 必须同时命中 429 与额度关键词（复用既有双锚定 `_infer_quota_error`）。放弃的方案：改 daemon 侧识别 `isApiErrorMessage/apiErrorStatus` 字段——需要重建并重启共享守护进程，影响所有在线用户，且平台侧对旧 daemon 版本仍需兜底；放到后续 daemon 变更单独处理。第二个放弃方案：前端装配器不再丢弃 API Error 行——会在已失败轮上产生「原文气泡 + 错误卡」双显，改为按末条错误回填结构化卡。
 
@@ -1343,6 +1494,7 @@
 变更：2026-10-30-provider-user-share
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/lease/context.py, backend/app/modules/daemon/session/service/attachments.py, backend/app/modules/daemon/session/service/inject_gates.py, backend/app/modules/daemon/tests/test_lease_context_provider_priority.py, backend/app/modules/daemon/tests/test_lease_context_provider_share.py, backend/app/modules/daemon/tests/test_session_switch_config.py, backend/app/modules/llm_provider/model.py, backend/app/modules/llm_provider/router.py, backend/app/modules/llm_provider/schema.py, backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_provider_shares.py, backend/migrations/versions/20261030180000_provider_user_shares.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx, frontend/src/components/llm-providers/llm-provider-list.tsx, frontend/src/components/llm-providers/share-provider-dialog.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx, frontend/src/lib/api/llm-providers.ts
 最近确认：3a4250dacc83daba3eb2f5fa2776f3172e4647d4
 理由：本方案最大的风险是「授权主体从 runtime 属主改为会话属主」可能改变存量共享守护进程会话的 provider 解析结果：此前 runtime 属主的会话级 provider 生效、会话属主的被静默拒绝；改为会话属主后，会话属主自己的 provider 会开始真正生效（更符合预期），但依赖旧行为的会话可能换用不同供应商。缓解：仅当会话属主有有效授权（自有或共享）时才注入，否则原样回落默认链（与今日一致）。第二个风险是用户名精确匹配带来的目标枚举（404 区分不存在/禁用）；已用统一 404 文案收敛，不返回用户列表。放弃的方案：给共享加独立密码/额度上限——超出本次范围；把共享项放进设置页只读区——用户要求「只能在会话页面选择」，直接不展示更简单且无越权入口。
 
@@ -1351,6 +1503,7 @@
 变更：2026-10-31-share-openai-chat-proxy-token
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/llm_provider.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/daemon/lease/context.py, backend/app/modules/daemon/router/gateway_misc.py, backend/app/modules/daemon/tests/test_lease_context_provider_share.py, backend/app/modules/daemon/tests/test_llm_proxy.py, backend/app/modules/llm_provider/proxy_token.py, backend/app/modules/llm_provider/router.py, backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_proxy_token.py, backend/app/modules/llm_provider/tests/test_router.py, backend/migrations/versions/20261030160000_grant_business_member_change_read.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/llm-providers/__tests__/share-provider-dialog.test.tsx, frontend/src/components/llm-providers/share-provider-dialog.tsx, sillyhub-daemon/src/codex-settings.ts
 最近确认：bb8f1bfe50f8888a580d18007b9407758c4a1d05
 理由：最大风险：llm-proxy 是 master key 唯一注入点（Grill 加固面），新增验签分支若实现有误可能影响生产 GLM 流量。缓解：分支按 Bearer 前缀短路隔离——shlp_ 前缀才进入新代码，生产存量流量（daemon apiKey/JWT）一行不差走旧路径；令牌分支任何失败都 fail-closed（401/403），不放行无主请求；新增用例覆盖篡改/过期/错配三条拒绝路径。次风险：zcode-settings 写盘新字段进入 provider_config.json（0600 会话隔离目录）——与现有明文 api_key 同盘同防护等级，不新增暴露面。死路（已试弃）：让代理改查 DB 做共享判定——Bearer 是 daemon 身份，DB 里没有「这次推理属于哪个会话」的信息，查无可查；这是身份载体问题，必须把会话属主身份随请求带下来。
 
@@ -1359,6 +1512,7 @@
 变更：2026-11-02-stale-test-sync-contract
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py, backend/app/modules/daemon/tests/test_session_service.py, backend/app/modules/knowledge/tests/test_vector_search.py, backend/app/modules/knowledge/vector_search.py, backend/app/modules/platform_sync/tests/test_agent_log_messages.py, backend/app/modules/platform_sync/tests/test_agent_log_push.py
 最近确认：fe213906aa3547e28d43ffc321d8f7826ef9005e
 理由：最大风险：「改测试让它变绿」若方向反了会把真回归洗白。防御：三簇均有引入提交的设计文档背书（1015aa22f design FR-01 逐字规定拒建占位；cdcb97fdb schema 字段是交付面；2ca991c0 换缝是共享特性的既载实现），且修复原则是让测试重新验证原行为语义（占位创建/回滚/schema 形状）而非把断言改成现状快照——每处断言恢复后都要能被空实现打红。放弃的方案：回滚三个引入提交的生产契约——三者均为有意设计且有独立验收（幽灵占位是生产实证事故修复），为绿测试翻生产契约本末倒置。
 
@@ -1367,6 +1521,7 @@
 变更：2026-11-02-embed-batch-chunk
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/daemon.changelog.md, .sillyspec/docs/backend/modules/knowledge.changelog.md, .sillyspec/docs/backend/modules/platform_sync.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/modules/daemon/tests/test_inject_orchestrator_tagging.py, backend/app/modules/daemon/tests/test_session_service.py, backend/app/modules/knowledge/tests/test_vector_search.py, backend/app/modules/knowledge/vector_search.py, backend/app/modules/platform_sync/tests/test_agent_log_messages.py, backend/app/modules/platform_sync/tests/test_agent_log_push.py, docs/releases/2026-11-02-001-7e4e6903f3b0.md
 最近确认：55d501f483e7bc3b984511d067239ae4c14e55f5
 理由：答：最大风险：批内失败重试粒度变粗的反向担忧——实为不变（今天单批失败也是整体重建重来，分批后同样整体重来，且单批成功率上升而非下降）。次级风险：批大小 64 若未来语料单条文本极长（每条数十 KB），单批字节量仍可能偏大——当前决策条目文本为百字级，64×百字 ≈ 数十 KB JSON，远低于风险线；若未来形态变化，常量提升为 Settings 配置即可（本变更不做，避免无据配置面）。试过但放弃的方案：① 代理层（`EmbeddingSubprocessProxy.embed`）透明分批——超时/透明重启重试语义需在代理内重造（整批序列共享 deadline 的切分与 `attempts` 计数重定义），复杂度高于收益，且现存爆炸面仅 search_sync 一处；② 只提 mem_limit（2500m→3500m）——治标：语料单调增长，2026-10-24 的 1100m→2500m 提额四天后即被 2.4GB 批复现，继续提额只是推迟；③ worker 侧（embedding_worker.py）内部再分批——worker 收到的单请求 JSON 已含全量 texts，解析瞬间内存峰值已发生，worker 内分批为时已晚，必须在请求发起侧收口。
 
@@ -1375,6 +1530,7 @@
 变更：2026-11-02-scan-docs-unbound-view
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/service/control.py, backend/app/modules/daemon/tests/test_session_switch_config.py, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx, frontend/src/components/daemon-required-notice.test.tsx, frontend/src/components/daemon-required-notice.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/session-manager/lifecycle.ts, sillyhub-daemon/src/interactive/session-manager/persistence.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/daemon-session-resume-route.test.ts, sillyhub-daemon/tests/daemon-session-switch-config.test.ts, sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts
 最近确认：e3a2efbe1d6cba9012dd3d97791cf730ec373991
 理由：- 最大风险：无绑定且该工作区从未被任何成员的 daemon 同步过 → 服务端镜像不存在，reparse 回 DOCS_DIR_MISSING 警告 + 空列表。展示为既有空态 + warnings 横幅（既有渲染面），可接受——本来也无数据可看；不为此加特殊分支。 - 放弃方案①：后端为无绑定用户提供共享 daemon 绑定（把「借用」语义扩到读面）——牵动 runtime 权限模型，改动面大且不为「看存量数据」所需，放弃。 - 放弃方案②：不动 DaemonRequiredNotice、在 scan-docs 页内新写一个降级横幅组件——配置入口与引导展开逻辑得复制一遍，两处漂移风险，放弃（选 variant 复用）。
 
@@ -1383,6 +1539,7 @@
 变更：2026-11-02-daemon-resume-gate-fix
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/daemon/session/service/control.py, backend/app/modules/daemon/tests/test_session_switch_config.py, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx, frontend/src/components/daemon-required-notice.test.tsx, frontend/src/components/daemon-required-notice.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/session-manager/lifecycle.ts, sillyhub-daemon/src/interactive/session-manager/persistence.ts, sillyhub-daemon/src/interactive/types.ts, sillyhub-daemon/tests/daemon-session-resume-route.test.ts, sillyhub-daemon/tests/daemon-session-switch-config.test.ts, sillyhub-daemon/tests/interactive/session-idle-scanner.test.ts
 最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
 理由：答：最大风险是保留旧 `lastActiveAt` 后，显式启用 idle 回收（`SESSION_IDLE_TIMEOUT_SEC>0`）的部署会把刚恢复的会话立即回收——以 `restoredAt` 起算空闲时长封闭该路径（boot 恢复路径顺带修复既有同形态隐患）；默认关闭形态零影响。次风险：record-less 兜底 `Date.now()` 在「跨机移交全量 reopen」的罕见形态下仍可顶闸——接受（规模受 backend 24h GC 约束；彻底封死需协议加 last_active_at 字段，本期不做，留作后续升级位：daemon 已按 payload 显式值优先实现，backend 未来补发即生效，零 daemon 改动）。 放弃的方案：① 改闸计数口径（如排除「恢复后从未 inject」的会话）——需新增跨路径状态位且改动防风暴闸本体，风险面大于收益；改时间戳源头一处即闭环。② backend 全量恢复改分批/限速下发——治标不治本（30 分钟窗口仍在，只是推迟），且改动 backend 调度节奏牵连重连收敛时序。③ 用 `turnCount===0` 判恢复态——新会话首轮未完成前同为 0，误伤新建会话判据，弃。
 
@@ -1391,5 +1548,6 @@
 变更：2026-11-02-group-member-footer-config
 原编号：D-001@v1
 锚点：未记录
+文件：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/app/modules/daemon/group/service/crud.py, backend/app/modules/daemon/group/service/helpers.py, backend/app/modules/daemon/group/service/members.py, backend/app/modules/daemon/group/service/shadow.py, backend/app/modules/daemon/session/service/__init__.py, backend/app/modules/daemon/session/service/inject.py, backend/app/modules/daemon/tests/test_group_cross_mention.py, backend/app/modules/daemon/tests/test_group_member_model_thinking.py, backend/migrations/versions/20261102140000_group_member_model_thinking.py, backend/openapi.json, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/group-chat/__tests__/member-panel-config.test.tsx, frontend/src/components/group-chat/__tests__/member-panel.test.tsx, frontend/src/components/group-chat/create-group-wizard.tsx, frontend/src/components/group-chat/member-config-fields.tsx, frontend/src/components/group-chat/member-panel.tsx, frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx, frontend/src/lib/api-types.ts
 最近确认：2ef4ea0460957804dcaca9fc0659a31e5dcf96a8
 理由：答：最大风险是 config_snapshot「model」键语义切换的兼容面——现值为供应商名（错位），改存真实模型名后，前端 chips 与 multimodal gate（shadow.py:832）消费口径随之归正，但若有未盘点消费方按「供应商名」解析该键会读错。缓解：盘点 config_snapshot.model 全部消费点（前端 chips、shadow gate）随本变更一并切换；daemon 侧不消费该键（模型走 lease metadata）。次风险：thinking_level 引擎门控口径——pi/codex 的档位支持差异照 session-config-bar 既有 caps 判定复用，不另造词表。放弃的方案：①model/thinking_level 存 config_snapshot JSON 而非独立列——快照定位是展示冗余（组装自关联行），源数据入 JSON 会延续「快照当真值」的错位（本次正是要修它）；②整体替换三表面为 session-config-bar 复用——该组件绑会话 inject 暂存语义（running/ended/暂存态），成员表单是静态配置提交，硬套会引入无关状态面。

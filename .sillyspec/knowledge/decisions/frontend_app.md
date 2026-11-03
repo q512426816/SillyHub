@@ -6,6 +6,7 @@
 状态：implemented
 变更：2026-09-08-session-turn-nav
 锚点：`frontend/src/components/daemon/session-panel/session-panel-page.tsx`
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/change/router.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_change_lineage_filter.py, backend/openapi.json, docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/m/workspaces/[id]/changes/page.tsx, frontend/src/components/mobile/mobile-change-card.test.tsx, frontend/src/components/mobile/mobile-change-card.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/changes.ts
 最近确认：fd96ae48
 理由：ZCode 式导航用户定案；桌面常驻（刻度轨仅 ~30px 不占聊天宽度），mobile 触屏无 hover 走 ⋯ 菜单抽屉行式列表（点击即跳），dialog 宿主不挂载。
 
@@ -76,6 +77,7 @@
 状态：implemented
 变更：2026-10-12-clipboard-fallback
 锚点：未记录
+文件：.sillyspec/changes/2026-10-12-clipboard-fallback/tasks.md, frontend/src/app/(dashboard)/runtimes/page.tsx, frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx, frontend/src/app/(dashboard)/settings/api-keys/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx, frontend/src/lib/__tests__/clipboard.test.ts, frontend/src/lib/clipboard.ts, .sillyspec/changes/2026-10-12-clipboard-fallback/design.md, .sillyspec/changes/2026-10-12-clipboard-fallback/proposal.md, .sillyspec/changes/2026-10-12-clipboard-fallback/requirements.md
 最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
 理由：- 风险：execCommand 已被 WHATWG 废弃，未来浏览器可能移除——届时降级路径失效回到报错横幅（与修复前同等），Async Clipboard 主路径不受影响；非安全上下文下无其它程序化通道（Service Worker 剪贴板方案依赖 HTTPS），移除前该方案是唯一解。 - 放弃方案 A：改部署形态强制 HTTPS/localhost——部署约束变更不归前端代码管，且局域网自签证书有额外运维成本；代码侧降级是即时空运的解。 - 放弃方案 B：navigator.clipboard 缺失时直接报「请在 HTTPS 下使用」引导文案——不解决功能不可用本身，execCommand 降级在目标浏览器（Chrome/Edge/Firefox 全支持）下即可用。
 
@@ -83,6 +85,7 @@
 状态：implemented
 变更：2026-10-13-change-owner-backfill
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/change.md, .sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/backend/modules/_module-map.yaml, .sillyspec/docs/backend/modules/change.changelog.md, .sillyspec/docs/backend/modules/change.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md, backend/app/modules/change/binding.py, backend/app/modules/change/model.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_change_session_binding.py, backend/app/modules/change/tests/test_reparse_owner_backfill.py, backend/app/modules/change/tests/test_spec_binding.py, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/app/m/workspaces/[id]/changes/page.tsx, frontend/src/components/mobile/mobile-change-card.test.tsx
 最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
 理由：最大风险：语义软化——兜底「工作区所有者」在多人协作工作区里未必是真责任人（agent 干的活记到创建工作区的人头上）。缓解：前端 title 明示「负责人未指派，默认工作区所有者」兜底语义；数据侧不改写存量，真实 owner（change_writer 路径）永远优先显示。若未来需要精确归属，可在会话立项联动时把会话用户写入（本次范围外，留作后续演进）。 试过但放弃的方案： - 「reparse 对存量空行也回填 workspace.created_by」——放弃理由：300 条历史行一次性改写、不可逆，且多数为 agent 产出，把「未知」写成「猜测」弱化数据可信度；展示层兜底达到同等可见效果。 - 「从 git log 提交者推断负责人」——放弃理由：agent 提交的 git author 不可靠（多为统一 agent 身份/机器账号），且 reparse 在平台侧执行需要额外仓库访问，成本高收益低。
 
@@ -90,5 +93,6 @@
 状态：implemented
 变更：2026-10-14-change-center-lineage-tag-and-filter
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/modules/change/router.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_change_lineage_filter.py, backend/openapi.json, docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/m/workspaces/[id]/changes/page.tsx, frontend/src/components/mobile/mobile-change-card.test.tsx, frontend/src/components/mobile/mobile-change-card.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/changes.ts
 最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
 理由：最大风险：`_resolve_thin_lineage_keys` 全 workspace 拉行 + outerjoin progress 肥 JSON，大 workspace 下列表请求变慢。评估：与现网 `pending_review_only` 聚焦路径同量级（后者已有 Redis read-through 缓存先例），v1 先现算不加缓存，超预期再按先例挂缓存，不阻塞本变更。死路①：把三分支直译 SQL（PG jsonb + SQLite json_each 跨方言 JSON 展开）——方言分裂、防御解析逻辑（畸形 steps 容忍）难复刻，放弃。死路②：changes 表物化 `is_thin` 列——出身是投影语义（依赖 progress JSON 与时间窗），同步成本高且易漂移（注释↔实现不一致是万恶之源），放弃。死路③：筛选沿用 `current_stage != 'thin'` 取反——漏归档兜底行、与行内标签口径分裂，放弃。

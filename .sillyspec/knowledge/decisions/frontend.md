@@ -604,6 +604,7 @@ supersedes：D-006@v1
 变更：2026-10-22-session-trajectory-third-view
 原编号：D-001@v1
 锚点：未记录
+文件：.sillyspec/docs/SillyHub/modules/daemon.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_lib.changelog.md, .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/deploy.md, .sillyspec/docs/multi-agent-platform/modules/docs.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md, backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/engine.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_service.py, deploy/docker-compose.yml, frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-trajectory-view.test.tsx, frontend/src/components/daemon/session-panel/__tests__/session-view-tabs.test.tsx
 最近确认：28c19e2677fae0639cda0a7ba96aec3ba484749e
 理由：用户裁决为第三个顶层视图：会话面板显示对话 / 进度 / 轨迹三态并列；「进度」恢复纯时间线，不再保留「时间线 / 轨迹」第二层开关。覆盖 2026-10-22-session-trajectory-view 的 D-035。
 supersedes：D-035
@@ -1132,6 +1133,7 @@ supersedes：D-005@v1
 变更：2026-10-23-session-network-context
 原编号：D-007@v1
 锚点：未记录
+文件：sillyhub-daemon/src/daemon.ts
 最近确认：55e50da155266013c97475c0c6787bd964170980
 理由：知识库共享断言面钉子②：daemon 心跳加参（sillyhub-daemon/src/daemon.ts _sendHeartbeatOnce 平铺传参）后，length 钉四文件必须全部 N→N+1：tests/daemon-heartbeat-pending.test.ts、tests/daemon-heartbeat-sillyspec.test.ts、tests/sillyspec-platform-command.test.ts（6 处）、tests/integration/selfupdate-scenarios.test.ts（2 处）。同一变更内完成，否则 CI 补红。
 故障面：遗漏任一钉子文件即 CI 红——task 清单显式列出四文件。
@@ -1358,6 +1360,7 @@ supersedes：D-003@v1
 变更：2026-10-26-turn-phase-orphan-fallback
 原编号：D-001@v1
 锚点：未记录
+文件：frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
 最近确认：65081d429e74019db614c9b39035464c74bd4be2
 理由：前提=平台「单会话单活跃 run」硬不变式。反例逐一排查：①跨轮子代理——parent_tool_use_id 归属派生轮，是轮内事件不建轮，不产生 turn_phase；②团队分身——parent_session_id 独立会话树，事件按 agent_session:{id} 频道各自路由；③忙轮守卫——已有活跃轮时后端拒绝新 run（DaemonSessionTurnConflict）或转排队（排队消息非活跃轮，派发建轮才活跃）；④steering 中途注入——沿用活跃 run 不建新轮；⑤自动续跑——前轮终态后才建新轮。实现侧保险：回退只写 currentRunId 指向的轮（现有状态机维护，只指向 pending/running/interrupting），不做模糊匹配。
 
