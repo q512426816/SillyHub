@@ -747,8 +747,6 @@ async def test_search_schedules_background_sync_without_blocking_read_path(
     tmp_path: Path, search_env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """FR-01 stale：失配首搜请求路径零 chunk 嵌入、即时返回存量结果；drain 后全语义。"""
-    import sys
-
     from sqlalchemy import select
 
     from app.modules.knowledge.search import KnowledgeSearchChunk
@@ -783,12 +781,9 @@ async def test_search_schedules_background_sync_without_blocking_read_path(
         rows = (
             await s.execute(select(KnowledgeSearchChunk.start_line, KnowledgeSearchChunk.title))
         ).all()
-    print("DBG rows:", sorted(rows), file=sys.stderr)
-    print("DBG texts:", fake.embedded_texts, file=sys.stderr)
-    print(
-        "DBG bg_errors:",
-        [r.message for r in caplog.records if "bg_sync" in str(r.message)],
-        file=sys.stderr,
+    assert ("新内容",) not in {(r[0], r[1]) for r in rows}
+    assert not [r.message for r in caplog.records if "bg_sync" in str(r.message)], (
+        "后台任务失败会以结构化 warning 留痕（本用例不应出现）"
     )
 
     out3 = await search_sync(
@@ -935,3 +930,51 @@ async def test_server_build_off_schedules_nothing_regression_lock(
     )
     assert out2["index_sync"] is None, "禁建库即使失配也不调度"
     assert search_mod._bg_sync_tasks == {}, "禁建库 stale 不得调度"
+
+
+async def test_delta_update_refreshes_title_and_anchor(tmp_path: Path, search_env) -> None:
+    """D-006 回归锚定：改写小节标题保持行号坐标 → 差量后新标题/新词面可搜（mutation 判据：
+    去掉 _sync_delta UPDATE 分支的 title/anchor 赋值，本用例必红）。"""
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk
+
+    _write(
+        tmp_path,
+        "knowledge/manual.md",
+        "# 手册\n\n## 旧标题名\n\n状态点正文内容。\n",
+    )
+    fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    await await_background_syncs_for_tests()
+    # 改写标题（行号坐标不变：H2 仍在 line 3）→ 差量 UPDATE 路径
+    _write(
+        tmp_path,
+        "knowledge/manual.md",
+        "# 手册\n\n## 新标题名\n\n状态点正文内容。\n",
+    )
+    out = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out["index_sync"] == "scheduled"
+    await await_background_syncs_for_tests()
+    out2 = await search_sync(
+        tmp_path, search_env[0], "新标题名", 5, fake, "fake-model", session_factory=search_env[1]
+    )
+    assert out2["results"], "差量后新标题词面可搜"
+    assert out2["results"][0]["title"] == "新标题名", "索引行 title 必须随差量刷新（存量 bug 锚定）"
+    async with search_env[1]() as session:
+        anchors = (
+            (
+                await session.execute(
+                    select(KnowledgeSearchChunk.anchor).where(
+                        KnowledgeSearchChunk.spec_path == "knowledge/manual.md"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert anchors == ["新标题名"], "索引行 anchor 必须随差量刷新"
