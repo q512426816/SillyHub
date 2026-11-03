@@ -70,3 +70,4 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-28-change-detail-sessions-source-fix | 变更详情会话区数据源错挂与附件标题修复：概览「会话」区实际取工作区全量最近会话而非该变更关联会话，用…
 - 2026-11-02-scan-docs-unbound-view | 扫描文档页无绑定也可浏览服务端存量数据
 - 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建
+- 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正

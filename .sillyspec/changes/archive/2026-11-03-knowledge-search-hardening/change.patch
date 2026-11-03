@@ -1,0 +1,121 @@
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+index 1e39fefe0..94398cc66 100644
+--- a/backend/app/modules/knowledge/search.py
++++ b/backend/app/modules/knowledge/search.py
+@@ -133,9 +133,14 @@ class KnowledgeSearchState(BaseModel, table=True):
+     #: 比较前双方 list(map(list, ...)) 归一——JSON 读回为 list，避免 tuple!=list 恒真）。
+     corpus_fingerprint: list = Field(sa_column=Column(JSON, nullable=False))
+     model_version: str = Field(sa_column=Column(String(128), nullable=False))
++    #: 最后同步时刻（2026-11-03-knowledge-search-hardening：补 onupdate——同步成功
++    #: 刷新为该次同步时刻，索引新鲜度可观测；onupdate 是 ORM 客户端侧行为，DDL 不变
++    #: 无迁移；指纹一致快路径零 UPDATE，本列不变即「未发生同步」的真信号）。
+     updated_at: datetime = Field(
+         default_factory=lambda: datetime.now(UTC),
+-        sa_column=Column(DateTime(timezone=True), nullable=False),
++        sa_column=Column(
++            DateTime(timezone=True), nullable=False, onupdate=lambda: datetime.now(UTC)
++        ),
+     )
+ 
+ 
+diff --git a/backend/app/modules/knowledge/tests/test_knowledge_search.py b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+index fa54b0dd6..c3410804b 100644
+--- a/backend/app/modules/knowledge/tests/test_knowledge_search.py
++++ b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+@@ -543,6 +543,46 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
+     assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
+ 
+ 
++async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path(
++    tmp_path: Path, search_env
++) -> None:
++    """updated_at 可观测性（2026-11-03-knowledge-search-hardening / FR-02）：
++    差量同步成功 → updated_at 刷新为同步时刻；指纹一致快路径零 UPDATE → 保持不变。"""
++    import asyncio as _asyncio
++
++    from sqlalchemy import select
++
++    from app.modules.knowledge.search import KnowledgeSearchState
++
++    async def _state_updated_at() -> object:
++        async with search_env[1]() as session:
++            return (await session.execute(select(KnowledgeSearchState))).scalar_one().updated_at
++
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    t1 = await _state_updated_at()
++    # 改单文件 → 差量同步（指纹变化必触发 state UPDATE）
++    p = tmp_path / "knowledge" / "known-issues.md"
++    p.write_text(
++        p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
++    )
++    await _asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    t2 = await _state_updated_at()
++    assert t2 is not None and t2 > t1, "差量同步成功后 updated_at 必须刷新"
++    # 快路径：语料未变再搜 → 无 UPDATE → updated_at 不变（未发生同步的真信号）
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    t3 = await _state_updated_at()
++    assert t3 == t2, "指纹一致快路径禁止写 state（updated_at 保持不变）"
++
++
+ # ── 服务器禁建库开关（2026-10-19-knowledge-search-build-switch）──────────────
+ 
+ 
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index bec484b7d..a4b2eff29 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -170,12 +170,15 @@ services:
+       # 默认 16MiB 上限会被 >12MB 的 spec 目录撑爆（WS close 1009 致 import 必断）。
+       # 治本在 daemon 端 gzip 压缩，这里是防御性兜底。
+       - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 104857600"
+-    # 2026-10-24-backend-mem-limit-raise：1100m → 2500m。宿主实测 7.5G（旧注释
+-    # 「服务器 1.6G」认知已过时——1100m 装不下服务本体 ~460M + 模型 worker 峰值
+-    # ~1.05G：嵌入 fastembed / 翻译 ct2，dmesg 记 10-16~10-23 共 25 次 cgroup OOM，
+-    # 10-23 一天 9 次，OOM 窗口前端超时连败反复触发全局熔断横幅）。2500m 兜住
+-    # 双 worker 并存与批量推理峰，宿主仍有 3G+ 安全边际。
+-    mem_limit: 2500m
++    # 2026-11-03-knowledge-search-hardening：2500m → 3500m。2026-11-03 生产诊断
++    # （宿主 dmesg）：2500m 下 worker 仍被 cgroup OOM kill——10 月 40 次、11-02
++    # 还有 2 次（被杀者 oom_score_adj=0 的嵌入/翻译 worker，anon-rss ~2.4G），
++    # worker 被杀即打断知识索引差量同步（搜索慢的直接放大器）。3500m 覆盖
++    # 「服务本体 ~460M + 嵌入/翻译双 worker 并存 ~2.1G」峰值并留余量；宿主 7.5G
++    # 下全栈限额总和 ~4.25G 仍充裕。
++    # （历史：2026-10-24-backend-mem-limit-raise：1100m → 2500m，dmesg 记
++    # 10-16~10-23 共 25 次 cgroup OOM，10-23 一天 9 次。）
++    mem_limit: 3500m
+     # 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护——容器
+     # 内存告急时内核优先牺牲嵌入子进程（worker 启动时自重置 oom_score_adj=0），
+     # 主服务存活。compose 服务级设置免 entrypoint CAP_SYS_RESOURCE 权限问题。
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 73482dd80..62a580c59 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -776,7 +776,9 @@ export default function KnowledgePage({ params }: Props) {
+                   title={searchDegradedReason ?? undefined}
+                   className="mx-1 mb-2 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning"
+                 >
+-                  语义模型暂不可用，当前为关键词匹配结果
++                  {searchDegradedReason === "index_not_built"
++                    ? "知识索引未预建，当前为关键词匹配结果"
++                    : "语义模型暂不可用，当前为关键词匹配结果"}
+                 </div>
+               ) : null}
+               {debouncedQuery ? (
+@@ -787,7 +789,7 @@ export default function KnowledgePage({ params }: Props) {
+                 >
+                   {searching && searchResults === null ? (
+                     <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
+-                      搜索中…首次搜索需建立索引，可能较慢
++                      搜索中…知识库有新变更时需先增量同步，可能较慢
+                     </p>
+                   ) : searchError ? (
+                     <div

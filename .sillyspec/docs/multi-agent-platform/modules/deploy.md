@@ -67,3 +67,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - 2026-10-24-backend-mem-limit-raise | 提升 backend 容器内存限额防 OOM
 - 2026-10-28-release-record-generator | 发布记录生成器脚本取号锚点与校验
 - 2026-10-28-session-config-default-provider-fix | 会话配置条默认供应商显示与模型联动缺陷：pi 等引擎会话显示了不匹配引擎的默认供应商名（兜底查找未按…
+- 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正

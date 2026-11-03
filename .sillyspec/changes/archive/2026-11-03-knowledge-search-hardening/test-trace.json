@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-knowledge-search-hardening",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-03-knowledge-search-hardening:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py「test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-knowledge-search-hardening"
+    }
+  ]
+}

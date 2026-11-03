@@ -305,3 +305,43 @@ created_at: 2026-10-19T02:55:25.079Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-28-release-record-generator/requirements.md#FR-04
 最近确认：5a38cc907fba2b2f527a74f152c7fad83e7f7ed1
+
+## FR-agent-skills-024 deploy/docker-compose.yml backend mem_limit 为 3500m，注释记录依据
+变更：2026-11-03-knowledge-search-hardening
+状态：active
+摘要：主路径；生产生效
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/requirements.md#FR-01
+最近确认：97e84e47cd66ae9504347e421527e9ac80837741
+
+## FR-agent-skills-025 差量同步成功后 knowledge_search_state.updated_at 刷新（新增测试断言，既有知识搜索测试全绿）
+变更：2026-11-03-knowledge-search-hardening
+状态：active
+摘要：差量同步刷新；快路径不写
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/requirements.md#FR-02
+最近确认：97e84e47cd66ae9504347e421527e9ac80837741
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-knowledge-search-hardening:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py「test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-knowledge-search-hardening
+  status: active
+
+## FR-agent-skills-026 搜索等待文案不再出现「首次搜索需建立索引」误导表述；model_ready=false 且 reason=index_not_built 时徽标提示索引未预建
+变更：2026-11-03-knowledge-search-hardening
+状态：active
+摘要：等待文案；索引未建徽标；模型不可用徽标
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/requirements.md#FR-03
+最近确认：97e84e47cd66ae9504347e421527e9ac80837741
+
+## FR-agent-skills-027 纯配置与前端文案不写测试（记不适用理由）
+变更：2026-11-03-knowledge-search-hardening
+状态：active
+摘要：裁决在案
+全文：.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/requirements.md#FR-04
+最近确认：97e84e47cd66ae9504347e421527e9ac80837741

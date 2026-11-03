@@ -1,0 +1,23 @@
+{"ts":1793669271554,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1793669271554,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1793669497767,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793669561414,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793669581524,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793669608264,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793669638640,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：eploy/docker-compose.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793669676025,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1793669678583,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793669678583,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1793669732704,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/knowledge/search.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793669910308,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1793669912011,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793669912011,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1793669996553,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1793669999202,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793669999202,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1793670035830,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1793670036129,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793670036129,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1793670138314,"kind":"commit","stage":null,"detail":"97e84e47c","provisional":true}
+{"ts":1793670152250,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-11-03-knowledge-search-hardening/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793670192244,"kind":"gate-run","stage":"verify","detail":"门实测 passed（12.1s） · 20261103014312","provisional":true}

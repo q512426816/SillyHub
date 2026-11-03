@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-knowledge-search-hardening",
+  "reviewer": "zcode-general-purpose-subagent（read-only 独立评审通道，GLM-5.3-Flash）",
+  "verdict": "PASS",
+  "reviewedAgainst": "97e84e47cd66ae9504347e421527e9ac80837741",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "updated_at 语义口径：mtime 漂移但内容零变化的 delta 遍历也会刷新该列",
+      "evidence": "指纹含 mtime_ns，mtime 变即失配走 _sync_delta；content_hash 未变则零重嵌，但 state.corpus_fingerprint UPDATE 仍触发 onupdate 刷新。updated_at 语义=「最后一次完成的懒同步遍历」而非「最后一次实际重嵌」——与 FR-02「懒同步成功落库（全量或差量）后刷新」措辞一致，非假信号（同步确实发生），仅记录口径供后续排障解读时不误判",
+      "location": "backend/app/modules/knowledge/search.py:436-444"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "chunk 数据与 state 行是两次 commit（chunk 先、state 后），中断窗口内 updated_at 只会保守低估",
+      "evidence": "_sync_delta/_sync_full 内部先 commit chunks（search.py:525/570），_ensure_synced 随后写指纹+updated_at 同一 commit（search.py:453-455）。两 commit 间崩溃 → 新 chunks+旧指纹+旧 updated_at，下次搜索 delta 按 content_hash 幂等重放收敛；updated_at 在该窗口永不超前于真实数据（不会虚报新鲜），design「updated_at 与指纹同一 commit」的声明本身属实",
+      "location": "backend/app/modules/knowledge/search.py:453-455"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklist": {
+    "frImplTestConsistency": "一致。FR-01 compose backend mem_limit 3500m+注释含 10月40次/11-02 2次 OOM 证据与日期，其余服务限额（postgres 256m/redis 64m/minio 128m/frontend 300m）未动；FR-02 绑定测试真实存在（test_knowledge_search.py:546）且断言面=t2>t1（差量刷新）+t3==t2（快路径冻结），复跑 35 passed 9.35s 实证；FR-03 两处文案逐字兑现、徽标按 reason==='index_not_built' 分支且 data-testid 与条件逻辑未动；FR-01/03/04「不适用：理由」成立（纯部署配置/纯前端文案/裁决记录本身）",
+    "blindDimensions": "四问与代码实证相符。乱序：刷新仅发生在 per-workspace 锁内同步事务（单写者），无乱序写；并发：跨进程前提=单 uvicorn worker（compose 启动命令无 --workers 实证），既有已声明前提沿用且扩容条件写明；切换：中断回滚安全，双 commit 窗口让 updated_at 只保守低估并幂等收敛；作用域：workspace_id 唯一约束隔离，onupdate 仅作用被 UPDATE 行，全仓 grep 证实 KnowledgeSearchState 写者仅 search.py 一处。「指纹未变但 model_version 变」→ 走全量重嵌后刷新=真信号；「delta 零内容 mtime 变」→ 见 findings[0] 口径记录",
+    "declaredBoundaries": "逐条裁决：①「快路径零 UPDATE 属预期真信号」可接受——唯一 UPDATE 写者在同步分支之后，无「未同步却刷新」通路（search.py:440 早退实证）；②「无 alembic 迁移」可接受——onupdate 是 ORM 客户端侧刷新器，列 DDL 本就存在（default_factory 原有），无 schema 变化；③「单 uvicorn worker 前提沿用」可接受——compose 命令行无 --workers，非本变更引入的前提且属既有 design 已声明面；④「3500m 最坏情形与变更前等价（worker 仍偶发被杀）」可接受——3500m 覆盖实测峰值 anon-rss ~2.4-2.56G 且宿主 7.5G 下全栈总和 ~4.25G（3500+256+300+128+64=4248m 核算无误），风险不劣于变更前",
+    "protectiveClaims": "属实。快路径 return 早退真实存在（search.py:440）；onupdate 先例 mcp_registry/model.py:150 与 tool_policy.py:108 真实存在（tasks.md「对齐 mcp_registry 先例」兑现）；oom_score_adj 主进程保护与 worker 闲置自灭描述在 compose 注释与 SKILL.md 中一致且本 diff 未触碰",
+    "generatedArtifacts": "n/a（无类型/契约生成物，本次为 ORM 列刷新器+配置+文案）",
+    "testValidityRootCause": "空实现判据成立：去掉 onupdate 后全仓不存在任何刷新 updated_at 的代码路径（唯一 UPDATE 写者即 _ensure_synced），t2==t1 必然变红（t1 为 INSERT 时刻默认值）；根因判据成立：本 diff 是正向可观测性补全+配置放宽+文案对齐，不含吞异常/藏失败的 guard（DB 异常降级链为既有代码，本 diff 未触碰）"
+  },
+  "reviewedAt": "2026-11-03T09:49:00+08:00"
+}
