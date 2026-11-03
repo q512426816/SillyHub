@@ -543,6 +543,46 @@ async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_en
     assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
 
 
+async def test_state_updated_at_refreshes_after_delta_sync_and_frozen_on_fast_path(
+    tmp_path: Path, search_env
+) -> None:
+    """updated_at 可观测性（2026-11-03-knowledge-search-hardening / FR-02）：
+    差量同步成功 → updated_at 刷新为同步时刻；指纹一致快路径零 UPDATE → 保持不变。"""
+    import asyncio as _asyncio
+
+    from sqlalchemy import select
+
+    from app.modules.knowledge.search import KnowledgeSearchState
+
+    async def _state_updated_at() -> object:
+        async with search_env[1]() as session:
+            return (await session.execute(select(KnowledgeSearchState))).scalar_one().updated_at
+
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    t1 = await _state_updated_at()
+    # 改单文件 → 差量同步（指纹变化必触发 state UPDATE）
+    p = tmp_path / "knowledge" / "known-issues.md"
+    p.write_text(
+        p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
+    )
+    await _asyncio.sleep(0.01)  # 跨平台时钟精度兜底：保证刷新值可比较
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    t2 = await _state_updated_at()
+    assert t2 is not None and t2 > t1, "差量同步成功后 updated_at 必须刷新"
+    # 快路径：语料未变再搜 → 无 UPDATE → updated_at 不变（未发生同步的真信号）
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    t3 = await _state_updated_at()
+    assert t3 == t2, "指纹一致快路径禁止写 state（updated_at 保持不变）"
+
+
 # ── 服务器禁建库开关（2026-10-19-knowledge-search-build-switch）──────────────
 
 

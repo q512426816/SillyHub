@@ -133,9 +133,14 @@ class KnowledgeSearchState(BaseModel, table=True):
     #: 比较前双方 list(map(list, ...)) 归一——JSON 读回为 list，避免 tuple!=list 恒真）。
     corpus_fingerprint: list = Field(sa_column=Column(JSON, nullable=False))
     model_version: str = Field(sa_column=Column(String(128), nullable=False))
+    #: 最后同步时刻（2026-11-03-knowledge-search-hardening：补 onupdate——同步成功
+    #: 刷新为该次同步时刻，索引新鲜度可观测；onupdate 是 ORM 客户端侧行为，DDL 不变
+    #: 无迁移；指纹一致快路径零 UPDATE，本列不变即「未发生同步」的真信号）。
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
+        sa_column=Column(
+            DateTime(timezone=True), nullable=False, onupdate=lambda: datetime.now(UTC)
+        ),
     )
 
 

@@ -776,7 +776,9 @@ export default function KnowledgePage({ params }: Props) {
                   title={searchDegradedReason ?? undefined}
                   className="mx-1 mb-2 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning"
                 >
-                  语义模型暂不可用，当前为关键词匹配结果
+                  {searchDegradedReason === "index_not_built"
+                    ? "知识索引未预建，当前为关键词匹配结果"
+                    : "语义模型暂不可用，当前为关键词匹配结果"}
                 </div>
               ) : null}
               {debouncedQuery ? (
@@ -787,7 +789,7 @@ export default function KnowledgePage({ params }: Props) {
                 >
                   {searching && searchResults === null ? (
                     <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
-                      搜索中…首次搜索需建立索引，可能较慢
+                      搜索中…知识库有新变更时需先增量同步，可能较慢
                     </p>
                   ) : searchError ? (
                     <div
