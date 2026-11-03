@@ -399,6 +399,55 @@ describe('2026-11-04-turn-activity-watchdog：轮活动看门狗', () => {
     expect(onTurnActivityTimeout).toHaveBeenCalledTimes(1);
   });
 
+  it('interrupt await 窗口内事件到达（引擎存活）→ 复核守卫静默跳过，不误报（评审 P2）', async () => {
+    vi.useFakeTimers();
+    const onTurnActivityTimeout = vi.fn(async () => {});
+    let resolveInterrupt: (v: boolean) => void = () => {};
+    const fakeDriver: InteractiveDriver = {
+      provider: 'claude',
+      async start() {
+        return { provider: 'claude' } as unknown as InteractiveDriverHandle;
+      },
+      async consume() {
+        return new Promise<void>(() => {});
+      },
+      async interrupt() {
+        return new Promise<boolean>((res) => {
+          resolveInterrupt = res;
+        });
+      },
+    };
+    const sm = new SessionManager({
+      driver: fakeDriver as never,
+      drivers: { claude: fakeDriver },
+      onTurnResult: vi.fn(),
+      onTurnMessage: vi.fn(),
+      onSessionEnd: vi.fn(),
+      onSessionEvent: vi.fn(),
+      onTurnActivityTimeout,
+    } as SessionManagerDeps);
+    const state = makeState('sess-1', 'active');
+    seed(sm, state);
+
+    await sm.inject('sess-1', 'hello', 'run-1');
+    await onMessage(core(sm), state, { events: [] });
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+
+    // fire 已进入 interrupt await；此刻轮 result 到达（引擎其实活着）。
+    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
+    await onResult(core(sm), state, {
+      subtype: 'success',
+      is_error: false,
+    } as never);
+    resolveInterrupt(false);
+
+    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
+    const after = sm.get('sess-1')!;
+    expect(after.status).toBe('active');
+    expect(after.staleRunResetAt).toBeUndefined();
+    expect(after.currentRunId).toBeUndefined();
+  });
+
   it('回调未注入（旧装配形态）：到点仍 interrupt + 重置本地态、不抛错', async () => {
     vi.useFakeTimers();
     const { sm } = createSessionManager(undefined);

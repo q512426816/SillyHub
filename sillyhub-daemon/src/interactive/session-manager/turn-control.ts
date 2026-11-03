@@ -784,6 +784,9 @@ async function fireTurnActivityWatchdog(
   if (!state) return;
   if (state.status !== 'running' || state.currentRunId !== runId) return;
   await interrupt(mgr, sessionId).catch(() => false);
+  // interrupt 的 await 窗口内可能有事件/result 到达（引擎存活证据，评审 P2）——
+  // 复核双守卫：已流转则静默跳过，不给活轮误报 failed。
+  if (state.status !== 'running' || state.currentRunId !== runId) return;
   state.status = 'active';
   state.lastActiveAt = Date.now();
   state.staleRunResetAt = Date.now();
