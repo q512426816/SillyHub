@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-distill-prompt-fix",
+  "reviewer": "subagent-zcode-review",
+  "verdict": "PASS",
+  "reviewedAgainst": "ddd01f0431fe37d0e32f403fedcbd23e8f208031",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-01 的「单引号转义指引」与「笔误静默入库」警示未设直接断言，仅间接覆盖",
+      "evidence": "实际文样两段均在（生成形态逐形态核验命中），但测试仅以单引号 body 模板正向断言 + 禁双引号反断言 + known_issues 禁用警示间接覆盖，未直接断言「转义」「笔误静默入库」文样，未来文样回退这两句不会被测试拦截",
+      "location": "backend/app/modules/knowledge/tests/test_distill.py:810-832"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-03T11:27:01+08:00"
+}

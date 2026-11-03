@@ -1,0 +1,50 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  蒸馏提示词加固：转义回流悬空回落
+
+  平台触发的知识沉淀 prompt（backend/app/modules/knowledge/distill.py build_distill_prompt）经两轮评审与本机实测暴露四处问题：--body
+  双引号模板在正文含反引号或美元符时被 shell 展开静默损坏；spec_note 断言「会话结束自动上行、无需手动同步」不成立（propose 零同步，收尾上行 best-effort 且失败静默）；spec_dir 悬空引用时
+  propose 静默 mkdir 孤儿树（本机 4e9eb05b 实证 daemon 注册面零命中）；另缺来源标记、数量指引、查重与幂等说明。
+
+
+  成功标准：
+
+  - 模板 propose 命令改单引号 body 并带 --from 来源标记，附单引号转义与 category 枚举（known-issues 连字符）指引
+
+  - spec_dir 段改写为「落盘前 ls 核验；悬空回落当前工作目录 .sillyspec 并留痕偏差；禁止落自建孤儿目录」，删除「自动上行无需手动同步」表述
+
+  - 新增回流确认段：propose 后显式 sillyspec platform sync（不带 --change）并按回执留痕，未连接平台则汇报未回流
+
+  - 新增查重（search --query）/同题幂等/宁缺毋滥 2-5 条指引；resume 式补上下文摘要兜底句
+
+  - test_distill.py 既有 prompt 断言同步更新，backend 知识蒸馏测试全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: df408e6884d4a7ba1acc19503fc53947e5871d84
+updatedAt: '2026-11-03T03:27:36.203Z'
+cross_baselines:
+  sillyspec: db1882500e9d1c8b817788b0a5ac9c4098f1682e
+baseline_sha256: d6be2dda86d9c438791c5cc7adca6d7b5814c2475a9c100466c01031bfe7a050
+spec_approved: true
+spec_approved_at: '2026-11-03T03:11:03.804Z'
+spec_approved_by: zcode-distill-prompt-fix
+spec_approved_channel: agent-self
+spec_attested_by: zcode-distill-prompt-fix
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（14.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261103032256\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 3 个
+

@@ -936,3 +936,108 @@ created_at: 2026-10-15T11:52:52.897Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-23-knowledge-scope-maintenance/requirements.md#FR-03
 最近确认：80f9dd90355be5253439d049cadcd771baf88c09
+
+## FR-knowledge-032 模板 propose 命令改单引号 body 并带 --from 来源标记，附单引号转义与 category 枚举（known-issues 连字符）指引
+变更：2026-11-03-distill-prompt-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 任意 source_type（session fresh/resume、change、quick）与任意 spec_dir 取值（含 None），When 生成
+全文：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/requirements.md#FR-01
+最近确认：ddd01f0431fe37d0e32f403fedcbd23e8f208031
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-distill-prompt-fix:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-distill-prompt-fix
+  status: active
+
+## FR-knowledge-033 spec_dir 段改写为「落盘前 ls 核验；悬空回落当前工作目录 .sillyspec 并留痕偏差；禁止落自建孤儿目录」，删除「自动上行无需手动同步」表述
+变更：2026-11-03-distill-prompt-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given spec_dir 非空，When 生成 prompt，Then 含 ls 核验、悬空回落与孤儿树警示文样，且「自动上行」「无需你手动同步」零命中。
+全文：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/requirements.md#FR-02
+最近确认：ddd01f0431fe37d0e32f403fedcbd23e8f208031
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-distill-prompt-fix:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-distill-prompt-fix
+  status: active
+
+## FR-knowledge-034 新增回流确认段：propose 后显式 sillyspec platform sync（不带 --change）并按回执留痕，未连接平台则汇报未回流
+变更：2026-11-03-distill-prompt-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 四种生成形态，When 生成 prompt，Then 每份均含 `sillyspec platform sync` 调用指引与「未回流」留痕要求。
+全文：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/requirements.md#FR-03
+最近确认：ddd01f0431fe37d0e32f403fedcbd23e8f208031
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-distill-prompt-fix:flow:测试绑定FR-03
+  tests: backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-distill-prompt-fix
+  status: active
+
+## FR-knowledge-035 新增查重（search --query）/同题幂等/宁缺毋滥 2-5 条指引；resume 式补上下文摘要兜底句
+变更：2026-11-03-distill-prompt-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given resume 式生成，When 生成 prompt，Then 含 --query 查重指引、同题幂等说明、「宁缺毋滥」数量指引与摘要兜底句四要素。
+全文：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/requirements.md#FR-04
+最近确认：ddd01f0431fe37d0e32f403fedcbd23e8f208031
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-distill-prompt-fix:flow:测试绑定FR-04
+  tests: backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_resume_variant」 | backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-distill-prompt-fix
+  status: active
+
+## FR-knowledge-036 test_distill.py 既有 prompt 断言同步更新，backend 知识蒸馏测试全绿
+变更：2026-11-03-distill-prompt-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 更新后的断言，When 运行 backend 知识蒸馏测试，Then 全部通过且无跳过。
+全文：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/requirements.md#FR-05
+最近确认：ddd01f0431fe37d0e32f403fedcbd23e8f208031
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-03-distill-prompt-fix:flow:测试绑定FR-05
+  tests: backend/app/modules/knowledge/tests/test_distill.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-03-distill-prompt-fix
+  status: active

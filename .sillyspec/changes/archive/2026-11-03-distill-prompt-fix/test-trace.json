@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-03-distill-prompt-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-03-distill-prompt-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-distill-prompt-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-03-distill-prompt-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-distill-prompt-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-03-distill-prompt-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-distill-prompt-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-03-distill-prompt-fix:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_resume_variant」",
+        "backend/app/modules/knowledge/tests/test_distill.py「test_build_distill_prompt_spec_dir_propose_guidance」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-distill-prompt-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-11-03-distill-prompt-fix:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_distill.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-03-distill-prompt-fix"
+    }
+  ]
+}

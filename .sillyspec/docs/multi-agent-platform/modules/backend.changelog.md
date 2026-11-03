@@ -141,3 +141,4 @@
 - 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建
 - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
 - 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正
+- 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
