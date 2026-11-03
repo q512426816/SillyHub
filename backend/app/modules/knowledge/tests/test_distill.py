@@ -787,7 +787,9 @@ def test_build_distill_prompt_session_fresh_requires_export_name() -> None:
 
 
 def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
-    """洞二回流指引：全来源（含 resume 式）propose 命令带 --spec-dir 平台同步树。"""
+    """洞二回流指引（2026-11-03 加固）：propose 命令单引号 body + --from 来源标记；
+    spec_dir 段改 ls 核验回落（删「自动上行/无需手动同步」失实表述）；全形态（含
+    spec_dir=None 旧形）含回流确认段与查重/幂等/数量指引。"""
     spec_dir = "~/.sillyhub/daemon/specs/ws-1"
     fresh_session = build_distill_prompt(
         "session", "sid-1", None, export_name="distill-source-sid-1.md", spec_dir=spec_dir
@@ -797,16 +799,41 @@ def test_build_distill_prompt_spec_dir_propose_guidance() -> None:
     )
     change = build_distill_prompt("change", "key-1", None, spec_dir=spec_dir)
     quick = build_distill_prompt("quick", "ql-a", None, spec_dir=spec_dir)
+    legacy = build_distill_prompt("change", "key-1", None)
+    for label, prompt in (
+        ("fresh_session", fresh_session),
+        ("resume_session", resume_session),
+        ("change", change),
+        ("quick", quick),
+        ("legacy", legacy),
+    ):
+        # FR-01：命令模板单引号 body + 来源标记。
+        assert "--body '<Markdown 正文>'" in prompt, label
+        assert '--from "session-distill"' in prompt, label
+        assert '--body "' not in prompt, label  # 双引号 body 模板禁止回归
+        # FR-04：查重 --query 精确用法 + 同题幂等 + 枚举（连字符/禁下划线）+ 数量纪律。
+        assert "search --query" in prompt, label
+        assert "幂等更新" in prompt, label
+        assert "known-issues 用连字符" in prompt, label
+        assert "known_issues" in prompt, label  # 以「禁用 known_issues」警示形态出现
+        assert "宁缺毋滥" in prompt, label
+        # FR-03：回流确认段全形态存在（含未连接平台的留痕要求）。
+        assert "sillyspec platform sync" in prompt, label
+        assert "未回流" in prompt, label
     for label, prompt in (
         ("fresh_session", fresh_session),
         ("resume_session", resume_session),
         ("change", change),
         ("quick", quick),
     ):
+        # FR-02：spec_dir 核验回落指引；失实表述必须消失。
         assert f"--spec-dir {spec_dir}" in prompt, label
-        assert "上行回流" in prompt, label
+        assert "ls 核验" in prompt, label
+        assert "孤儿树" in prompt, label
+        assert "留痕偏差" in prompt, label
+        assert "自动上行" not in prompt, label
+        assert "无需你手动同步" not in prompt, label
     # 无 spec_dir 旧形不带该参数（零回归直调路径）。
-    legacy = build_distill_prompt("change", "key-1", None)
     assert "--spec-dir" not in legacy
 
 
@@ -815,6 +842,9 @@ def test_build_distill_prompt_resume_variant() -> None:
     resume_prompt = build_distill_prompt("session", "024a9fc2", None, for_resume=True)
     assert "本会话本身的完整对话记录" in resume_prompt
     assert "session_id" not in resume_prompt
+    # 2026-11-03 加固：长会话上下文可能被摘要压缩——必须带兜底句（不臆测丢失细节）。
+    assert "摘要" in resume_prompt
+    assert "不臆测" in resume_prompt
 
 
 # ---------------------------------------------------------------------------

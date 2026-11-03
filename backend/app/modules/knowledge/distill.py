@@ -166,6 +166,9 @@ def build_distill_prompt(
       ``--spec-root`` 被其静默忽略回退 cwd）；change/quick 的来源读取路径同指
       该树（platform-managed 下 cwd 无 .sillyspec）。``None`` 时回落旧行文
       （无工作区上下文的直调/测试，零回归）。
+      2026-11-03 加固：文样改为「落盘前 ls 核验、悬空回落 cwd .sillyspec 并
+      留痕偏差」，删除失实的「会话结束自动上行」承诺；propose 命令换单引号
+      body + ``--from`` 来源标记；新增公共回流确认段（显式 platform sync）。
 
     quick-2dba0118：quick 式来源指引改为**条目级**——quicklog 是单文件多条目
     形态（QUICKLOG-*.md 内 ``## <ql-id>`` 节），不再指 ``<ql>.md`` 独立文件
@@ -173,7 +176,7 @@ def build_distill_prompt(
     """
     if source_type == "session":
         if for_resume:
-            source_line = "来源即本会话本身的完整对话记录（你是原会话的续接，已持有全部上下文），请回顾本会话全过程进行提炼。"
+            source_line = "来源即本会话本身的完整对话记录（你是原会话的续接，已持有全部上下文），请回顾本会话全过程进行提炼。若上下文已被摘要压缩，基于可得内容提炼，不臆测丢失细节。"
         else:
             if not export_name:
                 raise ValueError(
@@ -211,32 +214,48 @@ def build_distill_prompt(
         propose_cmd = (
             'sillyspec knowledge propose --title "<条目标题>" '
             "--category <conventions|patterns|known-issues|uncategorized> "
-            f'--body "<Markdown 正文>" --spec-dir {spec_dir}'
+            '--from "session-distill" '
+            f"--body '<Markdown 正文>' --spec-dir {spec_dir}"
         )
         spec_note = (
-            f"\n必须携带 --spec-dir {spec_dir}：该路径是平台同步的规范树"
-            "（会话结束自动上行回流平台知识库，无需你手动同步）；不带该参数会落到"
-            "你当前工作目录的 .sillyspec，不一定参与平台同步，产物可能无法回流。\n"
+            f"\n--spec-dir {spec_dir} 是本工作区的平台同步规范树：落盘前必须先用 ls 核验"
+            "该路径真实存在——存在则按原路径落盘；不存在（悬空引用，propose 会静默创建"
+            "无人同步的孤儿树）则改落你当前工作目录的 .sillyspec（平台同步面），并在汇报中"
+            "留痕偏差，禁止写进自建的新目录。\n"
         )
     else:
         propose_cmd = (
             'sillyspec knowledge propose --title "<条目标题>" '
             "--category <conventions|patterns|known-issues|uncategorized> "
-            '--body "<Markdown 正文>"'
+            '--from "session-distill" '
+            "--body '<Markdown 正文>'"
         )
         spec_note = ""
     return (
         "你是知识沉淀助手，负责把平台的记录资产提炼成可长期复用的知识条目。\n"
         f"\n{source_line}\n"
         "\n提炼要求：\n"
-        "1. 只保留值得长期复用的知识：踩坑与解法、可复用模式、平台约定与契约；忽略过程性描述与一次性信息。\n"
+        "1. 只保留值得长期复用的知识：踩坑与解法、可复用模式、平台约定与契约；忽略过程性"
+        "描述与一次性信息。宁缺毋滥：通常 2～5 条，确无可沉淀内容时直接汇报「本批无候选」，"
+        "不硬凑。\n"
         "2. 每条知识独立成条，标题概括问题本身，正文用 Markdown 写清「问题、解法、证据（文件/提交）、适用条件」。\n"
+        '3. 动笔前先查重：sillyspec knowledge search --query "<关键词>"（必须用 --query 传参）；'
+        "命中相近条目时沿用其原标题重提——同题即幂等更新，不会产生重复条目。\n"
         f"{focus_line}"
-        "\n落盘方式（必须逐字遵守，不许改用其它写文件方式）：\n"
+        "\n落盘方式（每条都必须走 sillyspec knowledge propose 写入，禁止用其它任何写文件方式"
+        "直写知识库——会绕过 frontmatter、不被评审闭环承认；命令模板如下，参数值按条目替换）：\n"
         "对每条提炼出的知识，执行：\n"
         f"{propose_cmd}\n"
         f"{spec_note}"
-        "\n完成后简要汇报提炼出的候选知识清单即可，不要修改知识库之外的任何文件。"
+        "\npropose 传参规则：--category 只能取上述四个枚举值（CLI 不校验，笔误静默入库），"
+        "known-issues 用连字符、禁用 known_issues；--body 一律用单引号包裹（单引号内反引号、"
+        "$、双引号均为字面量，正文可安全含行内代码与路径），正文内 ASCII 单引号须转义或改写"
+        "避开，禁止用双引号包裹 --body——正文含反引号或 $ 时会被 shell 展开，静默损坏落库。\n"
+        "\n回流确认（必须执行）：propose 全部完成后显式跑一次 sillyspec platform sync"
+        "（不带 --change）。已连接平台时按回执留痕回流结果；未连接平台时 sync 会静默跳过，"
+        "必须在汇报中留痕「未回流」。\n"
+        "\n完成后简要汇报：提炼出的候选知识清单（标题+分类）、propose 落盘点（原路径或偏差"
+        "说明）、platform sync 回执结果。不要修改知识库之外的任何文件，也不要做 git 提交。"
     )
 
 
