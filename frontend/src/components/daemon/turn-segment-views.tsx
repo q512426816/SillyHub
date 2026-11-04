@@ -73,6 +73,8 @@ import { CopyButton } from "@/components/daemon/copy-button";
 import { DiffStatBadge } from "@/components/daemon/diff-stat-badge";
 import { diffStatFromPatch } from "@/components/agent-log/tool-diff";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
+// 2026-11-04-steered-msg-attachment-chips：引导段气泡附件卡片（同主用户气泡）。
+import { AttachmentChips } from "@/components/daemon/attachment-chips";
 import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
 // 2026-10-25-subagent-card-unify-panel（FR-05）：子代理卡片内嵌内部活动流动条
 //（与外部会话跑马灯同一组件/机制，inline 变体贴卡片布局）。
@@ -1452,11 +1454,32 @@ export const ModelRetryRowView = memo(function ModelRetryRowView({
  *   - ended：弱化气泡（opacity-70）+「本轮已结束，消息未投递」（R-04 如实暴露）。
  * data-steered-msg={phase} 供测试断言（自旧 footer 迁移）。文本经
  * parseAttachmentMarkers 剥附件标记行（同 prompt 气泡展示口径）。
+ *
+ * 2026-11-04-steered-msg-attachment-chips：标记行里的 attachments 不再丢弃——
+ * 三态气泡内与主用户气泡同口径渲染 AttachmentChips（delivered 实色 primary
+ * 气泡用 onPrimary 色调，steering/ended 浅底用 brand）；正文剥离后为空（纯附件
+ * 引导）时不渲染空正文节点，只留 chips + 状态行。data-steered-body 供测试断言
+ * 正文节点在场性。
  */
 export const UserMsgSegmentView = memo(function UserMsgSegmentView({
   segment,
 }: UserMsgSegmentViewProps) {
-  const text = parseAttachmentMarkers(segment.text).text;
+  // 同一次解析同时供 chips 与正文消费（后端/发送侧标记行格式见 D-3）。
+  const parsed = parseAttachmentMarkers(segment.text);
+  const text = parsed.text;
+  const attachments = parsed.attachments;
+  const delivered = segment.phase === "delivered";
+  const tone = delivered ? "onPrimary" : "brand";
+  const chips =
+    attachments.length > 0 ? (
+      <AttachmentChips attachments={attachments} tone={tone} />
+    ) : null;
+  const body = text ? (
+    <span data-steered-body>
+      {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+      <InlineAttRefTextWithPreview text={text} tone={delivered ? "onPrimary" : "brand"} />
+    </span>
+  ) : null;
   return (
     <div
       data-steered-msg={segment.phase}
@@ -1466,8 +1489,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         {segment.phase === "steering" ? (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
-              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
-              <InlineAttRefTextWithPreview text={text} />
+              {chips}
+              {body}
             </div>
             <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
               <span
@@ -1480,8 +1503,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         ) : segment.phase === "delivered" ? (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
-              {/* task-06：引导段正文行内引用标签化（蓝色主气泡内用 onPrimary 色调）。 */}
-              <InlineAttRefTextWithPreview text={text} tone="onPrimary" />
+              {chips}
+              {body}
             </div>
             <p className="mt-1 text-right text-[11px] text-emerald-600">
               ✓ 已投递，agent 已收到引导
@@ -1490,8 +1513,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         ) : (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground opacity-70">
-              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
-              <InlineAttRefTextWithPreview text={text} />
+              {chips}
+              {body}
             </div>
             <p className="mt-1 text-right text-[11px] text-muted-foreground">
               本轮已结束，消息未投递
