@@ -848,7 +848,7 @@ export function CtxUsageBar({
   // FR-06 caps 门控：provider 明确且 getProviderCaps(provider).ctx_usage=false
   // （未知引擎名命中回退 false）→ 只渲染 QuotaPill 不渲染 CtxUsageRing；
   // null/未传旁路门控照常渲染环（不因门控丢现有功能，环仍有未知态「—」兜底）。
-  // providerId 语义与 QuotaPill 行为不动（额度查询照旧）。
+  // providerId 仅透传给 QuotaPill（选中供应商优先展示，见 QuotaPillProps）。
   // 2026-09-14-session-ctx-compact task-06：provider 经 ...ringProps 透传给环
   // （压缩按钮 caps 门控消费，见 CtxUsageRingProps.provider 注释）。
   const ctxSupported =
