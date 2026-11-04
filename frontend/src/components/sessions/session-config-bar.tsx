@@ -57,7 +57,7 @@
  * data-staged-pending 测试锚 + 悬停 title「已记住，将随下一条消息发送时生效」；
  * 禁用态 title 优先（D-009）；正常会话与 askuser 待答场景统一。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dropdown, Tag, Tooltip, type MenuProps } from "antd";
 import { Brain, ChevronDown, Cloud, GitBranch, Settings2, User } from "lucide-react";
@@ -66,6 +66,8 @@ import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listUsableProviders, noProviderLabel } from "@/lib/api/llm-providers";
+import type { LlmProviderRead } from "@/lib/api/llm-providers";
+import { getLastModel, rememberLastModel } from "@/lib/model-memory";
 import { useNotify } from "@/lib/errors";
 import {
   fetchSessionGitStatus,
@@ -92,6 +94,43 @@ export const SWITCH_NO_PROVIDER_VALUE = "";
  * undefined=不切换）。
  */
 export const SWITCH_MODEL_DEFAULT_VALUE = "";
+
+/**
+ * 供应商模型候选排序（2026-11-04-model-provider-cascade FR-01 抽出复用）：
+ * 主模型（sonnet role）置顶 + 去重保序 + 过滤空名。模型自动解析与模型下拉
+ * 候选必须同源同序（显示即所得）。
+ */
+function orderedProviderModelNames(provider: LlmProviderRead): string[] {
+  const entries = provider.models ?? [];
+  const primaryIdx = entries.findIndex((m) => m.roles?.includes("sonnet"));
+  const ordered =
+    primaryIdx > 0
+      ? [entries[primaryIdx], ...entries.filter((_, i) => i !== primaryIdx)]
+      : entries;
+  const seen = new Set<string>();
+  const models: string[] = [];
+  for (const m of ordered) {
+    const name = m?.name;
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    models.push(name);
+  }
+  return models;
+}
+
+/**
+ * 模型自动解析（FR-01）：该供应商上次显式选过的模型（本地记忆，越界回退）
+ * → 候选第一个 → 空串（跟随供应商配置）。模块级纯函数便于单测直测。
+ */
+export function resolveAutoModelForProvider(
+  provider: LlmProviderRead | null | undefined,
+): string {
+  if (!provider) return "";
+  const candidates = orderedProviderModelNames(provider);
+  const remembered = getLastModel(provider.id);
+  if (remembered && candidates.includes(remembered)) return remembered;
+  return candidates[0] ?? "";
+}
 
 /**
  * 2026-10-30-askuser-config-pending（FR-01 / D-001@v2）：暂存待生效悬停文案——
@@ -631,27 +670,26 @@ export function SessionConfigBar({
   /**
    * 模型候选 = provider.model → default_fallback_model → model_role_mappings
    * 各角色 model **去重保序**（空串/缺键过滤；不做上游 /v1/models 实时拉取，
-   * D-002）。首项「默认（跟随供应商配置）」在渲染处固定，不进候选集。
+   * D-002）。排序/去重逻辑抽模块级 orderedProviderModelNames（与模型自动解析
+   * 同源同序，2026-11-04-model-provider-cascade）。旧「首项默认」已随 FR-02
+   * 移除——具体供应商下不再提供「默认」选项。
    */
-  const modelCandidates = useMemo(() => {
-    if (!selectedProvider) return [] as string[];
-    // D-001：下拉源 = 供应商模型列表条目名（主模型置顶）。
-    const entries = selectedProvider.models ?? [];
-    const primaryIdx = entries.findIndex((m) => m.roles?.includes("sonnet"));
-    const ordered =
-      primaryIdx > 0
-        ? [entries[primaryIdx], ...entries.filter((_, i) => i !== primaryIdx)]
-        : entries;
-    const raw: (string | null | undefined)[] = ordered.map((m) => m?.name);
-    const seen = new Set<string>();
-    const models: string[] = [];
-    for (const m of raw) {
-      if (!m || seen.has(m)) continue;
-      seen.add(m);
-      models.push(m);
-    }
-    return models;
-  }, [selectedProvider]);
+  const modelCandidates = useMemo(
+    () => (selectedProvider ? orderedProviderModelNames(selectedProvider) : []),
+    [selectedProvider],
+  );
+
+  /**
+   * 2026-11-04-model-provider-cascade FR-01：供应商级联的模型自动解析
+   * （记忆→候选第一个→空串跟随）。组件内薄封装（providers 列表在手）。
+   */
+  const resolveAutoModel = useCallback(
+    (providerId: string): string =>
+      resolveAutoModelForProvider(
+        providers.find((p) => p.id === providerId) ?? null,
+      ),
+    [providers],
+  );
 
   /**
    * provisional 模式模型暂存（组件内显示用；父层经 onProvisionalModelSwitch
@@ -662,11 +700,18 @@ export function SessionConfigBar({
   // 2026-10-25-session-config-deferred-switch：会话态模型显示优先受控暂存值
   // （键存在 = 面板侧已归一为真暂存，值 ≠ 当前生效值）。
   const stagedModel = staged?.model;
+  // 2026-11-04-model-provider-cascade FR-02：快照/暂存模型为空且候选非空时
+  // 显示自动解析值（记忆→候选第一个）。仅显示层——不产生暂存/载荷，未显式
+  // 动作发送行为零变化（载荷 model 缺省 = 跟随供应商配置，既有语义）。
+  const autoModelForDisplay = useMemo(
+    () => (selectedProvider ? resolveAutoModel(selectedProvider.id) : ""),
+    [selectedProvider, resolveAutoModel],
+  );
   const currentModel = provisional
-    ? provisionalModel
+    ? provisionalModel || autoModelForDisplay
     : stagedModel !== undefined
       ? stagedModel
-      : (configSnapshot?.model ?? "");
+      : (configSnapshot?.model ?? "") || autoModelForDisplay;
 
   /**
    * 快照模型可能已不在候选集（供应商高级设置后续改过）→ 追加到尾部兜底，
@@ -893,11 +938,13 @@ export function SessionConfigBar({
     if (stagedMode) {
       setOpenKind(null);
       const cancel = effectiveValues[p.field] === p.value;
-      // 暂存供应商（非取消）级联重置模型暂存——候选随供应商变，旧模型对新供应
-      // 商无意义；值 "" 经面板归一（与生效模型一致即清字段），生效模型非空时
-      // 「模型 → 默认」是真实生效变化（对齐旧「切供应商 inject 带 model:""」语义）。
+      // 2026-11-04-model-provider-cascade FR-01：暂存供应商（非取消）级联自动
+      // 选中模型——该供应商上次显式选过的模型（记忆，越界回退）→ 候选第一个
+      // → 空串跟随；与供应商成对进入暂存（旧「重置默认」会让载荷 model 落空、
+      // 显示与实际注入错位）。自动解析本身不写记忆（记忆仅由显式选模型产生）。
       if (p.field === "llm_provider_id" && !cancel) {
-        onStagedSwitch({ field: "model", value: SWITCH_MODEL_DEFAULT_VALUE, label: "默认" });
+        const auto = resolveAutoModel(p.value);
+        onStagedSwitch({ field: "model", value: auto, label: auto || "默认" });
       }
       onStagedSwitch({
         field: p.field,
@@ -905,6 +952,26 @@ export function SessionConfigBar({
         label: p.label,
         cancel: cancel || undefined,
       });
+      // 2026-11-04-model-provider-cascade FR-03/FR-04：显式选模型（非取消）——
+      // 记忆「生效供应商 → 所选模型」；会话 provider NULL 且无供应商暂存时成对
+      // 补暂存显示层引擎默认供应商 id，发送载荷携带 model+provider 非空对
+      // （后端 model_requires_provider 守卫不再拒绝，生产会话 edf0c569 缺口根治）。
+      if (p.field === "model" && !cancel) {
+        const effectiveProviderId =
+          staged?.llm_provider_id ?? llmProviderId ?? engineDefaultProvider?.id ?? null;
+        if (effectiveProviderId) rememberLastModel(effectiveProviderId, p.value);
+        if (
+          llmProviderId == null &&
+          staged?.llm_provider_id === undefined &&
+          engineDefaultProvider
+        ) {
+          onStagedSwitch({
+            field: "llm_provider_id",
+            value: engineDefaultProvider.id,
+            label: engineDefaultProvider.name,
+          });
+        }
+      }
       // D-001（用户定调）：暂存静默——控件值变化即反馈，不弹 toast、不渲染
       // 「待生效」标记；切换结果由发送成功后的时间线切换信息行呈现。
       return;
@@ -918,6 +985,13 @@ export function SessionConfigBar({
       if (p.field === "model") {
         setProvisionalModel(p.value);
         onProvisionalModelSwitch?.(p.value);
+        // 2026-11-04-model-provider-cascade FR-03/FR-04：记忆 + provider 空时
+        // 成对补引擎默认供应商（预会话 preProviderId 经 onProvisionalSwitch 回写）。
+        const effectiveProviderId = llmProviderId || engineDefaultProvider?.id || null;
+        if (effectiveProviderId) rememberLastModel(effectiveProviderId, p.value);
+        if (!llmProviderId && engineDefaultProvider) {
+          onProvisionalSwitch?.("llm_provider_id", engineDefaultProvider.id);
+        }
         // 2026-09-14-session-thinking-level task-06（FR-06）：模型变档位重置
         // （照「切供应商重置模型」模式——动态档位按当前模型（claude
         // supportedEffortLevels per-model），模型既变旧档对新模型无意义；仅清
@@ -926,11 +1000,14 @@ export function SessionConfigBar({
         onProvisionalThinkingLevelSwitch?.("");
         return;
       }
-      // task-10：切供应商级联重置模型暂存（候选随供应商变，旧模型对新供应商
-      // 无意义；「不指定」下 model 非空更会被后端 422——task-11 守卫）。
+      // 2026-11-04-model-provider-cascade FR-01：切供应商级联自动选中模型
+      // （记忆→候选第一个→空串跟随），替代旧「重置默认」——候选随供应商变，
+      // 旧模型对新供应商无意义；「不指定」下自动解析为空串（跟随），model 非
+      // 空不会被后端 422（task-11 守卫前提已由成对语义保证）。
       if (p.field === "llm_provider_id") {
-        setProvisionalModel(SWITCH_MODEL_DEFAULT_VALUE);
-        onProvisionalModelSwitch?.(SWITCH_MODEL_DEFAULT_VALUE);
+        const auto = resolveAutoModel(p.value);
+        setProvisionalModel(auto);
+        onProvisionalModelSwitch?.(auto);
       }
       onProvisionalSwitch?.(p.field, p.value);
       return;
@@ -939,15 +1016,23 @@ export function SessionConfigBar({
     setSubmitting(true);
     setOpenKind(null);
     try {
-      // task-10（FR-03-3）：供应商与模型同请求——切供应商级联重置 model=""
-      // （语义见上）；切模型补带当前 llm_provider_id（model 非空必须挂供应商，
-      // 后端 422 守卫）。档案切换不带伴生键，payload 零变化。
+      // task-10（FR-03-3）+ 2026-11-04-model-provider-cascade：供应商与模型同
+      // 请求——切供应商级联自动解析 model（记忆→第一个→空跟随）；切模型补带
+      // 供应商（会话值 → 引擎默认 → 不指定兜底；model 非空必须挂供应商，后端
+      // 422 守卫）。档案切换不带伴生键，payload 零变化。显式选模型同样写记忆。
       const companion: Partial<SessionInjectOptions> =
         p.field === "llm_provider_id"
-          ? { model: SWITCH_MODEL_DEFAULT_VALUE }
+          ? { model: resolveAutoModel(p.value) }
           : p.field === "model"
-            ? { llm_provider_id: llmProviderId ?? SWITCH_NO_PROVIDER_VALUE }
+            ? {
+                llm_provider_id:
+                  llmProviderId ?? engineDefaultProvider?.id ?? SWITCH_NO_PROVIDER_VALUE,
+              }
             : {};
+      if (p.field === "model") {
+        const effectiveProviderId = llmProviderId ?? engineDefaultProvider?.id ?? null;
+        if (effectiveProviderId) rememberLastModel(effectiveProviderId, p.value);
+      }
       const resp = await injectSession(sessionId, prompt, {
         ...companion,
         [p.field]: p.value,
@@ -1126,7 +1211,7 @@ export function SessionConfigBar({
                     ? STAGED_PENDING_TITLE
                     : running && !stagedMode
                       ? "运行中可切换，将于本轮结束后生效"
-                      : "模型（默认=跟随供应商配置）"
+                      : "模型（随供应商自动选中，可手动切换）"
               }
               data-staged-pending={staged?.model !== undefined ? "true" : undefined}
               onChange={(e) => {
@@ -1148,9 +1233,9 @@ export function SessionConfigBar({
                   "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
               )}
             >
-              <option value={SWITCH_MODEL_DEFAULT_VALUE}>
-                默认（跟随供应商配置）
-              </option>
+              {/* 2026-11-04-model-provider-cascade FR-02：具体供应商下不再提供
+                  「默认」选项——模型必须显式具体值（不指定态模型选择整体不渲染，
+                  即默认语义）；选项集 = 候选（+越界快照/暂存值兜底显示）。 */}
               {modelOptions.map((m) => (
                 <option key={m} value={m}>
                   {m}

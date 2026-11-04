@@ -1587,6 +1587,43 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     // 草稿随 onSendSettled strip 比对清空（置换版 ≠ 原文的口径回归）。
     await waitFor(() => expect(ta.value).toBe(""));
   });
+
+  // 2026-11-04-model-provider-cascade FR-05：inject 失败（如 model_requires_provider
+  // 422）即时 toast 弹出后端 message——横幅在时间线顶部易无感，生产会话 edf0c569
+  // 三连 422 用户全程无感实证。占位轮回退/横幅既有行为不回退。
+  it("inject 失败 → notify.error 即时弹出后端 message；占位轮回退照旧", async () => {
+    renderPage();
+    await selectDefaultSession();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText(/继续追问|消息将排队/),
+      ).toBeTruthy(),
+    );
+    const rejectErr = new ApiError(
+      422,
+      {
+        code: "HTTP_422_DAEMON_SESSION_CONFIG_INVALID",
+        message: "模型依赖供应商：选择模型时必须同时指定供应商。",
+        request_id: "req-test-1",
+        details: { reason: "model_requires_provider", model: "deepseek-v4.1-flash" },
+      },
+    );
+    mocks.injectSession.mockRejectedValueOnce(rejectErr);
+    const ta = screen.getByPlaceholderText(
+      /继续追问|消息将排队/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "继续一下" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.notifyError).toHaveBeenCalled());
+    // toast message 携带后端原文（errMessage 提取链）
+    const call = mocks.notifyError.mock.calls.at(-1) as unknown[];
+    expect(String((call[0] as { message?: string })?.message ?? call[0])).toContain(
+      "模型依赖供应商",
+    );
+    // 占位轮回退 + 原文回填可重试（FR-02 既有口径零变化）
+    await waitFor(() => expect(ta.value).toBe("继续一下"));
+  });
 });
 
 // ── task-08（2026-08-21-session-reopen-resume / FR-09 / DS-5）：reconnecting 恢复超时 + 409 中文化 ──

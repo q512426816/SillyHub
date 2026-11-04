@@ -1360,6 +1360,8 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           turns: prev.turns.filter((t) => t.runId !== placeholderId),
           errorMsg: errMessage(apiErr, "追问失败"),
         }));
+        // 2026-11-04-model-provider-cascade FR-05：失败即时 toast（errorMsg 照旧）。
+        notify.error(apiErr, "追问失败");
         throw err; // D-003：向上抛 → 调用方按路径处理（见函数头注释）
       } finally {
         if (inflightSendRef.current?.placeholderId === placeholderId) {
@@ -1429,6 +1431,8 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           ...prev,
           errorMsg: errMessage(apiErr, "发送失败"),
         }));
+        // 2026-11-04-model-provider-cascade FR-05：失败即时 toast（errorMsg 照旧）。
+        notify.error(apiErr, "发送失败");
         // 2026-10-23-session-dialog-input-align / FR-02：受理即清后失败（满员 409 /
         // 离线 / 网络）→ 原文回填可原地重试（缺省回落置换版 prompt，旧调用兼容）。
         restoreRejectedSend(rawPrompt ?? prompt);

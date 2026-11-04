@@ -266,6 +266,9 @@ beforeEach(() => {
   mocks.apiFetch.mockReset().mockResolvedValue([]);
   mocks.messageSuccess.mockReset();
   mocks.messageError.mockReset();
+  // 2026-11-04-model-provider-cascade：模型记忆是持久 localStorage——用例间
+  // 清零防串扰（记忆命中/回退断言依赖干净初态）。
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -392,11 +395,12 @@ describe("SessionConfigBar 切换供应商", () => {
     // 不发请求（不产生空切换轮）、不弹 toast（D-001 静默）
     expect(mocks.injectSession).not.toHaveBeenCalled();
     expect(mocks.messageSuccess).not.toHaveBeenCalled();
-    // 级联：切供应商同时重置模型暂存（""=跟随供应商配置，对齐 provisional 先例）
+    // 2026-11-04-model-provider-cascade FR-01：级联自动选中模型——无记忆取候选
+    // 第一个（GLM 平台候选 [glm-4.7]），与供应商成对进入暂存（旧「重置默认」退役）。
     expect(patches[0]).toEqual({
       field: "model",
-      value: SWITCH_MODEL_DEFAULT_VALUE,
-      label: "默认",
+      value: "glm-4.7",
+      label: "glm-4.7",
       cancel: undefined,
     });
     expect(patches[1]).toEqual({
@@ -472,7 +476,8 @@ describe("SessionConfigBar 切换供应商", () => {
     await waitFor(() =>
       expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
         llm_provider_id: "prov-shared",
-        model: "",
+        // 2026-11-04-model-provider-cascade FR-01：级联自动选中（无记忆 → 候选第一个）
+        model: "glm-4.7",
       }),
     );
   });
@@ -484,10 +489,11 @@ describe("SessionConfigBar 切换供应商", () => {
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
 
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    // ql-20260817-010：静默切换——prompt 空串；task-10：切供应商同请求级联重置 model=""。
+    // ql-20260817-010：静默切换——prompt 空串；2026-11-04-model-provider-cascade
+    // FR-01：切供应商同请求级联自动选中模型（无记忆 → 候选第一个）。
     expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
       llm_provider_id: "prov-glm",
-      model: "",
+      model: "glm-4.7",
     });
     await waitFor(() =>
       expect(mocks.messageSuccess).toHaveBeenCalledWith(
@@ -891,19 +897,18 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     agent_kinds: ["claude"],
   };
 
-  it("选中供应商 → 模型子下拉出现，候选 = 三来源去重保序 + 首项「默认」", async () => {
+  it("选中供应商 → 模型子下拉出现，候选 = 三来源去重保序（无「默认」项）；快照空显示自动解析值", async () => {
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
     renderBar({ llmProviderId: "prov-glm" });
     const select = (await screen.findByRole("combobox", {
       name: "配置-模型",
     })) as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    // 首项固定「默认（跟随供应商配置）」value=""；随后 model → default_fallback
-    // → role_mappings 按序去重（glm-4.7 重复只留一次；空串/缺键已过滤）。
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);  // D-001：主模型置顶后全部条目
-    expect(select.options[0]?.textContent).toBe("默认（跟随供应商配置）");
-    // 快照无 model → 当前值即「默认」首项
-    expect(select.value).toBe("");
+    // 2026-11-04-model-provider-cascade FR-02：具体供应商下不再有「默认」项；
+    // model → default_fallback → role_mappings 按序去重（glm-4.7 重复只留一次）。
+    expect(values).toEqual(["glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    // 快照无 model → 显示自动解析值（无记忆 → 候选第一个 glm-4.7）
+    expect(select.value).toBe("glm-4.7");
   });
 
   it("暂存模式选模型 → onStagedSwitch 上抛 model（不 inject），控件显示暂存模型", async () => {
@@ -933,14 +938,14 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     expect(
       screen.queryByRole("combobox", { name: "配置-模型" }),
     ).not.toBeInTheDocument();
-    // 暂存供应商 → 模型下拉立即出现，候选 = GLM 三模型
+    // 暂存供应商 → 模型下拉立即出现，候选 = GLM 三模型（级联自动选中 glm-4.7）
     openCtrl("配置-供应商");
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
     const select = (await screen.findByRole("combobox", {
       name: "配置-模型",
     })) as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    expect(values).toEqual(["glm-4.7", "glm-4.6", "glm-4.5-air"]);
     // 选回「不指定（本机默认）」= 真值(null) → cancel 暂存 → 模型下拉回退隐藏
     openCtrl("配置-供应商");
     fireEvent.click(
@@ -1025,9 +1030,9 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     const select = (await screen.findByRole("combobox", {
       name: "配置-模型",
     })) as HTMLSelectElement;
-    // 候选照常三来源去重保序（首项「默认」）
+    // 候选照常三来源去重保序（2026-11-04 FR-02：无「默认」项）
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);  // D-001：主模型置顶后全部条目
+    expect(values).toEqual(["glm-4.7", "glm-4.6", "glm-4.5-air"]);  // D-001：主模型置顶后全部条目
     cleanup();
     // cursor 锁定：供应商+模型整块锁定，子下拉同锁不渲染（白名单外负例承接）
     mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
@@ -1069,11 +1074,124 @@ describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
     expect(onProvisionalModelSwitch).toHaveBeenCalledWith("glm-4.6");
     expect(onProvisionalSwitch).not.toHaveBeenCalled();
     expect(select.value).toBe("glm-4.6");
+  });
 
-    // 切回「默认」→ 暂存重置回空串
-    fireEvent.change(select, { target: { value: "" } });
-    expect(onProvisionalModelSwitch).toHaveBeenLastCalledWith("");
-    expect(select.value).toBe("");
+  // ── 4.6 2026-11-04-model-provider-cascade：模型自动选中/记忆/成对暂存 ─────
+
+  describe("SessionConfigBar 模型自动选中与记忆（model-provider-cascade）", () => {
+    const P = (over: Record<string, unknown> = {}) => ({
+      id: "prov-p",
+      name: "P 平台",
+      models: [
+        { name: "m1", roles: ["sonnet"] },
+        { name: "m2", roles: [] },
+      ],
+      agent_kinds: ["claude"],
+      ...over,
+    });
+
+    it("FR-01 记忆命中：暂存选供应商自动带上次显式选过的模型（成对 patches）", async () => {
+      mocks.listProviders.mockResolvedValue([P()] as never);
+      window.localStorage.setItem("sh:last-model:prov-p", JSON.stringify("m2"));
+      const { patches } = renderBarControlled({ llmProviderId: null });
+      openCtrl("配置-供应商");
+      fireEvent.click(await screen.findByRole("button", { name: "选择 P 平台" }));
+      expect(patches[0]).toEqual({
+        field: "model",
+        value: "m2",
+        label: "m2",
+        cancel: undefined,
+      });
+      expect(patches[1]).toEqual({
+        field: "llm_provider_id",
+        value: "prov-p",
+        label: "P 平台",
+        cancel: undefined,
+      });
+    });
+
+    it("FR-01 无记忆取候选第一个；记忆越界回退第一个且不污染本地记忆", async () => {
+      mocks.listProviders.mockResolvedValue([P()] as never);
+      window.localStorage.setItem("sh:last-model:prov-p", JSON.stringify("m3-gone"));
+      const { patches } = renderBarControlled({ llmProviderId: null });
+      openCtrl("配置-供应商");
+      fireEvent.click(await screen.findByRole("button", { name: "选择 P 平台" }));
+      expect((patches[0] as { value: string }).value).toBe("m1");
+      // 自动解析不写记忆——越界值原样保留
+      expect(window.localStorage.getItem("sh:last-model:prov-p")).toBe(
+        JSON.stringify("m3-gone"),
+      );
+    });
+
+    it("FR-03 显式选模型写记忆（会话供应商在场）", async () => {
+      mocks.listProviders.mockResolvedValue([P()] as never);
+      renderBar({ llmProviderId: "prov-p" });
+      const select = (await screen.findByRole("combobox", {
+        name: "配置-模型",
+      })) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: "m2" } });
+      expect(window.localStorage.getItem("sh:last-model:prov-p")).toBe(
+        JSON.stringify("m2"),
+      );
+    });
+
+    it("FR-04 provider NULL 点模型成对补暂存引擎默认供应商（422 缺口根治）", async () => {
+      mocks.listProviders.mockResolvedValue([
+        { ...P(), id: "prov-d", name: "D 平台", is_default: true },
+      ] as never);
+      const { patches } = renderBarControlled({ llmProviderId: null });
+      // 显示层回退：引擎默认供应商在场 → 模型下拉初始可见（2026-10-28 行为）
+      const select = (await screen.findByRole("combobox", {
+        name: "配置-模型",
+      })) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: "m1" } });
+      const fields = patches.map((p) => (p as { field: string }).field).sort();
+      expect(fields).toEqual(["llm_provider_id", "model"]);
+      const providerPatch = patches.find(
+        (p) => (p as { field: string }).field === "llm_provider_id",
+      ) as { value: string; cancel?: boolean };
+      expect(providerPatch.value).toBe("prov-d");
+      expect(providerPatch.cancel).toBeUndefined();
+    });
+
+    it("FR-04 已显式暂存供应商时点模型不覆盖既有暂存，记忆写给生效供应商", async () => {
+      mocks.listProviders.mockResolvedValue([
+        { ...P(), id: "prov-d", name: "D 平台", is_default: true },
+        P(),
+      ] as never);
+      const { patches } = renderBarControlled({ llmProviderId: null });
+      // 先暂存供应商 P（级联自动选中 m1）
+      openCtrl("配置-供应商");
+      fireEvent.click(await screen.findByRole("button", { name: "选择 P 平台" }));
+      // 再显式改模型（显示层跟随暂存 P → 候选 P 的模型）
+      const select = (await screen.findByRole("combobox", {
+        name: "配置-模型",
+      })) as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: "m2" } });
+      const providerPatches = patches.filter(
+        (p) => (p as { field: string }).field === "llm_provider_id",
+      );
+      // 仅级联产生的一条 provider patch——模型点选不再补 provider
+      expect(providerPatches).toHaveLength(1);
+      expect(providerPatches[0]).toMatchObject({ value: "prov-p" });
+      const modelPatches = patches.filter(
+        (p) => (p as { field: string }).field === "model",
+      );
+      expect((modelPatches.at(-1) as { value: string }).value).toBe("m2");
+      expect(window.localStorage.getItem("sh:last-model:prov-p")).toBe(
+        JSON.stringify("m2"),
+      );
+    });
+
+    it("FR-02 快照模型空 + 记忆命中 → 显示记忆值（仅显示不暂存）", async () => {
+      mocks.listProviders.mockResolvedValue([P()] as never);
+      window.localStorage.setItem("sh:last-model:prov-p", JSON.stringify("m2"));
+      renderBar({ llmProviderId: "prov-p" });
+      const select = (await screen.findByRole("combobox", {
+        name: "配置-模型",
+      })) as HTMLSelectElement;
+      expect(select.value).toBe("m2");
+    });
   });
 });
 
@@ -1952,8 +2070,10 @@ describe("SessionConfigBar 默认供应商引擎匹配（session-config-default-
       name: "配置-模型",
     })) as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["", "glm-4.7", "glm-4.6"]);
-    expect(select.value).toBe("");
+    // 2026-11-04-model-provider-cascade FR-02：无「默认」项；快照空 → 显示自动
+    // 解析值（无记忆 → 候选第一个 glm-4.7）。
+    expect(values).toEqual(["glm-4.7", "glm-4.6"]);
+    expect(select.value).toBe("glm-4.7");
   });
 
   it("claude 会话未显式选供应商 + 引擎匹配默认存在 → 模型下拉渲染，「不指定」项保持当前高亮（显示层回退不改选择语义）", async () => {
@@ -1992,8 +2112,8 @@ describe("SessionConfigBar 默认供应商引擎匹配（session-config-default-
     const select = (await screen.findByRole("combobox", {
       name: "配置-模型",
     })) as HTMLSelectElement;
+    // 2026-11-04-model-provider-cascade FR-02：无「默认」项，候选单模型直显。
     expect(Array.from(select.options).map((o) => o.value)).toEqual([
-      "",
       "glm-4.7",
     ]);
   });

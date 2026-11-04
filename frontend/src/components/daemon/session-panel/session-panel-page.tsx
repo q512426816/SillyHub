@@ -4154,6 +4154,10 @@ export function SessionPanelPage({
             turns: prev.turns.filter((t) => t.runId !== placeholderId),
           }));
           setErrorMsg(errMessage(apiErr, "发送失败"));
+          // 2026-11-04-model-provider-cascade FR-05：横幅在时间线顶部（轮块流
+          // 滚动区外）易无感——toast 即时弹出后端错误信息（如
+          // model_requires_provider 422 中文文案）；横幅/回退/草稿保留零变化。
+          notify.error(apiErr, "发送失败");
           // FR-02：受理即清后失败 → 原文回填可重试（输入框已有新内容则不覆盖）。
           restoreRejectedSend(rawPrompt);
         }
@@ -4241,6 +4245,8 @@ export function SessionPanelPage({
       } catch (err) {
         const apiErr = err as ApiError;
         setErrorMsg(errMessage(apiErr, "发送失败"));
+        // 2026-11-04-model-provider-cascade FR-05：失败即时 toast（横幅照旧）。
+        notify.error(apiErr, "发送失败");
         // FR-02：受理即清后失败（满员 409 / 离线 / 网络错误）→ 原文回填可重试。
         restoreRejectedSend(rawPrompt);
       }
@@ -4885,6 +4891,8 @@ export function SessionPanelPage({
           turns: prev.turns.filter((t) => t.runId !== placeholderId),
         }));
         setErrorMsg(errMessage(apiErr, "重新发送失败"));
+        // 2026-11-04-model-provider-cascade FR-05：失败即时 toast（横幅照旧）。
+        notify.error(apiErr, "重新发送失败");
       }
     },
     // qc 为 useQueryClient 稳定实例，补入 deps 消除 exhaustive-deps 告警（行为不变）。
