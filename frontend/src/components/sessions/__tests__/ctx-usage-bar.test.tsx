@@ -387,13 +387,14 @@ describe("QuotaPill 刷新策略常量", () => {
 // ── QuotaPill：全供应商聚合 + 30s 轮询（quick-e4d0551f）──────────────────
 
 describe("QuotaPill", () => {
-  it("无可查用量供应商 → 整体不渲染，不发起任何额度查询", async () => {
+  it("选中不可查供应商 → 面显示「不支持」，不发起额度查询、不顶替其他家数据", async () => {
     mockListProviders.mockResolvedValue([
       provider({ id: "p-anth", name: "Anthropic", base_url: "https://api.anthropic.com" }),
     ]);
-    const { container } = renderPill(<QuotaPill providerId="p-anth" />);
-    await waitFor(() => expect(mockListProviders).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    renderPill(<QuotaPill providerId="p-anth" />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(pill).toHaveTextContent("不支持");
+    expect(pill.getAttribute("title")).toContain("Anthropic");
     expect(mockGetProviderQuota).not.toHaveBeenCalled();
     expect(mockQueryUsage).not.toHaveBeenCalled();
   });
@@ -417,10 +418,38 @@ describe("QuotaPill", () => {
     expect(await screen.findByTestId("quota-pill")).toHaveTextContent("80%");
   });
 
-  it("有可查供应商但暂时无数据（quota=null）→ 灰字提示，不渲染胶囊", async () => {
+  it("选中可查供应商无数据（quota=null）→ 面显示「无数据」，不顶替其他家数据", async () => {
+    mockListProviders.mockResolvedValue([
+      provider(),
+      provider({ id: "p-kimi", name: "Kimi", base_url: "https://api.kimi.com" }),
+    ]);
+    mockGetProviderQuota.mockResolvedValue(quotaResp(null));
+    mockQueryUsage.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          plan_name: "Kimi·5小时窗",
+          unit: "%",
+          total: 100,
+          used: 30,
+          remaining: 70,
+        },
+      ],
+    } satisfies UsageResult);
+    renderPill(<QuotaPill providerId="p-zhipu" />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(screen.getByTestId("quota-pill-no-data")).toBeInTheDocument();
+    expect(pill).toHaveTextContent("无数据");
+    expect(pill.getAttribute("title")).toContain("智谱GLM");
+    await waitFor(() => expect(mockQueryUsage).toHaveBeenCalledWith("p-kimi"));
+    // 选中智谱无数据时不得改显 Kimi 的 70%。
+    expect(pill.textContent).not.toContain("70%");
+  });
+
+  it("providerId=null 且可查供应商均无数据 → 灰字提示，不渲染胶囊（旧聚合行为）", async () => {
     mockListProviders.mockResolvedValue([provider()]);
     mockGetProviderQuota.mockResolvedValue(quotaResp(null));
-    renderPill(<QuotaPill providerId="p-zhipu" />);
+    renderPill(<QuotaPill providerId={null} />);
     expect(await screen.findByTestId("quota-empty-hint")).toHaveTextContent(
       "暂无供应商额度信息",
     );
@@ -543,6 +572,98 @@ describe("QuotaPill", () => {
     expect(screen.getByText("5小时窗 剩余")).toBeInTheDocument();
     expect(detail.textContent).toContain("每 5 分钟自动刷新");
     expect(detail.textContent).toContain("悬浮 2 秒立即刷新");
+  });
+
+  it("配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据", async () => {
+    mockListProviders.mockResolvedValue([
+      provider(),
+      provider({
+        id: "p-kimi",
+        name: "Kimi",
+        base_url: "https://api.kimi.com",
+        models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
+      }),
+    ]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: null }],
+      }),
+    );
+    mockQueryUsage.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          plan_name: "Kimi·5小时窗",
+          unit: "%",
+          total: 100,
+          used: 30,
+          remaining: 70,
+        },
+      ],
+    } satisfies UsageResult);
+    const { rerender } = renderPill(<QuotaPill providerId="p-zhipu" />);
+    expect(await screen.findByTestId("quota-pill")).toHaveTextContent("80%");
+
+    // 暂存切到 Kimi（会话尚未发送）：面立即改显 Kimi 的数据，不残留智谱 80%。
+    rerender(<QuotaPill providerId="p-kimi" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("quota-pill")).toHaveTextContent("70%"),
+    );
+    expect(screen.getByTestId("quota-pill").textContent).not.toContain("80%");
+
+    // 取消暂存（回落到会话已生效的智谱）→ 面回到智谱数据。
+    rerender(<QuotaPill providerId="p-zhipu" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%"),
+    );
+  });
+
+  it("选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶", async () => {
+    mockListProviders.mockResolvedValue([
+      provider({ id: "p-anth", name: "Anthropic", base_url: "https://api.anthropic.com" }),
+      provider(),
+      provider({
+        id: "p-kimi",
+        name: "Kimi",
+        base_url: "https://api.kimi.com",
+        models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
+      }),
+    ]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: null }],
+      }),
+    );
+    mockQueryUsage.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          plan_name: "Kimi·5小时窗",
+          unit: "%",
+          total: 100,
+          used: 30,
+          remaining: 70,
+        },
+      ],
+    } satisfies UsageResult);
+    renderPill(<QuotaPill providerId="p-anth" />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(pill).toHaveTextContent("不支持");
+
+    fireEvent.click(pill);
+    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
+    const detail = screen.getByText("模型剩余额度").parentElement!;
+    // 选中供应商置顶 + 状态说明；其余可查供应商仍可查看。
+    expect(detail.textContent).toContain("Anthropic");
+    expect(detail.textContent).toContain("该供应商暂不支持额度查询");
+    expect(detail.textContent).toContain("智谱GLM · glm-4.7");
+    expect(detail.textContent).toContain("Kimi · kimi-k2");
+    const anthIdx = detail.textContent!.indexOf("Anthropic");
+    const zhipuIdx = detail.textContent!.indexOf("智谱GLM");
+    expect(anthIdx).toBeGreaterThanOrEqual(0);
+    expect(zhipuIdx).toBeGreaterThan(anthIdx);
   });
 
   it("余额类供应商（DeepSeek）：浮层显示金额（¥/$）而非百分比", async () => {
@@ -691,13 +812,13 @@ describe("QuotaPill", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.getByTestId("quota-pill")).toHaveTextContent("70%");
 
-    // 30s 后轮询拿到 is_valid=false → 条目被清除（不留陈旧假数据），回落灰字提示。
+    // 5 分钟后轮询拿到 is_valid=false → 条目被清除（不留陈旧假数据），
+    // 选中供应商回落「无数据」状态面（2026-11-04 FR-03，不再整体灰字提示）。
     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
     await vi.advanceTimersByTimeAsync(0);
-    expect(screen.getByTestId("quota-empty-hint")).toHaveTextContent(
-      "暂无供应商额度信息",
-    );
-    expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quota-pill-no-data")).toBeInTheDocument();
+    expect(screen.getByTestId("quota-pill")).toHaveTextContent("无数据");
+    expect(screen.queryByTestId("quota-empty-hint")).not.toBeInTheDocument();
   });
 });
 

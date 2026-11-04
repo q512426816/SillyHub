@@ -414,6 +414,42 @@ export interface ProviderQuotaEntry {
   tiers: QuotaTierView[];
 }
 
+/**
+ * 胶囊面展示模型（2026-11-04-session-quota-pill-follow-provider FR-02~05）：
+ *   - entry：选中供应商有额度数据 → 面/浮层首位都用它；
+ *   - unsupported：选中供应商不在可查名单（detectUsageProvider=null）→ 明确状态；
+ *   - no-data：选中供应商可查但本轮无数据 → 明确状态；
+ *   - aggregate：未指定供应商（本机默认）→ 保留原聚合行为。
+ * 选中供应商 id 在列表中找不到（已删除 / 列表尚未含）时回落 aggregate。
+ */
+export type QuotaFace =
+  | { kind: "entry"; provider: LlmProviderRead; entry: ProviderQuotaEntry }
+  | { kind: "unsupported"; provider: LlmProviderRead }
+  | { kind: "no-data"; provider: LlmProviderRead }
+  | { kind: "aggregate"; entries: ProviderQuotaEntry[] };
+
+/** 纯函数：选中供应商 + 已取额度条目 → 面展示模型（导出供单测）。 */
+export function resolveQuotaFace(
+  providerId: string | null | undefined,
+  providers: readonly LlmProviderRead[],
+  entries: ReadonlyMap<string, ProviderQuotaEntry>,
+): QuotaFace {
+  const selected = providerId
+    ? (providers.find((p) => p.id === providerId) ?? null)
+    : null;
+  if (selected) {
+    const entry = entries.get(selected.id);
+    if (entry) return { kind: "entry", provider: selected, entry };
+    return detectUsageProvider(selected.base_url) == null
+      ? { kind: "unsupported", provider: selected }
+      : { kind: "no-data", provider: selected };
+  }
+  const list = [...entries.values()].sort((a, b) =>
+    a.providerName.localeCompare(b.providerName, "zh-CN"),
+  );
+  return { kind: "aggregate", entries: list };
+}
+
 /** 鉴权失效标记（usage 两态之确定性失败，refresh 据此清除该家条目）。 */
 class QuotaAuthInvalidError extends Error {}
 
@@ -499,8 +535,9 @@ async function fetchProviderEntry(
 
 export interface QuotaPillProps {
   /**
-   * 当前会话供应商 id（quick-e4d0551f 起仅作展示排序优先提示，不再门控渲染；
-   * null/undefined=本机默认 → 胶囊照常聚合展示全部可查供应商额度）。
+   * 当前选中的供应商 id（2026-11-04-session-quota-pill-follow-provider 起语义
+   * 恢复为「选中供应商」：有值时胶囊面/浮层首位必须是该供应商，不可查/无数据
+   * 显示明确状态；null/undefined=本机默认 → 保留原聚合展示行为）。
    */
   providerId: string | null | undefined;
   /**
@@ -596,23 +633,28 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
   }, [clearHoverTimer, refresh]);
   useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
-  // 展示排序：当前会话供应商优先，其余按名称稳定序。
-  const sortedEntries = useMemo(() => {
-    const list = [...entries.values()];
-    list.sort((a, b) => {
-      if (a.providerId === providerId) return -1;
-      if (b.providerId === providerId) return 1;
-      return a.providerName.localeCompare(b.providerName, "zh-CN");
-    });
+  // 面展示模型：选中供应商优先（FR-01~04），未指定供应商 → 聚合（FR-05）。
+  const face = useMemo(
+    () => resolveQuotaFace(providerId, providersQ.data ?? [], entries),
+    [providerId, providersQ.data, entries],
+  );
+  // 浮层「其余可查供应商」：排除选中家，按名称稳定序（选中家由 face 单独置顶）。
+  const otherEntries = useMemo(() => {
+    const list = [...entries.values()].filter(
+      (e) => face.kind === "aggregate" || e.providerId !== providerId,
+    );
+    list.sort((a, b) => a.providerName.localeCompare(b.providerName, "zh-CN"));
     return list;
-  }, [entries, providerId]);
+  }, [entries, face.kind, providerId]);
 
   // 列表加载中 / 拉取失败 → 静默不渲染（弱依赖 R-05，不闪错误态）。
   if (providersQ.isPending || providersQ.isError) return null;
-  // 没有任何可查用量供应商 → 无信息可展示。
-  if (detectable.length === 0) return null;
 
-  if (sortedEntries.length === 0) {
+  const hasSelection = face.kind !== "aggregate";
+  // 未指定供应商且一家可查供应商都没有 → 无信息可展示（旧行为）。
+  if (!hasSelection && detectable.length === 0) return null;
+
+  if (face.kind === "aggregate" && face.entries.length === 0) {
     // 有可查供应商但暂时一家都没取到数据 → 灰字提示（胶囊本体不渲染）。
     return (
       <span
@@ -624,61 +666,95 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
     );
   }
 
-  const face = sortedEntries[0]!;
-  const restCount = sortedEntries.length - 1;
-  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
-  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
-  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
-  const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
-  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
+  // 2026-10-22-session-composer-slim FR-03 / D-001：面只显示首个百分比窗口
+  // （选中供应商 / 聚合首位）；纯余额类显示余额金额；其余收进浮层与 title。
+  let headTier: QuotaTierView | null = null;
+  let faceLabel: string;
+  if (face.kind === "entry") {
+    const e = face.entry;
+    headTier = e.tiers.filter((t) => t.leftPct != null)[0] ?? e.tiers[0] ?? null;
+    faceLabel = `${e.providerName}${e.model ? ` · ${e.model}` : ""}`;
+  } else if (face.kind === "aggregate") {
+    const e = face.entries[0]!;
+    headTier = e.tiers.filter((t) => t.leftPct != null)[0] ?? e.tiers[0] ?? null;
+    faceLabel = `${e.providerName}${e.model ? ` · ${e.model}` : ""}`;
+  } else {
+    faceLabel = face.provider.name;
+  }
+
   const headPct = headTier?.leftPct ?? null;
-  const faceReset = headTier?.reset ?? null;
-  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
+  const restCount =
+    face.kind === "aggregate" ? face.entries.length - 1 : otherEntries.length;
   const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
-  const pillTitle =
-    headPct != null
-      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
-          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
-        }${restHint}（点击查看全部明细）`
-      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
+
+  let pillTitle: string;
+  if (face.kind === "unsupported" || face.kind === "no-data") {
+    const state = face.kind === "unsupported" ? "暂不支持额度查询" : "额度暂无数据";
+    pillTitle = `${faceLabel}｜${state}${
+      restCount > 0 ? `（点击查看其他 ${restCount} 家）` : "（点击查看明细）"
+    }`;
+  } else {
+    const reset = headTier?.reset ?? null;
+    pillTitle =
+      headPct != null
+        ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
+            reset ? `｜${formatQuotaResetTime(reset)} 重置` : ""
+          }${restHint}（点击查看全部明细）`
+        : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
+  }
+
+  const renderEntrySection = (e: ProviderQuotaEntry) => (
+    <div key={e.providerId}>
+      <div className="font-medium text-foreground">
+        {e.providerName}
+        {e.model ? (
+          <span className="text-muted-foreground"> · {e.model}</span>
+        ) : null}
+      </div>
+      <div className="mt-0.5 flex flex-col gap-1">
+        {e.tiers.map((t, i) => (
+          <div key={i}>
+            <div className="flex items-center justify-between">
+              <span>{t.label} 剩余</span>
+              <b
+                className={`font-semibold ${
+                  t.leftPct == null ? "" : quotaLeftToneClass(t.leftPct)
+                }`}
+              >
+                {t.leftPct != null
+                  ? `${t.leftPct}%`
+                  : formatQuotaBalance(t.balance)}
+              </b>
+            </div>
+            {t.reset ? (
+              <div className="text-[11px] text-muted-foreground">
+                {formatQuotaResetTime(t.reset)} 重置
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   const detail = (
     <div style={{ width: 264 }}>
       <div className="text-xs font-medium text-foreground">模型剩余额度</div>
       <div className="mt-1.5 flex flex-col gap-2 text-xs text-muted-foreground">
-        {sortedEntries.map((e) => (
-          <div key={e.providerId}>
-            <div className="font-medium text-foreground">
-              {e.providerName}
-              {e.model ? (
-                <span className="text-muted-foreground"> · {e.model}</span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex flex-col gap-1">
-              {e.tiers.map((t, i) => (
-                <div key={i}>
-                  <div className="flex items-center justify-between">
-                    <span>{t.label} 剩余</span>
-                    <b
-                      className={`font-semibold ${
-                        t.leftPct == null ? "" : quotaLeftToneClass(t.leftPct)
-                      }`}
-                    >
-                      {t.leftPct != null
-                        ? `${t.leftPct}%`
-                        : formatQuotaBalance(t.balance)}
-                    </b>
-                  </div>
-                  {t.reset ? (
-                    <div className="text-[11px] text-muted-foreground">
-                      {formatQuotaResetTime(t.reset)} 重置
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+        {/* 选中供应商置顶（FR-04）：有数据列明细，无数据/不可查列状态说明；
+            其余可查供应商按名称序跟随（aggregate 态即全体按名称序）。 */}
+        {face.kind === "entry" ? renderEntrySection(face.entry) : null}
+        {face.kind === "unsupported" || face.kind === "no-data" ? (
+          <div>
+            <div className="font-medium text-foreground">{face.provider.name}</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {face.kind === "unsupported"
+                ? "该供应商暂不支持额度查询"
+                : "额度数据暂不可用，稍后自动重试"}
             </div>
           </div>
-        ))}
+        ) : null}
+        {otherEntries.map(renderEntrySection)}
         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
           数据来自各供应商额度接口，每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新。
         </div>
@@ -703,11 +779,25 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
           aria-hidden
           className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
         />
-        {headPct != null ? (
-          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
-        ) : headTier?.balance ? (
-          <span>{formatQuotaBalance(headTier.balance)}</span>
-        ) : null}
+        {face.kind === "entry" || face.kind === "aggregate" ? (
+          headPct != null ? (
+            <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
+          ) : headTier?.balance ? (
+            <span>{formatQuotaBalance(headTier.balance)}</span>
+          ) : null
+        ) : (
+          // 2026-11-04 用户口径：状态胶囊面只留短文案（「不支持」/「无数据」），
+          // 供应商名与完整说明在 title / 点击浮层里。
+          <span
+            data-testid={
+              face.kind === "unsupported"
+                ? "quota-pill-unsupported"
+                : "quota-pill-no-data"
+            }
+          >
+            {face.kind === "unsupported" ? "不支持" : "无数据"}
+          </span>
+        )}
       </button>
     </Popover>
   );
