@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-daemon-spec-sync-chunking",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1376091d671f8586e342ca5fc5204e63fda09270",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "FR-02 规范性子句「rebase 重试段命中部分落地失败必须透传、禁止升级 SpecPushConflict」无测试钉住",
+      "evidence": "增量复审（56fee9d9d）：新用例 tests/spec-sync-push-chunking.test.ts:217-254「评审 P2-1」钉死突变——首轮 2 块全 conflict（server_versions 指向缓存 base.md v1→v2 可 rebase）→ 重试轮块 2（i=1>0）抛 ChunkedPushPartialError；删除 spec-sync.ts:1155 透传行则该异常落入升级分支改抛 SpecPushConflict（message 为 conflict 文案、不含 ECONNRESET 串）→ L249 rejects.toThrow(/ECONNRESET: rebase retry mid-push drop/) 变红；L253 call===4 与 L254 postSpy 零调用为辅助断言。验证方式：mock 语义推演 + 56fee9d9d 后全套 49/49 绿",
+      "location": "sillyhub-daemon/src/spec-sync.ts:1155"
+    },
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "FR-01 块响应合并子句（conflict 任一块真、new_versions 逐块累积）无判别性断言",
+      "evidence": "增量复审（56fee9d9d）：新用例 tests/spec-sync-push-chunking.test.ts:257-306「评审 P2-2」钉死全部三个子突变——删 1018（conflict 合并）→ 非首块 conflict 被吞、无 rebase，L296 call===6 变红（实际 3）且块 3 文件缓存 version 0≠5；删 1020（server_versions 合并）→ merged.server_versions={} → rebased=0 不重试 → 仍 conflict 抛 SpecPushConflict，L292 成功 await 变红；删 1019（new_versions 合并）→ 重试全绿但 merged.new_versions={} → 缓存 12 文件 version=0≠5，L305 toBe(5) 变红。合并语义经缓存回写（version=5）可观察。验证方式：mock 语义推演 + 56fee9d9d 后全套 49/49 绿",
+      "location": "sillyhub-daemon/src/spec-sync.ts:1018-1020"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "env 非法值回退（resolveChunkOps/resolveChunkBytes：NaN/0/负数/非整数/<1024 → 缺省）无直接单测",
+      "evidence": "代码逻辑正确且与 CLI 侧 sillyspec/src/spec-sync.js:69-79 逐行同义（Number(undefined)=NaN、Number('')=0 均落入回退），但 FR-04 边界清单未列 env 回退、测试也未覆盖——建议补两条纯断言",
+      "location": "sillyhub-daemon/src/spec-sync.ts:909-919"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "「extractChangeDirs(全量 ops) 失败 warn」行为移除——验证为无回归（留痕）",
+      "evidence": "extractChangeDirs 为纯函数无任何抛错路径（spec-sync.ts:1512-1536 仅 Set/字符串操作，doc 注释自证「纯函数不抛错」），被移除的 warn 本属不可达分支；且 backend/app/modules/spec_workspace/service.py:_compute_reparse_scope 的 ops 扫描环（约 3213-3250 行）在 change_dirs 空时无条件运行（「无标注（旧 daemon）：扫本次 ops 路径 changes/ 前缀兜底」），按块提取降级 [] 有服务端兜底",
+      "location": "sillyhub-daemon/src/spec-sync.ts:1512-1536"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-04T22:39:29+08:00"
+}

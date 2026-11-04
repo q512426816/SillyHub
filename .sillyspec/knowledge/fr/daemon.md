@@ -9641,3 +9641,108 @@
 - 场景：主路径 — Given 本变更触达的 sillyhub-daemon 源码与 backend control.py；When 运行 daemon vitest 全量与 backend 触达面 pytest；Then 新增用例通过、存量用例零回归、typecheck 零错误
 全文：.sillyspec/changes/archive/2026-11-02-daemon-resume-gate-fix/requirements.md#FR-03
 最近确认：f40871f8c7d74acd4e645439cce215a3c3e283fe
+
+## FR-daemon-372 daemon 增量推送按 op 数与 base64 字节粗估双约束切块（缺省 128 ops / 2MiB，env SILLYSPEC_SPEC_SYNC_CHUNK_OPS / SILLYSPEC_SPEC_SYNC_CHUNK_BYTES 可调，键名与 CLI 一致）顺序提交，块响应合并（conflict 任一块真、server_versions/new_versions 累积）后走既有 conflict re-base 与缓存回写路径，对外行为与单批等价
+变更：2026-11-04-daemon-spec-sync-chunking
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 有清单缓存、12 个新增文件、`SILLYSPEC_SPEC_SYNC_CHUNK_OPS=5`；When postSpecSync；Then postSpec
+全文：.sillyspec/changes/archive/2026-11-04-daemon-spec-sync-chunking/requirements.md#FR-01
+最近确认：56fee9d9d5e484a402f4c9b956050a93995feb6b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「12 ops → 3 块顺序提交全部落地：逐块调用 5+5+2、响应合并、不回退 tar、进度按块累计」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-daemon-spec-sync-chunking
+  status: active
+
+## FR-daemon-373 中途块失败且已有块落地时禁止回退整包 tar（部分落地后 tar 全量覆盖有覆盖他端写入风险且必超时），异常上抛由下轮同步以服务器清单为锚断点续传；首块即失败（零落地）维持既有 tar 回退行为不变（旧后端兼容）
+变更：2026-11-04-daemon-spec-sync-chunking
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 12 ops 切 3 块、第 2 块网络错误；When postSpecSync；Then 拒绝（rejects）原始错误、postSpecSyncIncrem
+全文：.sillyspec/changes/archive/2026-11-04-daemon-spec-sync-chunking/requirements.md#FR-02
+最近确认：56fee9d9d5e484a402f4c9b956050a93995feb6b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「中途块失败（第 2 块）→ 原始错误上抛、已落地块保留、不回退旧 tar」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-daemon-spec-sync-chunking
+  status: active
+
+## FR-daemon-374 onProgress 进度按块累计上报 files_processed
+变更：2026-11-04-daemon-spec-sync-chunking
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 12 ops 切 3 块且传入 onProgress；When 推送；Then observed files_processed 序列为 [5,10,12]（起
+全文：.sillyspec/changes/archive/2026-11-04-daemon-spec-sync-chunking/requirements.md#FR-03
+最近确认：56fee9d9d5e484a402f4c9b956050a93995feb6b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「12 ops → 3 块顺序提交全部落地」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-daemon-spec-sync-chunking
+  status: active
+
+## FR-daemon-375 分批纯逻辑有判别性单测（超限单 op 独占一块、恰好等于阈值、双约束同时生效、保序）；集成测试覆盖全落地/中途失败不回退 tar/首块失败仍回退 tar 三态
+变更：2026-11-04-daemon-spec-sync-chunking
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 显式 opts.maxOps/maxBytes 驱动各边界与 env 驱动集成三态；When 断言块分布/调用次数/端点零调用；Then 全部通过（无顺序依赖、
+全文：.sillyspec/changes/archive/2026-11-04-daemon-spec-sync-chunking/requirements.md#FR-04
+最近确认：56fee9d9d5e484a402f4c9b956050a93995feb6b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「chunkOpsForPush 双约束切块」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-daemon-spec-sync-chunking
+  status: active
+
+## FR-daemon-376 既有 daemon 测试套件全绿
+变更：2026-11-04-daemon-spec-sync-chunking
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 实现与测试就位；When vitest run 相关面 + npx tsc --noEmit；Then 全部退出码 0。
+全文：.sillyspec/changes/archive/2026-11-04-daemon-spec-sync-chunking/requirements.md#FR-05
+最近确认：56fee9d9d5e484a402f4c9b956050a93995feb6b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts | sillyhub-daemon/tests/spec-sync-incremental.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-daemon-spec-sync-chunking
+  status: active

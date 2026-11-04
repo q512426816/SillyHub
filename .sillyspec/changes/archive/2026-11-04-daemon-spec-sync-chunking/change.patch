@@ -1,0 +1,538 @@
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index ba3cac022..812840d8a 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -24,8 +24,7 @@ import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
+ import { homedir } from 'node:os';
+ import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
+ import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename, utimes } from 'node:fs/promises';
+-import type { HubClient } from './hub-client.js';
+-import type { FileOp } from './hub-client.js';
++import type { HubClient, FileOp, SpecIncrementalSyncResult } from './hub-client.js';
+ import { daemonStateDir } from './config.js';
+ import { writeLocalYaml } from './local-yaml-writer.js';
+ import { isAbsoluteLikePath } from './linked-repos-path.js';
+@@ -896,6 +895,133 @@ export class SpecPushConflict extends Error {
+   }
+ }
+ 
++// ── 推送分批（2026-11-04-daemon-spec-sync-chunking，对齐 CLI 侧 sillyspec 仓同日修复）──
++//
++// 生产实证（multi-agent-platform 工作区）：15 天积压 2436 ops/45.7MB 单批推送在
++// 单请求预算内上传+服务端 apply 双超（服务器 8h 37 连败），daemon 侧更糟——增量
++// 超时后 catch 回退整包 tar（更大必超时）的恶性循环。分批后每块独立提交在预算内；
++// 已落地块推进服务器清单，失败即停由下轮 diff（清单锚刷新）断点续传。env 键名与
++// CLI 侧一致（SILLYSPEC_SPEC_SYNC_CHUNK_OPS / SILLYSPEC_SPEC_SYNC_CHUNK_BYTES）。
++
++const CHUNK_OPS_DEFAULT = 128;
++const CHUNK_BYTES_DEFAULT = 2 * 1024 * 1024;
++
++function resolveChunkOps(): number {
++  const raw = Number(process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS);
++  if (Number.isInteger(raw) && raw >= 1) return raw;
++  return CHUNK_OPS_DEFAULT;
++}
++
++function resolveChunkBytes(): number {
++  const raw = Number(process.env.SILLYSPEC_SPEC_SYNC_CHUNK_BYTES);
++  if (Number.isFinite(raw) && raw >= 1024) return Math.floor(raw);
++  return CHUNK_BYTES_DEFAULT;
++}
++
++/**
++ * 按 op 数与 base64 字节粗估和双约束切块（顺序保序；单 op 超任一上限独占一块——
++ * 4.7MB 级 change.patch 单文件不切不丢弃）。行宽为粗估（content + path×2 + 包裹），
++ * 只为分块比例，无需精确。空数组返回 []。
++ */
++export function chunkOpsForPush(
++  ops: FileOp[],
++  opts: { maxOps?: number; maxBytes?: number } = {},
++): FileOp[][] {
++  const maxOps = opts.maxOps ?? resolveChunkOps();
++  const maxBytes = opts.maxBytes ?? resolveChunkBytes();
++  if (!Array.isArray(ops) || ops.length === 0) return [];
++  if (maxOps < 1 || maxBytes < 1) return [ops.slice()];
++  const chunks: FileOp[][] = [];
++  let cur: FileOp[] = [];
++  let curBytes = 0;
++  for (const op of ops) {
++    const size =
++      (op.content ? op.content.length : 0) + op.path.length * 2 + 96;
++    if (cur.length > 0 && (cur.length >= maxOps || curBytes + size > maxBytes)) {
++      chunks.push(cur);
++      cur = [];
++      curBytes = 0;
++    }
++    cur.push(op);
++    curBytes += size;
++  }
++  if (cur.length > 0) chunks.push(cur);
++  return chunks;
++}
++
++/**
++ * 分批推送中途失败（已有块落地）的标记异常：**禁止回退整包 tar**——部分落地后
++ * tar 全量覆盖有覆盖他端写入风险且大积压必超时；上抛原始错误由下轮同步以服务器
++ * 清单为锚断点续传。落地计数仅用于日志与断言。
++ */
++export class ChunkedPushPartialError extends Error {
++  readonly landedChunks: number;
++  readonly totalChunks: number;
++  readonly cause0: unknown;
++  constructor(landedChunks: number, totalChunks: number, cause: unknown) {
++    super(
++      `spec_sync: chunked push failed after ${landedChunks}/${totalChunks} chunks landed`,
++    );
++    this.name = 'ChunkedPushPartialError';
++    this.landedChunks = landedChunks;
++    this.totalChunks = totalChunks;
++    this.cause0 = cause;
++  }
++}
++
++/**
++ * 分批顺序执行增量推送：块响应合并成单批等价形状（conflict 任一块真；
++ * server_versions/new_versions 逐块累积——computeIncrementalOps 每 path 至多一 op，
++ * 块间路径互斥无覆盖歧义），对外（re-base 重试 / 缓存回写 / SpecPushConflict 判定）
++ * 行为与单批等价。change_dirs 按块提取（scoped reparse 只触发本块涉及变更目录）。
++ * onProgress 按块累计 files_processed（files_total 已由调用方起点上报）。
++ *
++ * 失败语义：第 i 块（i>0，已有块落地）失败抛 ChunkedPushPartialError（调用方禁
++ * tar 回退、断点续传）；首块失败（零落地）原样上抛（维持既有 tar 回退兼容旧行为）。
++ */
++async function postSpecSyncIncrementalChunked(
++  client: HubClient,
++  wsId: string,
++  ops: FileOp[],
++  changeWriteId: string | undefined,
++  onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
++): Promise<SpecIncrementalSyncResult> {
++  const chunks = chunkOpsForPush(ops);
++  const merged: SpecIncrementalSyncResult = {
++    ok: true,
++    new_versions: {},
++    conflict: false,
++    server_versions: {},
++  };
++  let processed = 0;
++  for (const [i, chunk] of chunks.entries()) {
++    let chunkDirs: string[] = [];
++    try {
++      chunkDirs = extractChangeDirs(chunk);
++    } catch {
++      chunkDirs = [];
++    }
++    let rep: SpecIncrementalSyncResult;
++    try {
++      rep = await client.postSpecSyncIncremental(
++        wsId,
++        chunk,
++        changeWriteId,
++        chunkDirs,
++      );
++    } catch (e) {
++      if (i > 0) throw new ChunkedPushPartialError(i, chunks.length, e);
++      throw e;
++    }
++    processed += chunk.length;
++    onProgress?.({ files_processed: processed });
++    if (rep.conflict) merged.conflict = true;
++    Object.assign(merged.new_versions, rep.new_versions ?? {});
++    Object.assign(merged.server_versions ?? {}, rep.server_versions ?? {});
++  }
++  return merged;
++}
++
+ // ── postSpecSync ──────────────────────────────────────────────────────────────
+ 
+ /**
+@@ -986,25 +1112,20 @@ async function postSpecSyncImpl(
+     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
+   }
+ 
+-  // D-005@v1（task-01）：从本次增量 ops 提取 change_dirs（`changes/<name>/` 与
+-  // `changes/archive/<name>/` 前缀分组 key，去重），随请求体透传给 backend 触发 scoped
+-  // reparse。best-effort：计算失败降级 []（backend 无标注路径检测兜底），不阻断同步主流程。
+-  let changeDirs: string[] = [];
+-  try {
+-    changeDirs = extractChangeDirs(ops);
+-  } catch (e) {
+-    console.warn('spec_sync: change_dirs_extract_failed_fallback_empty', wsId, e);
+-  }
++  // D-005@v1（task-01）：change_dirs 改由 postSpecSyncIncrementalChunked 按块提取
++  // （`changes/<name>/` 与 `changes/archive/<name>/` 前缀分组去重）随每块请求透传给
++  // backend 触发 scoped reparse；best-effort 失败降级 []（backend 无标注路径检测兜底）。
+ 
+   try {
+     // 2026-10-11-sync-conflict-tri-fix FR-02：conflict 先做恰好一次 re-base 重试——
+     // server_versions 对齐缓存 version 后重算 ops 再推；「他端先推/重复推送」型冲突
+     // （镜像哈希已与本地一致，base_version 落后）重试即全绿（backend 注册表行随
+     // 全绿自动关闭，自愈闭环）；重试仍 conflict（真分叉）才上抛人工裁决。
++    // 2026-11-04-daemon-spec-sync-chunking：推送经 postSpecSyncIncrementalChunked
++    // 分批执行，合并响应与单批等价（re-base/回写/冲突判定零改动）。
+     let pushOps = ops;
+     let pushLocalFiles = localFiles;
+-    let pushChangeDirs = changeDirs;
+-    let result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
++    let result = await postSpecSyncIncrementalChunked(client, wsId, pushOps, changeWriteId, onProgress);
+     if (result.conflict) {
+       // re-base 段整段守卫（2026-10-12-spec-sync-rebase-guard，扩自 review P2 2026-10-11
+       // 的重试传输守卫）：首推已 conflict 后，re-base/version 对齐、ops 重算 IO、
+@@ -1021,19 +1142,17 @@ async function postSpecSyncImpl(
+           const recomputed = await computeIncrementalOps(specRoot, cached);
+           pushOps = recomputed.ops;
+           pushLocalFiles = recomputed.localFiles;
+-          try {
+-            pushChangeDirs = extractChangeDirs(pushOps);
+-          } catch {
+-            pushChangeDirs = [];
+-          }
+           onProgress?.({ files_total: pushOps.length, files_processed: 0 });
+           console.warn(
+             `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
+           );
+-          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
++          result = await postSpecSyncIncrementalChunked(client, wsId, pushOps, changeWriteId, onProgress);
+         }
+       } catch (e) {
+         if (e instanceof SpecPushConflict) throw e;
++        // 分批中途失败（已有块落地）：透传外层断点续传分支——升级成 SpecPushConflict
++        // 人工裁决过强（rebase 已对齐 version，下轮 diff 天然收敛），tar 回退禁止。
++        if (e instanceof ChunkedPushPartialError) throw e;
+         console.warn(
+           `spec_sync: rebase phase failure after conflict, escalate to manual adjudication ws=${wsId}:`,
+           e,
+@@ -1052,8 +1171,18 @@ async function postSpecSyncImpl(
+     // filesTotal = 本次增量 ops 数（变化的文件数）
+     return { ok: true, reparsed: 0, filesTotal: pushOps.length };
+   } catch (e) {
+-    // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
++    // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量。
++    // 分批中途失败（已有块落地，2026-11-04-daemon-spec-sync-chunking）**禁 tar 回退**：
++    // 部分落地后整包覆盖有覆盖他端写入风险且大积压必超时；上抛原始错误，下轮同步以
++    // 服务器清单为锚断点续传（已落地路径自动出 diff）。
+     if (e instanceof SpecPushConflict) throw e;
++    if (e instanceof ChunkedPushPartialError) {
++      console.warn(
++        `spec_sync: chunked push partial failure (${e.landedChunks}/${e.totalChunks} chunks landed), resume next cycle ws=${wsId}:`,
++        e.cause0,
++      );
++      throw e.cause0 instanceof Error ? e.cause0 : e;
++    }
+     const tarBuf = await packSpecDir(specRoot);
+     const resp = await client.postSpecSync(wsId, tarBuf, changeWriteId);
+     const fullManifest = await buildFullManifest(specRoot);
+diff --git a/sillyhub-daemon/tests/spec-sync-push-chunking.test.ts b/sillyhub-daemon/tests/spec-sync-push-chunking.test.ts
+new file mode 100644
+index 000000000..a1deab65e
+--- /dev/null
++++ b/sillyhub-daemon/tests/spec-sync-push-chunking.test.ts
+@@ -0,0 +1,308 @@
++// tests/spec-sync-push-chunking.test.ts
++// 2026-11-04-daemon-spec-sync-chunking：daemon 增量推送分批化（对齐 CLI 侧 sillyspec
++// 仓同日修复）。生产实证：15 天积压 2436 ops/45.7MB 单批推送双超 + 失败回退整包 tar
++// 的恶性循环；分批后每块独立提交、已落地块保留、下轮 diff 断点续传。
++//
++// 覆盖：
++//   - chunkOpsForPush 纯逻辑边界（单 op/恰好阈值/超出阈值/字节阈值/双约束/超限单 op
++//     独占一块/保序/空数组）
++//   - 多块全落地：postSpecSyncIncremental 逐块调用（≤env 块上限）、响应合并无 conflict、
++//     不回退旧 tar、onProgress 按块累计 files_processed
++//   - 中途块失败（已有块落地）：原始错误上抛、**不回退旧 tar**（断点续传语义）
++//   - 首块失败（零落地）：维持既有 tar 回退（旧后端兼容）
++//
++// mock 模式：vi.mock('node:os') homedir 指向独立临时根，参照 spec-sync-incremental.test.ts。
++
++import { createHash } from 'node:crypto';
++import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
++import { mkdir, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { dirname, join } from 'node:path';
++
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++
++// ── hoisted mocks（homedir 必须在 spec-sync import 前替换）────────────────────
++const hoisted = vi.hoisted(() => ({
++  homedirMock: vi.fn((): string => '/nonexistent-spec-sync-chunk-home'),
++}));
++
++vi.mock('node:os', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:os')>();
++  return { ...actual, homedir: hoisted.homedirMock };
++});
++
++const { postSpecSync, resolveManifestCachePath, chunkOpsForPush } =
++  await import('../src/spec-sync.js');
++
++// ── helpers ───────────────────────────────────────────────────────────────────
++
++function makeClient(overrides: {
++  postSpecSync?: ReturnType<typeof vi.fn>;
++  postSpecSyncIncremental?: ReturnType<typeof vi.fn>;
++} = {}) {
++  return {
++    postSpecSync: overrides.postSpecSync ?? vi.fn().mockResolvedValue({ ok: true, reparsed: 0 }),
++    postSpecSyncIncremental:
++      overrides.postSpecSyncIncremental ??
++      vi.fn().mockResolvedValue({
++        ok: true,
++        new_versions: {},
++        conflict: false,
++        server_versions: null,
++      }),
++  } as never;
++}
++
++async function seedCache(
++  wsId: string,
++  files: Record<string, { hash: string; version: number; mtime: number }>,
++) {
++  const p = resolveManifestCachePath(wsId);
++  await mkdir(dirname(p), { recursive: true });
++  await writeFile(p, JSON.stringify({ version: 1, files }) + '\n', 'utf-8');
++}
++
++let scratchDir: string;
++
++function write(relPath: string, content: string): void {
++  const abs = join(scratchDir, relPath);
++  mkdirSync(dirname(abs), { recursive: true });
++  writeFileSync(abs, content);
++}
++
++// ── A. chunkOpsForPush 纯逻辑 ────────────────────────────────────────────────
++
++describe('chunkOpsForPush 双约束切块（2026-11-04-daemon-spec-sync-chunking）', () => {
++  const mkOp = (path: string, contentLen = 0): Record<string, unknown> => ({
++    op: 'add',
++    path,
++    base_version: 0,
++    content: 'x'.repeat(contentLen),
++  });
++
++  it('单 op 单块；恰好等于阈值=1 块；超出阈值 3+1 切块', () => {
++    expect(chunkOpsForPush([mkOp('a')], { maxOps: 4, maxBytes: 1024 })).toHaveLength(1);
++    expect(
++      chunkOpsForPush([mkOp('a'), mkOp('b'), mkOp('c')], { maxOps: 3, maxBytes: 1 << 20 }),
++    ).toHaveLength(1);
++    const byOps = chunkOpsForPush([mkOp('a'), mkOp('b'), mkOp('c'), mkOp('d')], {
++      maxOps: 3,
++      maxBytes: 1 << 20,
++    });
++    expect(byOps.map((c) => c.length)).toEqual([3, 1]);
++  });
++
++  it('字节阈值切块：粗估=content+path×2+96（4000B op ≈ 4098，两块 8196>8192 切）', () => {
++    const byBytes = chunkOpsForPush(
++      [mkOp('a', 4000), mkOp('b', 4000), mkOp('c', 10)],
++      { maxOps: 100, maxBytes: 8192 },
++    );
++    expect(byBytes.map((c) => c.length)).toEqual([1, 2]);
++  });
++
++  it('双约束同时生效取更严；超字节单 op 独占一块；保序；空数组零块', () => {
++    const both = chunkOpsForPush([mkOp('a', 100), mkOp('b', 100), mkOp('c', 100)], {
++      maxOps: 2,
++      maxBytes: 250,
++    });
++    expect(both).toHaveLength(3);
++    const oneHuge = chunkOpsForPush([mkOp('huge.bin', 99999)], { maxOps: 8, maxBytes: 100 });
++    expect(oneHuge).toHaveLength(1);
++    expect(oneHuge[0]).toHaveLength(1);
++    const flat = chunkOpsForPush(
++      [1, 2, 3, 4, 5].map((i) => mkOp(`f${i}`)),
++      { maxOps: 2, maxBytes: 1 << 20 },
++    )
++      .flat()
++      .map((o) => (o as Record<string, unknown>).path);
++    expect(flat).toEqual(['f1', 'f2', 'f3', 'f4', 'f5']);
++    expect(chunkOpsForPush([], { maxOps: 2, maxBytes: 100 })).toHaveLength(0);
++  });
++});
++
++// ── B/C/D. postSpecSync 集成（分批推送行为） ─────────────────────────────────
++
++describe('postSpecSync 分批推送（env SILLYSPEC_SPEC_SYNC_CHUNK_OPS 驱动）', () => {
++  let home: string;
++  let scratch: string;
++  let prevChunkOps: string | undefined;
++
++  beforeEach(() => {
++    home = mkdtempSync(join(tmpdir(), 'spec-sync-chunk-home-'));
++    scratch = mkdtempSync(join(tmpdir(), 'spec-sync-chunk-scratch-'));
++    scratchDir = scratch;
++    hoisted.homedirMock.mockReturnValue(home);
++    prevChunkOps = process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS;
++    process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS = '5';
++  });
++
++  afterEach(() => {
++    if (prevChunkOps === undefined) delete process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS;
++    else process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS = prevChunkOps;
++    hoisted.homedirMock.mockReset();
++    rmSync(home, { recursive: true, force: true });
++    rmSync(scratch, { recursive: true, force: true });
++  });
++
++  it('12 ops → 3 块顺序提交全部落地：逐块调用 5+5+2、响应合并、不回退 tar、进度按块累计', async () => {
++    const wsId = 'ws-chunk-ok';
++    // 缓存里放一个未变文件撑住「有缓存」路径（真 sha256，防 diff 误发 update op）；再写 12 个新文件 → 12 个 add ops
++    await seedCache(wsId, {
++      'docs/keep.md': { hash: createHash('sha256').update('keep').digest('hex'), version: 3, mtime: 1 },
++    });
++    write('docs/keep.md', 'keep');
++    for (let i = 0; i < 12; i++) write(`docs/new${i}.md`, `content ${i}`);
++
++    const incrSpy = vi.fn().mockImplementation(async (_ws: string, ops: Array<{ path: string }>) => ({
++      ok: true,
++      new_versions: Object.fromEntries(ops.map((o) => [o.path, 1])),
++      conflict: false,
++      server_versions: null,
++    }));
++    const postSpy = vi.fn();
++    const onProgress = vi.fn();
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    const r = await postSpecSync(client, wsId, scratch, undefined, onProgress);
++
++    expect(r).toMatchObject({ ok: true, reparsed: 0, filesTotal: 12 });
++    expect(incrSpy).toHaveBeenCalledTimes(3);
++    expect(incrSpy.mock.calls.map((c) => (c[1] as unknown[]).length)).toEqual([5, 5, 2]);
++    expect(postSpy).not.toHaveBeenCalled(); // 增量成功不回退旧 tar
++    // 进度：起点 total=12，随后按块累计 processed=5/10/12
++    const processedSeq = onProgress.mock.calls
++      .map((c) => c[0] as { files_total?: number; files_processed?: number })
++      .filter((p) => typeof p.files_processed === 'number' && p.files_processed > 0)
++      .map((p) => p.files_processed);
++    expect(processedSeq).toEqual([5, 10, 12]);
++  });
++
++  it('中途块失败（第 2 块）→ 原始错误上抛、已落地块保留、不回退旧 tar', async () => {
++    const wsId = 'ws-chunk-fail-mid';
++    await seedCache(wsId, {});
++    for (let i = 0; i < 12; i++) write(`docs/f${i}.md`, `content ${i}`);
++
++    let call = 0;
++    const incrSpy = vi.fn().mockImplementation(async () => {
++      call += 1;
++      if (call === 2) throw new Error('ECONNRESET: simulated mid-push network drop');
++      return { ok: true, new_versions: {}, conflict: false, server_versions: null };
++    });
++    const postSpy = vi.fn();
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    await expect(postSpecSync(client, wsId, scratch)).rejects.toThrow(
++      /ECONNRESET: simulated mid-push network drop/,
++    );
++    expect(incrSpy).toHaveBeenCalledTimes(2); // 失败即停：第 1 块已落地 + 第 2 块失败
++    expect(postSpy).not.toHaveBeenCalled(); // 部分落地后禁 tar 回退（断点续传）
++  });
++
++  it('首块失败（零落地）→ 维持既有 tar 回退（旧后端兼容）', async () => {
++    const wsId = 'ws-chunk-fail-first';
++    await seedCache(wsId, {});
++    for (let i = 0; i < 12; i++) write(`docs/g${i}.md`, `content ${i}`);
++
++    const incrSpy = vi.fn().mockRejectedValue(new Error('HTTP 404 endpoint missing'));
++    const postSpy = vi.fn().mockResolvedValue({ ok: true, reparsed: 0 });
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    const r = await postSpecSync(client, wsId, scratch);
++
++    expect(incrSpy).toHaveBeenCalledTimes(1); // 首块即失败
++    expect(postSpy).toHaveBeenCalledTimes(1); // 既有行为：404/网络失败 → 回退旧 tar
++    expect(r).toMatchObject({ ok: true });
++  });
++
++  it('评审 P2-1：rebase 重试段中途块失败 → 透传原始错误断点续传，不升级 SpecPushConflict、不回退 tar', async () => {
++    const wsId = 'ws-chunk-rebase-passthrough';
++    // 缓存 base.md version=1（真哈希、内容未变——不产 op）；服务器在首轮响应里报
++    // version=2 → rebase 可对齐（rebased>0 → 重算重试）。
++    await seedCache(wsId, {
++      'docs/base.md': {
++        hash: createHash('sha256').update('base').digest('hex'),
++        version: 1,
++        mtime: 1,
++      },
++    });
++    write('docs/base.md', 'base');
++    for (let i = 0; i < 7; i++) write(`docs/r${i}.md`, `content ${i}`); // 7 ops → 5+2 两块
++
++    // 首轮（2 块）：两块都回 conflict（server_versions 指向 base.md v2）→ 合并 conflict
++    // → rebase 对齐 → 重算重试；重试轮：块1 成功、块2 网络错误（i>0 → ChunkedPushPartialError）
++    let call = 0;
++    const conflictResp = {
++      ok: true,
++      new_versions: {},
++      conflict: true,
++      server_versions: { 'docs/base.md': 2 },
++    };
++    const incrSpy = vi.fn().mockImplementation(async () => {
++      call += 1;
++      if (call <= 2) return conflictResp; // 首轮两块全 conflict
++      if (call === 4) throw new Error('ECONNRESET: rebase retry mid-push drop'); // 重试轮块2
++      return { ok: true, new_versions: {}, conflict: false, server_versions: null };
++    });
++    const postSpy = vi.fn();
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    await expect(postSpecSync(client, wsId, scratch)).rejects.toThrow(
++      /ECONNRESET: rebase retry mid-push drop/,
++    );
++    // 重试轮从块1 断点即停：总调用 = 首轮 2 + 重试轮 2；tar 零调用
++    expect(call).toBe(4);
++    expect(postSpy).not.toHaveBeenCalled();
++  });
++
++  it('评审 P2-2：块响应合并语义——conflict 任一块真（非首块 conflict 亦升级 SpecPushConflict）、new_versions 逐块累积回写缓存', async () => {
++    const wsId = 'ws-chunk-merge';
++    await seedCache(wsId, {
++      'docs/base.md': {
++        hash: createHash('sha256').update('base').digest('hex'),
++        version: 1,
++        mtime: 1,
++      },
++    });
++    write('docs/base.md', 'base');
++    for (let i = 0; i < 12; i++) write(`docs/m${i}.md`, `content ${i}`); // 12 ops → 5+5+2
++
++    // 全成三态：块1/块2 成功（各回本块 new_versions v5），块3 conflict（server_versions
++    // 指向 base.md——缓存有行可 rebase，rebase 后重算重试整轮再全绿）
++    let call = 0;
++    const incrSpy = vi.fn().mockImplementation(async (_ws: string, ops: Array<{ path: string }>) => {
++      call += 1;
++      if (call === 3) {
++        return {
++          ok: true,
++          new_versions: {},
++          conflict: true,
++          server_versions: { 'docs/base.md': 2 },
++        };
++      }
++      return {
++        ok: true,
++        new_versions: Object.fromEntries(ops.map((o) => [o.path, 5])),
++        conflict: false,
++        server_versions: null,
++      };
++    });
++    const postSpy = vi.fn();
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    const r = await postSpecSync(client, wsId, scratch);
++
++    // 非首块 conflict 亦被合并捕获 → rebase（base.md v1→v2 对齐）→ 重试轮全绿收敛
++    expect(r).toMatchObject({ ok: true, reparsed: 0, filesTotal: 12 });
++    expect(call).toBe(6); // 首轮 3 + 重试轮 3
++    expect(postSpy).not.toHaveBeenCalled();
++    // 重试轮回写：全部 12 个新文件 version=5（逐块累积经缓存回写可观察）
++    const { readFileSync, existsSync } = await import('node:fs');
++    expect(existsSync(resolveManifestCachePath(wsId))).toBe(true);
++    const cache = JSON.parse(readFileSync(resolveManifestCachePath(wsId), 'utf-8')) as {
++      files: Record<string, { version: number }>;
++    };
++    for (let i = 0; i < 12; i++) {
++      expect(cache.files[`docs/m${i}.md`]?.version).toBe(5);
++    }
++  });
++});

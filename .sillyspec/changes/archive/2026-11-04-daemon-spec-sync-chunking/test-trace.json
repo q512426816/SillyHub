@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-daemon-spec-sync-chunking",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「12 ops → 3 块顺序提交全部落地：逐块调用 5+5+2、响应合并、不回退 tar、进度按块累计」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-daemon-spec-sync-chunking"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「中途块失败（第 2 块）→ 原始错误上抛、已落地块保留、不回退旧 tar」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-daemon-spec-sync-chunking"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「12 ops → 3 块顺序提交全部落地」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-daemon-spec-sync-chunking"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-push-chunking.test.ts「chunkOpsForPush 双约束切块」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-daemon-spec-sync-chunking"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-11-04-daemon-spec-sync-chunking:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-conflict-autoheal.test.ts",
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-daemon-spec-sync-chunking"
+    }
+  ]
+}
