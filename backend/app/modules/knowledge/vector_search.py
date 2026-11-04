@@ -251,7 +251,13 @@ class EmbeddingSubprocessProxy:
             )
         budget = timeout_sec if timeout_sec and timeout_sec > 0 else self.REQUEST_TIMEOUT_SEC
         deadline = time.monotonic() + budget
-        with self._lock:
+        # 锁等待计入总预算（评审 P3 清偿）：语料批/他查询持锁可达其批预算（300s），
+        # 查询路紧预算必须覆盖锁排队——deadline 固定，锁等待与响应等待共享同一预算。
+        if not self._lock.acquire(timeout=budget):
+            raise EmbeddingSubprocessError(
+                f"embed lock busy, gave up after {budget:.1f}s (concurrent batch holds proxy)"
+            )
+        try:
             attempts = 0
             while True:
                 attempts += 1
@@ -280,6 +286,8 @@ class EmbeddingSubprocessProxy:
                 except Exception as exc:  # 管道断裂/超时/JSON 损坏一律按崩溃处理
                     self._on_crash()
                     raise EmbeddingSubprocessError(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            self._lock.release()
 
     def _on_crash(self) -> None:
         self._stop()

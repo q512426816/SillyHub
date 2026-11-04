@@ -179,6 +179,24 @@ def test_proxy_embed_timeout_sec_tight_budget(silent_worker_path: Path):
         proxy.close()
 
 
+def test_proxy_embed_lock_contention_respects_timeout(fake_worker_path: Path):
+    """锁排队计入预算（评审 P3 清偿）：锁被他方持有时 embed(timeout_sec=) 按预算
+    放弃（EmbeddingSubprocessError lock busy）——紧预算必须覆盖锁等待，否则查询路
+    可被持锁语料批（批预算 300s）变相拖满。"""
+    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(fake_worker_path))
+    try:
+        assert proxy._lock.acquire(timeout=1.0), "测试预取锁（模拟并发语料批持锁）"
+        t0 = time.monotonic()
+        with pytest.raises(EmbeddingSubprocessError, match="lock busy"):
+            proxy.embed(["q"], timeout_sec=0.3)
+        elapsed = time.monotonic() - t0
+        assert elapsed < 5.0, f"按传入限时放弃锁等待（实际 {elapsed:.2f}s）"
+        assert proxy.consecutive_crashes == 0, "锁放弃不是崩溃（不计崩溃退避）"
+    finally:
+        proxy._lock.release()
+        proxy.close()
+
+
 # -- get_embedder fail-soft ------------------------------------------------------------
 
 

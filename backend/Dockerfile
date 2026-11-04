@@ -120,8 +120,10 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 # 2026-11-05-knowledge-vector-async-refresh：预烤模型缓存随镜像分发（预烤失败时为空目录，
 # 运行时回退首用下载）；FASTEMBED_CACHE_PATH 已在上文 ENV 指向同路径——embedding_worker
-# 的 TextEmbedding 默认缓存解析到本目录，容器内初始化零网络下载。
+# 的 TextEmbedding 默认缓存解析到本目录，容器内初始化零网络下载。a+rwX：runtime 以非
+# root user app 运行——预烤失败时首用下载要能写入本目录（评审 P3 清偿：回退路径可达）。
 COPY --from=builder /opt/fastembed-cache /opt/fastembed-cache
+RUN chmod -R a+rwX /opt/fastembed-cache
 COPY --from=builder /build /app
 
 # Daemon distribution files (pre-built on host, injected via the additional
