@@ -33,7 +33,7 @@ import { Gauge } from "lucide-react";
 import {
   detectUsageProvider,
   getProviderQuota,
-  listProviders,
+  listUsableProviders,
   queryUsage,
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -369,8 +369,9 @@ export function CtxUsageRing({
 //     （quick-e4d0551f 首版 30s 固定轮询；quick-7fd9ce7f 用户二次反馈改默认
 //     5 分钟，胶囊上悬浮满 2 秒再立刻刷一次——低频轮询下主动查看拿新数据，
 //     mouseLeave 即取消，单次悬浮最多触发一次，refresh 自带 in-flight 防重入）。
-//   - providerId 语义变更：从「门控渲染（null 不渲染）」弱化为「展示排序优先
-//     提示」，本机默认会话也照常聚合展示全部可查供应商额度。
+//   - providerId 语义（2026-11-04-session-quota-pill-follow-provider 恢复为
+//     「当前选中供应商」）：有值时面/浮层首位严格跟随该供应商，不可查/无数据
+//     显示明确状态；null（本机默认）才聚合展示全部可查供应商额度。
 
 /** reset（ISO8601）→ 「MM-DD HH:mm」本地时间；无法解析原样返回（不编造）。 */
 export function formatQuotaResetTime(iso: string | null | undefined): string {
@@ -440,6 +441,12 @@ export function resolveQuotaFace(
   if (selected) {
     const entry = entries.get(selected.id);
     if (entry) return { kind: "entry", provider: selected, entry };
+    // 共享供应商（2026-10-30-provider-user-share）：额度属于属主账户，
+    // usage/quota 端点只允许属主查询；接收方一律按「不支持」展示，不回落聚合
+    // （否则会拿自己的别家额度顶替，评审 P1）。
+    if (selected.is_shared === true) {
+      return { kind: "unsupported", provider: selected };
+    }
     return detectUsageProvider(selected.base_url) == null
       ? { kind: "unsupported", provider: selected }
       : { kind: "no-data", provider: selected };
@@ -448,6 +455,20 @@ export function resolveQuotaFace(
     a.providerName.localeCompare(b.providerName, "zh-CN"),
   );
   return { kind: "aggregate", entries: list };
+}
+
+/**
+ * 额度胶囊当前供应商 id 解析（FR-01）：配置条暂存值优先（空串=本机默认→null），
+ * 未暂存时用会话已生效值。导出供页面接线与单测共用。
+ */
+export function resolveQuotaPillProviderId(
+  stagedProviderId: string | null | undefined,
+  sessionProviderId: string | null | undefined,
+): string | null {
+  if (stagedProviderId !== undefined && stagedProviderId !== null) {
+    return stagedProviderId || null;
+  }
+  return sessionProviderId ?? null;
 }
 
 /** 鉴权失效标记（usage 两态之确定性失败，refresh 据此清除该家条目）。 */
@@ -548,20 +569,22 @@ export interface QuotaPillProps {
 }
 
 export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
-  // 全量供应商列表：聚合展示的基础（列表查询轻，5 分钟慢刷新兜新增供应商）。
+  // 可用供应商列表（自己的 + 共享给自己的）：与会话配置条候选同源，确保
+  // 选中共享供应商时也能解析到它（2026-11-04 评审 P1——own-only 列表会让
+  // 共享供应商落空并回落聚合显示别家额度）。列表查询轻，5 分钟慢刷新。
   const providersQ = useQuery({
-    queryKey: ["llmProviders", "quota-pill"],
-    queryFn: listProviders,
+    queryKey: ["llmProviders", "usable", "quota-pill"],
+    queryFn: listUsableProviders,
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
   });
-  // 可查用量供应商（detectUsageProvider 非空才发查询，同 UsageFooter 预判，
-  // 省得对不可查供应商白跑一趟——后端也会兜底 success=false）。data 未就绪时
-  // 兜底空数组须内联进 useMemo，避免每次渲染生成新引用破坏 memo（eslint 506）。
+  // 可查用量供应商：跳过共享行（额度端点仅属主可查，接收方查询必失败）+
+  // detectUsageProvider 非空才发查询（同 UsageFooter 预判，省白跑一趟）。
+  // data 未就绪时兜底空数组须内联进 useMemo，避免每次渲染生成新引用破坏 memo。
   const detectable = useMemo(
     () =>
       (providersQ.data ?? []).filter(
-        (p) => detectUsageProvider(p.base_url) != null,
+        (p) => p.is_shared !== true && detectUsageProvider(p.base_url) != null,
       ),
     [providersQ.data],
   );
@@ -808,8 +831,9 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
 
 export interface CtxUsageBarProps extends CtxUsageRingProps {
   /**
-   * 当前会话供应商 id（传 QuotaPill 作展示排序优先提示；null=本机默认，
-   * 胶囊照常聚合展示全部可查供应商额度——quick-e4d0551f 语义变更）。
+   * 当前选中的供应商 id（页面接线取「配置条暂存值优先，未暂存用会话已生效值」
+   * ——见 resolveQuotaPillProviderId；null=本机默认，胶囊聚合展示全部可查
+   * 供应商额度）。
    */
   providerId?: string | null;
   /** ql-20260915-013：mobile 紧凑形态——额度胶囊只显百分比（明细点击浮层）。 */

@@ -18,7 +18,7 @@
 //     上下文」按钮三分支——caps.compact=false（cursor）/未提供 onCompact 不
 //     渲染；claude/pi/codex 渲染 + 点击上抛；compactDisabled 禁用态 + tooltip。
 //
-// mock：@/lib/api/llm-providers 的 listProviders / getProviderQuota / queryUsage
+// mock：@/lib/api/llm-providers 的 listUsableProviders / getProviderQuota / queryUsage
 // （detectUsageProvider 用真实实现——base_url 子串判定是纯函数，与后端逐字一致）。
 // QuotaPill 内部经 react-query 拉供应商列表，用例以 QueryClientProvider 包裹
 // （retry:false / gcTime:0 / refetchInterval:false，对齐 session-list-panel 惯例）。
@@ -34,6 +34,7 @@ import {
   QuotaPill,
   CtxUsageBar,
   resolveCtxWindowTokens,
+  resolveQuotaPillProviderId,
   formatQuotaResetTime,
   mapUsageTiersToViews,
   QUOTA_REFRESH_INTERVAL_MS,
@@ -44,7 +45,7 @@ import {
 } from "../ctx-usage-bar";
 import {
   getProviderQuota,
-  listProviders,
+  listUsableProviders,
   queryUsage,
 } from "@/lib/api/llm-providers";
 import type {
@@ -57,12 +58,12 @@ vi.mock("@/lib/api/llm-providers", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("@/lib/api/llm-providers")
   >()),
-  listProviders: vi.fn(),
+  listUsableProviders: vi.fn(),
   getProviderQuota: vi.fn(),
   queryUsage: vi.fn(),
 }));
 
-const mockListProviders = vi.mocked(listProviders);
+const mockListProviders = vi.mocked(listUsableProviders);
 const mockGetProviderQuota = vi.mocked(getProviderQuota);
 const mockQueryUsage = vi.mocked(queryUsage);
 
@@ -384,6 +385,23 @@ describe("QuotaPill 刷新策略常量", () => {
   });
 });
 
+// ── resolveQuotaPillProviderId：配置条暂存优先（2026-11-04 FR-01）────────
+
+describe("resolveQuotaPillProviderId（配置条暂存优先）", () => {
+  it("暂存有值 → 用暂存值（即便会话供应商不同）", () => {
+    expect(resolveQuotaPillProviderId("p-new", "p-old")).toBe("p-new");
+  });
+
+  it("暂存空串（本机默认）→ null，不回落到会话旧供应商", () => {
+    expect(resolveQuotaPillProviderId("", "p-old")).toBeNull();
+  });
+
+  it("未暂存（undefined）→ 用会话已生效供应商；会话也为空 → null", () => {
+    expect(resolveQuotaPillProviderId(undefined, "p-old")).toBe("p-old");
+    expect(resolveQuotaPillProviderId(undefined, null)).toBeNull();
+  });
+});
+
 // ── QuotaPill：全供应商聚合 + 30s 轮询（quick-e4d0551f）──────────────────
 
 describe("QuotaPill", () => {
@@ -583,6 +601,11 @@ describe("QuotaPill", () => {
         base_url: "https://api.kimi.com",
         models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
       }),
+      provider({
+        id: "p-anth",
+        name: "Anthropic",
+        base_url: "https://api.anthropic.com",
+      }),
     ]);
     mockGetProviderQuota.mockResolvedValue(
       quotaResp({
@@ -612,11 +635,46 @@ describe("QuotaPill", () => {
     );
     expect(screen.getByTestId("quota-pill").textContent).not.toContain("80%");
 
+    // 暂存切到不可查供应商 → 面立即变「不支持」，不残留 Kimi/智谱数据
+    // （判别性断言：旧「排序优先」实现此步会继续显示可查家的百分比）。
+    rerender(<QuotaPill providerId="p-anth" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("quota-pill")).toHaveTextContent("不支持"),
+    );
+    expect(screen.getByTestId("quota-pill").textContent).not.toContain("%");
+
     // 取消暂存（回落到会话已生效的智谱）→ 面回到智谱数据。
     rerender(<QuotaPill providerId="p-zhipu" />);
     await waitFor(() =>
       expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%"),
     );
+  });
+
+  it("选中共享供应商 → 面显示「不支持」且不查询该家额度（额度属属主）", async () => {
+    mockListProviders.mockResolvedValue([
+      provider({
+        id: "p-shared",
+        name: "共享智谱",
+        base_url: "https://open.bigmodel.cn/api/anthropic",
+        is_shared: true,
+        shared_by_name: "王鹏",
+      }),
+      provider(),
+    ]);
+    mockGetProviderQuota.mockResolvedValue(
+      quotaResp({
+        model: "glm-4.7",
+        windows: [{ label: "5小时窗", left: 80, reset: null }],
+      }),
+    );
+    renderPill(<QuotaPill providerId="p-shared" />);
+    const pill = await screen.findByTestId("quota-pill");
+    expect(pill).toHaveTextContent("不支持");
+    expect(pill.getAttribute("title")).toContain("共享智谱");
+    // 共享行不可查；只对自有智谱发起查询，绝不拿自有额度顶替共享供应商。
+    await waitFor(() => expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu"));
+    expect(mockGetProviderQuota).not.toHaveBeenCalledWith("p-shared");
+    expect(pill.textContent).not.toContain("80%");
   });
 
   it("选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶", async () => {

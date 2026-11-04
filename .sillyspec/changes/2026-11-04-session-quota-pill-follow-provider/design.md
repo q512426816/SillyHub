@@ -10,12 +10,14 @@ created_at: 2026-11-04T05:57:52.066Z
 
 `frontend/src/components/sessions/ctx-usage-bar.tsx` 的 `QuotaPill` 目前把「选中供应商」只当排序提示，胶囊面固定取 `sortedEntries[0]`（全量可查供应商里排第一的），选中供应商不可查时它根本不在 `entries` 里，于是面就落到别家。改为两级展示源：
 
-1. **有选中供应商**：胶囊面严格用该供应商的条目（`entries.get(providerId)`）；该供应商不可查或本轮无数据时，面渲染明确状态「<名> · 暂不支持额度查询」/「<名> · 额度暂无数据」，不再取别家数据。浮层第一节固定是该供应商（有数据列明细，无数据列状态说明），其余可查供应商按名称序跟在后面。
+1. **有选中供应商**：胶囊面严格用该供应商的条目（`entries.get(providerId)`）；该供应商不可查或本轮无数据时，面渲染短状态「不支持」/「无数据」（供应商名与完整说明在 title 与浮层，D-001），不再取别家数据。浮层第一节固定是该供应商（有数据列明细，无数据列状态说明），其余可查供应商按名称序跟在后面。
 2. **无选中供应商（本机默认）**：完全保留现有聚合行为（面取排序第一家、空数据灰字提示）。
 
-页面接线（`session-panel-page.tsx`）把会话态传入的 `providerId` 改为「配置条暂存值优先」：`stagedConfig.llm_provider_id` 有定义时用其值（空串=本机默认→null），否则用 `session.llm_provider_id`。这样配置条切换供应商（暂存、未发送）时胶囊立即跟随。预会话态已传 `preProviderId`，天然跟随。
+页面接线（`session-panel-page.tsx`）把会话态传入的 `providerId` 改为「配置条暂存值优先」，经导出纯函数 `resolveQuotaPillProviderId(staged, session)` 解析：暂存有定义时用其值（空串=本机默认→null），否则用 `session.llm_provider_id`。这样配置条切换供应商（暂存、未发送）时胶囊立即跟随。预会话态已传 `preProviderId`，天然跟随。
 
-查询集合不变：仍只对 `detectUsageProvider` 非空的供应商发起 quota/usage 请求；选中供应商不可查时不额外请求，直接从 `listProviders` 结果判定并渲染状态。
+供应商目录改用 `listUsableProviders()`（自己的 + 共享给自己的），与会话配置条候选同源：选中共享供应商时也能解析到它，按「不支持」展示且不发起额度查询（额度端点仅属主可查，接收方查询必失败），绝不回落聚合显示自己的别家额度（评审 P1 修复）。
+
+查询集合：只对「非共享且 `detectUsageProvider` 非空」的供应商发起 quota/usage 请求；选中供应商不可查/共享时不额外请求，直接从 `listUsableProviders` 结果判定并渲染状态。
 
 ## 接口契约
 
@@ -23,14 +25,14 @@ created_at: 2026-11-04T05:57:52.066Z
 
 - `QuotaPillProps.providerId`：语义从「展示排序优先提示」恢复为「当前选中的供应商」——有值时胶囊面/浮层首位必须是该供应商；null/undefined 仍是本机默认聚合。
 - `CtxUsageBarProps.providerId`：新增「暂存值优先」的取值约定，组件签名不变。
-- 新增导出纯函数 `resolveQuotaFace(selectedProvider, selectedEntry, entries)`，返回面展示模型 `{ kind: "entry" | "unsupported" | "no-data" | "aggregate", ... }`，供单测与渲染共用。
+- 新增导出纯函数 `resolveQuotaFace(providerId, providers, entries)`，返回面展示模型 `{ kind: "entry" | "unsupported" | "no-data" | "aggregate", ... }`；新增 `resolveQuotaPillProviderId(staged, session)` 供页面接线与单测共用。
 - 无后端/接口改动，无新 API。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
-   供应商列表（react-query）与额度查询（refresh 中 `Promise.allSettled`）可能先后到达。选中供应商已在 `listProviders` 结果中但额度尚未返回时，渲染「额度暂无数据」；额度返回后同一 `entries` 状态更新触发重渲染为正常数据。供应商列表未就绪（`isPending`）时不渲染，避免把「未知」误判成「不可查」。
+   供应商列表（react-query）与额度查询（refresh 中 `Promise.allSettled`）可能先后到达。选中供应商已在 `listUsableProviders` 结果中但额度尚未返回时，渲染「额度暂无数据」；额度返回后同一 `entries` 状态更新触发重渲染为正常数据。供应商列表未就绪（`isPending`）时不渲染，避免把「未知」误判成「不可查」。
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 

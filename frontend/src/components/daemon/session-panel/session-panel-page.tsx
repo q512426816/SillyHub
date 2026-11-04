@@ -57,7 +57,10 @@ import {
 } from "@/components/daemon/scheduled-messages-bar";
 import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
 import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
-import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
+import {
+  CtxUsageBar,
+  resolveQuotaPillProviderId,
+} from "@/components/sessions/ctx-usage-bar";
 import {
   SessionConfigBar, useActiveSharedAgents,
   type SessionConfigStaged, type SessionConfigStagedPatch,
@@ -6563,11 +6566,10 @@ export function SessionPanelPage({
                 // 2026-11-04-session-quota-pill-follow-provider FR-01：额度胶囊跟随
                 // 配置条「暂存选择优先」——切换供应商（未发送）立即改展示；暂存空串
                 // 表示本机默认（无供应商，聚合展示），取消暂存回落到会话已生效值。
-                providerId={
-                  stagedConfig.llm_provider_id !== undefined
-                    ? stagedConfig.llm_provider_id || null
-                    : (session.llm_provider_id ?? null)
-                }
+                providerId={resolveQuotaPillProviderId(
+                  stagedConfig.llm_provider_id,
+                  session.llm_provider_id,
+                )}
                 provider={session.provider ?? null}
                 onCompact={handleSessionCompact}
                 compactLoading={compacting}
