@@ -24,8 +24,7 @@ import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
 import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename, utimes } from 'node:fs/promises';
-import type { HubClient } from './hub-client.js';
-import type { FileOp } from './hub-client.js';
+import type { HubClient, FileOp, SpecIncrementalSyncResult } from './hub-client.js';
 import { daemonStateDir } from './config.js';
 import { writeLocalYaml } from './local-yaml-writer.js';
 import { isAbsoluteLikePath } from './linked-repos-path.js';
@@ -896,6 +895,133 @@ export class SpecPushConflict extends Error {
   }
 }
 
+// ── 推送分批（2026-11-04-daemon-spec-sync-chunking，对齐 CLI 侧 sillyspec 仓同日修复）──
+//
+// 生产实证（multi-agent-platform 工作区）：15 天积压 2436 ops/45.7MB 单批推送在
+// 单请求预算内上传+服务端 apply 双超（服务器 8h 37 连败），daemon 侧更糟——增量
+// 超时后 catch 回退整包 tar（更大必超时）的恶性循环。分批后每块独立提交在预算内；
+// 已落地块推进服务器清单，失败即停由下轮 diff（清单锚刷新）断点续传。env 键名与
+// CLI 侧一致（SILLYSPEC_SPEC_SYNC_CHUNK_OPS / SILLYSPEC_SPEC_SYNC_CHUNK_BYTES）。
+
+const CHUNK_OPS_DEFAULT = 128;
+const CHUNK_BYTES_DEFAULT = 2 * 1024 * 1024;
+
+function resolveChunkOps(): number {
+  const raw = Number(process.env.SILLYSPEC_SPEC_SYNC_CHUNK_OPS);
+  if (Number.isInteger(raw) && raw >= 1) return raw;
+  return CHUNK_OPS_DEFAULT;
+}
+
+function resolveChunkBytes(): number {
+  const raw = Number(process.env.SILLYSPEC_SPEC_SYNC_CHUNK_BYTES);
+  if (Number.isFinite(raw) && raw >= 1024) return Math.floor(raw);
+  return CHUNK_BYTES_DEFAULT;
+}
+
+/**
+ * 按 op 数与 base64 字节粗估和双约束切块（顺序保序；单 op 超任一上限独占一块——
+ * 4.7MB 级 change.patch 单文件不切不丢弃）。行宽为粗估（content + path×2 + 包裹），
+ * 只为分块比例，无需精确。空数组返回 []。
+ */
+export function chunkOpsForPush(
+  ops: FileOp[],
+  opts: { maxOps?: number; maxBytes?: number } = {},
+): FileOp[][] {
+  const maxOps = opts.maxOps ?? resolveChunkOps();
+  const maxBytes = opts.maxBytes ?? resolveChunkBytes();
+  if (!Array.isArray(ops) || ops.length === 0) return [];
+  if (maxOps < 1 || maxBytes < 1) return [ops.slice()];
+  const chunks: FileOp[][] = [];
+  let cur: FileOp[] = [];
+  let curBytes = 0;
+  for (const op of ops) {
+    const size =
+      (op.content ? op.content.length : 0) + op.path.length * 2 + 96;
+    if (cur.length > 0 && (cur.length >= maxOps || curBytes + size > maxBytes)) {
+      chunks.push(cur);
+      cur = [];
+      curBytes = 0;
+    }
+    cur.push(op);
+    curBytes += size;
+  }
+  if (cur.length > 0) chunks.push(cur);
+  return chunks;
+}
+
+/**
+ * 分批推送中途失败（已有块落地）的标记异常：**禁止回退整包 tar**——部分落地后
+ * tar 全量覆盖有覆盖他端写入风险且大积压必超时；上抛原始错误由下轮同步以服务器
+ * 清单为锚断点续传。落地计数仅用于日志与断言。
+ */
+export class ChunkedPushPartialError extends Error {
+  readonly landedChunks: number;
+  readonly totalChunks: number;
+  readonly cause0: unknown;
+  constructor(landedChunks: number, totalChunks: number, cause: unknown) {
+    super(
+      `spec_sync: chunked push failed after ${landedChunks}/${totalChunks} chunks landed`,
+    );
+    this.name = 'ChunkedPushPartialError';
+    this.landedChunks = landedChunks;
+    this.totalChunks = totalChunks;
+    this.cause0 = cause;
+  }
+}
+
+/**
+ * 分批顺序执行增量推送：块响应合并成单批等价形状（conflict 任一块真；
+ * server_versions/new_versions 逐块累积——computeIncrementalOps 每 path 至多一 op，
+ * 块间路径互斥无覆盖歧义），对外（re-base 重试 / 缓存回写 / SpecPushConflict 判定）
+ * 行为与单批等价。change_dirs 按块提取（scoped reparse 只触发本块涉及变更目录）。
+ * onProgress 按块累计 files_processed（files_total 已由调用方起点上报）。
+ *
+ * 失败语义：第 i 块（i>0，已有块落地）失败抛 ChunkedPushPartialError（调用方禁
+ * tar 回退、断点续传）；首块失败（零落地）原样上抛（维持既有 tar 回退兼容旧行为）。
+ */
+async function postSpecSyncIncrementalChunked(
+  client: HubClient,
+  wsId: string,
+  ops: FileOp[],
+  changeWriteId: string | undefined,
+  onProgress?: (p: { files_total?: number; files_processed?: number }) => void,
+): Promise<SpecIncrementalSyncResult> {
+  const chunks = chunkOpsForPush(ops);
+  const merged: SpecIncrementalSyncResult = {
+    ok: true,
+    new_versions: {},
+    conflict: false,
+    server_versions: {},
+  };
+  let processed = 0;
+  for (const [i, chunk] of chunks.entries()) {
+    let chunkDirs: string[] = [];
+    try {
+      chunkDirs = extractChangeDirs(chunk);
+    } catch {
+      chunkDirs = [];
+    }
+    let rep: SpecIncrementalSyncResult;
+    try {
+      rep = await client.postSpecSyncIncremental(
+        wsId,
+        chunk,
+        changeWriteId,
+        chunkDirs,
+      );
+    } catch (e) {
+      if (i > 0) throw new ChunkedPushPartialError(i, chunks.length, e);
+      throw e;
+    }
+    processed += chunk.length;
+    onProgress?.({ files_processed: processed });
+    if (rep.conflict) merged.conflict = true;
+    Object.assign(merged.new_versions, rep.new_versions ?? {});
+    Object.assign(merged.server_versions ?? {}, rep.server_versions ?? {});
+  }
+  return merged;
+}
+
 // ── postSpecSync ──────────────────────────────────────────────────────────────
 
 /**
@@ -986,25 +1112,20 @@ async function postSpecSyncImpl(
     return { ...resp, filesTotal: Object.keys(fullManifest.files).length };
   }
 
-  // D-005@v1（task-01）：从本次增量 ops 提取 change_dirs（`changes/<name>/` 与
-  // `changes/archive/<name>/` 前缀分组 key，去重），随请求体透传给 backend 触发 scoped
-  // reparse。best-effort：计算失败降级 []（backend 无标注路径检测兜底），不阻断同步主流程。
-  let changeDirs: string[] = [];
-  try {
-    changeDirs = extractChangeDirs(ops);
-  } catch (e) {
-    console.warn('spec_sync: change_dirs_extract_failed_fallback_empty', wsId, e);
-  }
+  // D-005@v1（task-01）：change_dirs 改由 postSpecSyncIncrementalChunked 按块提取
+  // （`changes/<name>/` 与 `changes/archive/<name>/` 前缀分组去重）随每块请求透传给
+  // backend 触发 scoped reparse；best-effort 失败降级 []（backend 无标注路径检测兜底）。
 
   try {
     // 2026-10-11-sync-conflict-tri-fix FR-02：conflict 先做恰好一次 re-base 重试——
     // server_versions 对齐缓存 version 后重算 ops 再推；「他端先推/重复推送」型冲突
     // （镜像哈希已与本地一致，base_version 落后）重试即全绿（backend 注册表行随
     // 全绿自动关闭，自愈闭环）；重试仍 conflict（真分叉）才上抛人工裁决。
+    // 2026-11-04-daemon-spec-sync-chunking：推送经 postSpecSyncIncrementalChunked
+    // 分批执行，合并响应与单批等价（re-base/回写/冲突判定零改动）。
     let pushOps = ops;
     let pushLocalFiles = localFiles;
-    let pushChangeDirs = changeDirs;
-    let result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+    let result = await postSpecSyncIncrementalChunked(client, wsId, pushOps, changeWriteId, onProgress);
     if (result.conflict) {
       // re-base 段整段守卫（2026-10-12-spec-sync-rebase-guard，扩自 review P2 2026-10-11
       // 的重试传输守卫）：首推已 conflict 后，re-base/version 对齐、ops 重算 IO、
@@ -1021,19 +1142,17 @@ async function postSpecSyncImpl(
           const recomputed = await computeIncrementalOps(specRoot, cached);
           pushOps = recomputed.ops;
           pushLocalFiles = recomputed.localFiles;
-          try {
-            pushChangeDirs = extractChangeDirs(pushOps);
-          } catch {
-            pushChangeDirs = [];
-          }
           onProgress?.({ files_total: pushOps.length, files_processed: 0 });
           console.warn(
             `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
           );
-          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+          result = await postSpecSyncIncrementalChunked(client, wsId, pushOps, changeWriteId, onProgress);
         }
       } catch (e) {
         if (e instanceof SpecPushConflict) throw e;
+        // 分批中途失败（已有块落地）：透传外层断点续传分支——升级成 SpecPushConflict
+        // 人工裁决过强（rebase 已对齐 version，下轮 diff 天然收敛），tar 回退禁止。
+        if (e instanceof ChunkedPushPartialError) throw e;
         console.warn(
           `spec_sync: rebase phase failure after conflict, escalate to manual adjudication ws=${wsId}:`,
           e,
@@ -1052,8 +1171,18 @@ async function postSpecSyncImpl(
     // filesTotal = 本次增量 ops 数（变化的文件数）
     return { ok: true, reparsed: 0, filesTotal: pushOps.length };
   } catch (e) {
-    // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
+    // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量。
+    // 分批中途失败（已有块落地，2026-11-04-daemon-spec-sync-chunking）**禁 tar 回退**：
+    // 部分落地后整包覆盖有覆盖他端写入风险且大积压必超时；上抛原始错误，下轮同步以
+    // 服务器清单为锚断点续传（已落地路径自动出 diff）。
     if (e instanceof SpecPushConflict) throw e;
+    if (e instanceof ChunkedPushPartialError) {
+      console.warn(
+        `spec_sync: chunked push partial failure (${e.landedChunks}/${e.totalChunks} chunks landed), resume next cycle ws=${wsId}:`,
+        e.cause0,
+      );
+      throw e.cause0 instanceof Error ? e.cause0 : e;
+    }
     const tarBuf = await packSpecDir(specRoot);
     const resp = await client.postSpecSync(wsId, tarBuf, changeWriteId);
     const fullManifest = await buildFullManifest(specRoot);
