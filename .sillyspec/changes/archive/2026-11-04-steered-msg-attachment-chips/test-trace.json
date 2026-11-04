@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-steered-msg-attachment-chips",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「引导段三态均渲染附件 chips」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-steered-msg-attachment-chips"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-chips.test.tsx「文件 chip 可点击并触发预览」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「点击引导气泡内文件 chip 打开预览」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-steered-msg-attachment-chips"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「纯附件引导消息不渲染空正文」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-steered-msg-attachment-chips"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-steered-msg-attachment-chips",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "73bcc7c1c9075475939d8d2ce4f49d13999911a7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "测试绑定用例名与测试文件实际用例名不完全一致（FR-01 / FR-03）",
+      "evidence": "requirements.md:64 绑定「引导段三态均渲染附件 chips」，实际 it.each 用例名为「三态均渲染附件 chips（phase=%s）」（无「引导段」前缀、带 phase 参数后缀，展开为 steering/delivered/ended 三条）；requirements.md:66 绑定「纯附件引导消息不渲染空正文」，实际为「纯附件引导消息：只渲染 chips 与状态行，不渲染空正文节点」。文件与用例真实存在、断言覆盖所声称行为（FR-01 三态均断言文件 chip 文本 + 图片 alt；FR-03 断言 data-steered-body 为 null），属名称精度问题，不影响行为核验；建议以实际用例全名回填绑定。",
+      "location": ".sillyspec/changes/2026-11-04-steered-msg-attachment-chips/requirements.md:64"
+    },
+    {
+      "severity": "P3",
+      "title": "design 盲维 Q1「三路段的 text 均由同一 joinAttachmentMarkers 语义构造」表述过强",
+      "evidence": "三条路径实际来源不同：steering 段由前端 sendToServerQueue 本地 joinAttachmentMarkers 拼接（session-panel-dialog.tsx:1407-1418）；实时 delivered 只翻转 phase 不改 text（session-panel-page.tsx:466-475）；SSE 兜底 delivered 段取后端 user_input rawContent（session-panel-page.tsx:536-575，后端 inject.py:784-790 在正文前逐行写 marker）；历史回放取 promptGroup.withMarker 优先（runtime-session-helpers.tsx:686-733）。三者共用同一 `[附件:id|kind|name]` 文本协议（后端 service.py:144-146 生成、前端 attachment-refs.ts:42-43 解析）且已核对均带 marker，「语义构造」成立、「同一函数」不成立。无功能影响，建议措辞改为「同一标记协议」。",
+      "location": ".sillyspec/changes/2026-11-04-steered-msg-attachment-chips/design.md:37"
+    },
+    {
+      "severity": "P3",
+      "title": "模块文档未同步引导段附件 chips 行为（建议补一句）",
+      "evidence": ".sillyspec/docs/SillyHub/modules/daemon.md:200 仍只描述「steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）」，未提附件 chips；本次为可见行为增强，组件/测试注释已更新。该文档无被推翻的既有陈述（不存在「引导段不渲染附件」的说法），不构成契约漂移，建议归档阶段补一句。",
+      "location": ".sillyspec/docs/SillyHub/modules/daemon.md:200"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok｜三路文本均已核对带 marker：steering = session-panel-dialog.tsx:1407-1418 joinAttachmentMarkers；实时 delivered 仅翻转 phase、text 不动（session-panel-page.tsx:466-475）；SSE 兜底 delivered 段用后端 user_input rawContent（session-panel-page.tsx:536-575），后端 inject.py:784-790 在正文前逐行写 `[附件:id|kind|name]`；历史回放 withMarker 优先（runtime-session-helpers.tsx:686-733）。旧数据无 marker 时 parseAttachmentMarkers 返回 attachments=[] 且 text 原样返回（attachment-refs.ts:57），渲染等价于改动前（仅多一层内联 span 包裹），零回归。措辞精度问题已列 P3。",
+    "并发": "ok｜UserMsgSegmentView 纯展示组件，无共享可变状态；解析为纯函数；objectURL 生命周期沿用 AttachmentImageChip 内部 effect（attachment-chips.tsx:34-53）：fetch 未完成即卸载时 alive=false 在 then 分支 revoke，正常卸载在 cleanup revoke created，依赖 [att.id] 不随 tone/phase 重拉；多条引导段并发渲染各自独立实例，无竞态。",
+    "切换": "ok｜markSteeredSegmentDelivered 仅 `{...s, phase:'delivered'}`（session-panel-page.tsx:466-475）、markSteeredSegmentsEnded 仅改 phase（:505），text/attachments 不丢；phase 切换时 chips 仍在同一渲染位置，tone 变化不触发图片重拉；段卸载/会话切换时 chips 子组件自清理，无悬挂状态。",
+    "作用域": "ok｜附件 id 为全局 uuid，内容接口按 current_user + id 过滤、非本人 404 隐藏（session_attachment/router.py:107-113）；前端不缓存跨会话附件数据，chips 只消费当前段文本。",
+    "边界裁决": "评审锚点：git rev-parse HEAD = 73bcc7c1c9075475939d8d2ce4f49d13999911a7（额度胶囊变更已前移一笔），非任务书给定 815d784bb；已核对本变更提交 815d784bb 的 turn-segment-views.tsx、新增测试与变更文档在 815d784bb..HEAD 间零差异（git diff 对应路径为空），评审结论对 815d784bb 成立。design「风险与死路」逐条裁决：①delivered 实色气泡 chips 用 onPrimary、steering/ended 浅底用 brand——可接受：delivered 气泡 bg-primary 配 primary-foreground 半透明 chip（attachment-chips.tsx:60/82/142-144），steering/ended 浅底配 brand-500/15，无白底白字；②纯附件不渲染正文容器、未来「无附件无正文」空段只剩状态行——可接受：发送侧 input.trim() 后才发（session-panel-dialog.tsx:1532），后端空/全空白 prompt 无附件直接 422 SessionEmptyPrompt、有附件则 prompt 归一为空串（inject.py:154-157），该空段不可由链路产生；③放弃结构化 metadata / 新 SSE 字段——可接受：现 marker 协议已承载 id/kind/name（service.py:144-146），本变更零后端改动、无 api-types 与 daemon gen:types 义务（提交仅含前端组件 + 新测试 + 文档），改 schema 需双端类型重生成 + 历史兼容，收益不抵成本；④旧数据无 marker 零回归——可接受（见乱序）。无「不可接受」边界。"
+  },
+  "reviewedAt": "2026-11-04T14:33:07+08:00"
+}

@@ -2444,3 +2444,67 @@ created_at: 2026-10-16T01:30:35.950Z
   confirmed_at: null
   source_change: 2026-10-30-marquee-awaiting-loop-scroll
   status: active
+
+## FR-test-utils-133 引导消息三态（引导中/已投递/未投递）气泡内解析标记行并渲染附件 chips，与主用户气泡一致
+变更：2026-11-04-steered-msg-attachment-chips
+状态：active
+摘要：已投递引导消息带图片与文件附件；引导中 / 未投递两态同样渲染 chips
+全文：.sillyspec/changes/archive/2026-11-04-steered-msg-attachment-chips/requirements.md#FR-01
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「引导段三态均渲染附件 chips」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-steered-msg-attachment-chips
+  status: active
+
+## FR-test-utils-134 图片附件显示缩略图、文件附件显示文件名 chip，点击均可弹出预览
+变更：2026-11-04-steered-msg-attachment-chips
+状态：active
+摘要：点击引导气泡内的文件 chip
+全文：.sillyspec/changes/archive/2026-11-04-steered-msg-attachment-chips/requirements.md#FR-02
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/attachment-chips.test.tsx「文件 chip 可点击并触发预览」 | frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「点击引导气泡内文件 chip 打开预览」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-steered-msg-attachment-chips
+  status: active
+
+## FR-test-utils-135 正文仍剥离标记行不重复展示；纯附件（正文为空）引导消息只渲染 chips 与状态行，不出现空正文气泡
+变更：2026-11-04-steered-msg-attachment-chips
+状态：active
+摘要：纯附件引导消息；带正文的引导消息
+全文：.sillyspec/changes/archive/2026-11-04-steered-msg-attachment-chips/requirements.md#FR-03
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-steered-msg-attachment-chips:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx「纯附件引导消息不渲染空正文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-steered-msg-attachment-chips
+  status: active
+
+## FR-test-utils-136 新增/更新相关前端测试并通过，tsc/lint 无新增错误
+变更：2026-11-04-steered-msg-attachment-chips
+状态：active
+摘要：回归闸门
+全文：.sillyspec/changes/archive/2026-11-04-steered-msg-attachment-chips/requirements.md#FR-04
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980

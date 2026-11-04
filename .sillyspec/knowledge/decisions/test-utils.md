@@ -253,3 +253,12 @@
 文件：frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
 最近确认：未记录
 理由：现状（frontend/src/components/daemon/turn-live-marquee.tsx MarqueeItemView）：条目内 ticker 为单份文本，rAF 从 offset=0 一次滚到 `marqueeTickerEnd(textWidth, viewWidth) = min(0, viewWidth - textWidth)`（文本末尾贴窗口右缘）即停。用户实测终态出现"末尾后一大段空白"（测量宽度与视觉宽度不一致的残局），且一次滚到末尾即停对每秒都在变的等待状态文本（秒数/token/30s 提示语追加）语义不佳——屏上常驻的恰是信息量最低的尾部提示语。 方案：MarqueeItemView 增加可选 prop `scrollMode: "once" | "loop"`（默认 "once"）；"loop" 模式渲染双份相同文本（第二份 aria-hidden，带固定间隔 padding，如 48px），rAF 以恒速 TICKER_LOOP_SPEED=72px/s 向左平移，offset ≤ -周期宽度时加回周期宽度无缝回卷（窗口内第一份末尾与第二份开头内容相同，视觉连续、永无空白区段）。跑马灯宿主渲染 marquee-awaiting 条目处传 `scrollMode="loop"`。回卷折算逻辑提为纯函数 wrapLoopOffset 供单测。
+
+## D-test-utils-029@v1 2026-11-04-steered-msg-attachment-chips——缺陷点在渲染层：`UserMsgSegmentView`（`frontend/src/components/daemon/turn-segment-views.
+状态：implemented
+变更：2026-11-04-steered-msg-attachment-chips
+原编号：D-000@v1
+锚点：.sillyspec/changes/2026-11-04-steered-msg-attachment-chips/design.md
+文件：frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx, frontend/src/components/daemon/turn-segment-views.tsx
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+理由：缺陷点在渲染层：`UserMsgSegmentView`（`frontend/src/components/daemon/turn-segment-views.tsx`）只取 `parseAttachmentMarkers(segment.text).text`，把同一次解析得到的 `attachments` 丢弃，导致引导消息 （mid-turn steer）气泡上不出现附件卡片。上游数据链路已完整：后端 inject 在 user_input 留痕头部写 `[附件:<uuid>|<kind>|<name>]`（`backend/app/modules/daemon/session/service/inject.py` 附件标记段）， 前端引导发送在展示文本里拼同样的标记行并上送 `attachment_ids` （`session-panel-dialog.tsx` 的 submitFollowup / sendToServerQueue），历史回放装配保留 marker 版本 （`runtime-session-helpers.tsx` 的 `withMarker` 优先）。 做法：在 `UserMsgSegmentView` 内保留完整解析产物，按 phase 选择 chips 色调后渲染既有 `AttachmentChips`（图片缩略图 / 文件 chip / 点击预览全部复用，不新造组件）；正文容器只在 `text` 非空时渲染，纯附件引导消息呈现「chips + 状态行」。`AttachmentChips` 的 `tone` 只有 `onPrimary`（实色主气泡）与 `brand`（浅底）两档：delivered 用 onPrimary，steering / ended 用 brand。 三态共用同一份标记解析结果，不复制解析逻辑。
