@@ -213,4 +213,96 @@ describe('postSpecSync 分批推送（env SILLYSPEC_SPEC_SYNC_CHUNK_OPS 驱动�
     expect(postSpy).toHaveBeenCalledTimes(1); // 既有行为：404/网络失败 → 回退旧 tar
     expect(r).toMatchObject({ ok: true });
   });
+
+  it('评审 P2-1：rebase 重试段中途块失败 → 透传原始错误断点续传，不升级 SpecPushConflict、不回退 tar', async () => {
+    const wsId = 'ws-chunk-rebase-passthrough';
+    // 缓存 base.md version=1（真哈希、内容未变——不产 op）；服务器在首轮响应里报
+    // version=2 → rebase 可对齐（rebased>0 → 重算重试）。
+    await seedCache(wsId, {
+      'docs/base.md': {
+        hash: createHash('sha256').update('base').digest('hex'),
+        version: 1,
+        mtime: 1,
+      },
+    });
+    write('docs/base.md', 'base');
+    for (let i = 0; i < 7; i++) write(`docs/r${i}.md`, `content ${i}`); // 7 ops → 5+2 两块
+
+    // 首轮（2 块）：两块都回 conflict（server_versions 指向 base.md v2）→ 合并 conflict
+    // → rebase 对齐 → 重算重试；重试轮：块1 成功、块2 网络错误（i>0 → ChunkedPushPartialError）
+    let call = 0;
+    const conflictResp = {
+      ok: true,
+      new_versions: {},
+      conflict: true,
+      server_versions: { 'docs/base.md': 2 },
+    };
+    const incrSpy = vi.fn().mockImplementation(async () => {
+      call += 1;
+      if (call <= 2) return conflictResp; // 首轮两块全 conflict
+      if (call === 4) throw new Error('ECONNRESET: rebase retry mid-push drop'); // 重试轮块2
+      return { ok: true, new_versions: {}, conflict: false, server_versions: null };
+    });
+    const postSpy = vi.fn();
+    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
+
+    await expect(postSpecSync(client, wsId, scratch)).rejects.toThrow(
+      /ECONNRESET: rebase retry mid-push drop/,
+    );
+    // 重试轮从块1 断点即停：总调用 = 首轮 2 + 重试轮 2；tar 零调用
+    expect(call).toBe(4);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('评审 P2-2：块响应合并语义——conflict 任一块真（非首块 conflict 亦升级 SpecPushConflict）、new_versions 逐块累积回写缓存', async () => {
+    const wsId = 'ws-chunk-merge';
+    await seedCache(wsId, {
+      'docs/base.md': {
+        hash: createHash('sha256').update('base').digest('hex'),
+        version: 1,
+        mtime: 1,
+      },
+    });
+    write('docs/base.md', 'base');
+    for (let i = 0; i < 12; i++) write(`docs/m${i}.md`, `content ${i}`); // 12 ops → 5+5+2
+
+    // 全成三态：块1/块2 成功（各回本块 new_versions v5），块3 conflict（server_versions
+    // 指向 base.md——缓存有行可 rebase，rebase 后重算重试整轮再全绿）
+    let call = 0;
+    const incrSpy = vi.fn().mockImplementation(async (_ws: string, ops: Array<{ path: string }>) => {
+      call += 1;
+      if (call === 3) {
+        return {
+          ok: true,
+          new_versions: {},
+          conflict: true,
+          server_versions: { 'docs/base.md': 2 },
+        };
+      }
+      return {
+        ok: true,
+        new_versions: Object.fromEntries(ops.map((o) => [o.path, 5])),
+        conflict: false,
+        server_versions: null,
+      };
+    });
+    const postSpy = vi.fn();
+    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
+
+    const r = await postSpecSync(client, wsId, scratch);
+
+    // 非首块 conflict 亦被合并捕获 → rebase（base.md v1→v2 对齐）→ 重试轮全绿收敛
+    expect(r).toMatchObject({ ok: true, reparsed: 0, filesTotal: 12 });
+    expect(call).toBe(6); // 首轮 3 + 重试轮 3
+    expect(postSpy).not.toHaveBeenCalled();
+    // 重试轮回写：全部 12 个新文件 version=5（逐块累积经缓存回写可观察）
+    const { readFileSync, existsSync } = await import('node:fs');
+    expect(existsSync(resolveManifestCachePath(wsId))).toBe(true);
+    const cache = JSON.parse(readFileSync(resolveManifestCachePath(wsId), 'utf-8')) as {
+      files: Record<string, { version: number }>;
+    };
+    for (let i = 0; i < 12; i++) {
+      expect(cache.files[`docs/m${i}.md`]?.version).toBe(5);
+    }
+  });
 });
