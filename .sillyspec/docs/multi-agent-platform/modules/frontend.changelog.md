@@ -257,3 +257,5 @@
 | 2026-11-02 | 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径 |
 | 2026-11-03 | 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正 |
 | 2026-11-03 | 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh |
+| 2026-11-04 | 2026-11-04-steered-msg-attachment-chips | 会话中转引导（steer）带附件时，引导气泡只显示正文、丢失附件卡片——用户无法在聊天里看到自己刚附… |
+| 2026-11-04 | 2026-11-04-session-quota-pill-follow-provider | 会话页底部「模型剩余额度」胶囊应按当前选中的供应商展示：现在胶囊面取聚合排序第一家的数据，切换供应商… |

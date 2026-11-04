@@ -24,7 +24,7 @@ created_at: 2026-11-04T05:57:52.066Z
 
 ### FR-02: 选中供应商不支持额度查询时，胶囊明确显示该供应商名与「暂不支持额度查询」，不渲染其他家额度数据
 
-- 必须：当选中供应商存在但不在后端可查名单（`detectUsageProvider` 返回 null）时，胶囊面显示简短状态「不支持」（供应商名与完整说明「暂不支持额度查询」在悬停 title 与点击浮层）；禁止以其他可查供应商的额度数据顶替胶囊面。
+- 必须：当选中供应商存在但不在后端可查名单（`detectUsageProvider` 返回 null），或该供应商是共享给当前用户的（额度端点仅属主可查）时，胶囊面显示简短状态「不支持」（供应商名与完整说明「暂不支持额度查询」在悬停 title 与点击浮层）；禁止以其他可查供应商的额度数据顶替胶囊面。
 
 #### 场景：选中 OpenCode Go
 
@@ -74,8 +74,8 @@ created_at: 2026-11-04T05:57:52.066Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据」
-FR-02: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 面显示「不支持」，不发起额度查询、不顶替其他家数据」
+FR-01: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据」；同文件「resolveQuotaPillProviderId（配置条暂存优先）」3 用例
+FR-02: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 面显示「不支持」，不发起额度查询、不顶替其他家数据」；同文件「选中共享供应商 → 面显示「不支持」且不查询该家额度（额度属属主）」
 FR-03: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中可查供应商无数据（quota=null）→ 面显示「无数据」，不顶替其他家数据」
 FR-04: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶」
 FR-05: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「providerId=null（本机默认）→ 照常聚合展示全部可查供应商额度」

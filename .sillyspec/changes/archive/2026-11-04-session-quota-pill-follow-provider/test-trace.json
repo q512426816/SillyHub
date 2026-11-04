@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-session-quota-pill-follow-provider",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 面显示「不支持」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中可查供应商无数据（quota=null）→ 面显示「无数据」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「providerId=null（本机默认）→ 照常聚合展示全部可查供应商额度」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「QuotaPill 全套用例」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-04-session-quota-pill-follow-provider"
+    }
+  ]
+}

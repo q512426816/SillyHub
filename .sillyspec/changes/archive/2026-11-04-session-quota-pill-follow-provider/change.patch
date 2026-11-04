@@ -1,0 +1,693 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-sessions.md b/.sillyspec/docs/frontend/modules/components-sessions.md
+index 1cb213d83..85adffe06 100644
+--- a/.sillyspec/docs/frontend/modules/components-sessions.md
++++ b/.sillyspec/docs/frontend/modules/components-sessions.md
+@@ -52,7 +52,8 @@ updated_at: 2026-09-16 09:45:00
+   - 导出 `buildDefaultSwitchPrompt(p)`（默认切换轮提示文案）、`SWITCH_NO_PROVIDER_VALUE`、类型 `SessionConfigCtrlKind`（machine/agent/provider/profile）/ `SessionConfigSwitchField`（agent_profile_id/llm_provider_id）。
+ - `ctx-usage-bar.tsx`（FR-08 / D-009 / D-014，输入框上方一行组件）：
+   - `CtxUsageRing`：环形上下文用量（props 含 usedTokens——父层 SSE turn usage + attach 历史 logs 累计后传入，本组件不累计）。
+-  - `QuotaPill({ providerId, mobile? })`：额度紧凑图标（2026-10-22-session-composer-slim FR-03 / D-001）——面上只显示「Gauge 图标 + 当前会话供应商首窗口百分比」（纯余额类显示金额），低量按 ≤50% 黄 / ≤20% 红着色；模型名、各窗口、重置时间、「等 N 家」收进点击 Popover 明细与 title。自调 `getProviderQuota`，5 分钟轮询 / 悬浮 2 秒刷新 / keep-last-good 语义不变（`formatQuotaResetTime` 导出）。
++  - `QuotaPill({ providerId, mobile? })`：额度紧凑图标（2026-10-22-session-composer-slim FR-03 / D-001）——面上只显示「Gauge 图标 + 当前选中供应商首窗口百分比」（纯余额类显示金额），低量按 ≤50% 黄 / ≤20% 红着色；模型名、各窗口、重置时间、「等 N 家」收进点击 Popover 明细与 title。自调 `getProviderQuota`，5 分钟轮询 / 悬浮 2 秒刷新 / keep-last-good 语义不变（`formatQuotaResetTime` 导出）。
++  - 选中供应商优先（2026-11-04-session-quota-pill-follow-provider）：`providerId` 有值时面/浮层首位严格跟随该供应商，由 `resolveQuotaFace` 产出四态——有数据（entry）/ 不可查（unsupported，面显示「不支持」）/ 可查暂无数据（no-data，面显示「无数据」）/ 未指定（aggregate，保留全量聚合）；浮层选中供应商置顶，其余可查供应商按名称序跟随。会话页接线取「配置条暂存值优先，未暂存用会话已生效值」，切换供应商（未发送）即时跟随。
+   - `CtxUsageBar`：Ring+Pill 组合条。
+   - 分母三级降级链 `resolveCtxWindowTokens(roleMapping, fallbackModel)`（D-014）：
+     - 供应商 role mapping 勾选 1M（one_m=true，injector 模型名后缀 [1m]）→ 1_000_000。
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 43d683a49..4b5e42145 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -57,7 +57,10 @@ import {
+ } from "@/components/daemon/scheduled-messages-bar";
+ import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
+ import { QUEUE_MAX_PENDING, useMessageQueue } from "@/hooks/use-message-queue";
+-import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
++import {
++  CtxUsageBar,
++  resolveQuotaPillProviderId,
++} from "@/components/sessions/ctx-usage-bar";
+ import {
+   SessionConfigBar, useActiveSharedAgents,
+   type SessionConfigStaged, type SessionConfigStagedPatch,
+@@ -6560,7 +6563,13 @@ export function SessionPanelPage({
+                 fallbackModel={ctxFallbackModel}
+                 windowOverride={session?.ctx_window_tokens ?? null}
+                 onWindowOverrideChange={handleCtxWindowOverrideChange}
+-                providerId={session.llm_provider_id ?? null}
++                // 2026-11-04-session-quota-pill-follow-provider FR-01：额度胶囊跟随
++                // 配置条「暂存选择优先」——切换供应商（未发送）立即改展示；暂存空串
++                // 表示本机默认（无供应商，聚合展示），取消暂存回落到会话已生效值。
++                providerId={resolveQuotaPillProviderId(
++                  stagedConfig.llm_provider_id,
++                  session.llm_provider_id,
++                )}
+                 provider={session.provider ?? null}
+                 onCompact={handleSessionCompact}
+                 compactLoading={compacting}
+diff --git a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+index cf458eabd..9e519e9e1 100644
+--- a/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
++++ b/frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx
+@@ -18,7 +18,7 @@
+ //     上下文」按钮三分支——caps.compact=false（cursor）/未提供 onCompact 不
+ //     渲染；claude/pi/codex 渲染 + 点击上抛；compactDisabled 禁用态 + tooltip。
+ //
+-// mock：@/lib/api/llm-providers 的 listProviders / getProviderQuota / queryUsage
++// mock：@/lib/api/llm-providers 的 listUsableProviders / getProviderQuota / queryUsage
+ // （detectUsageProvider 用真实实现——base_url 子串判定是纯函数，与后端逐字一致）。
+ // QuotaPill 内部经 react-query 拉供应商列表，用例以 QueryClientProvider 包裹
+ // （retry:false / gcTime:0 / refetchInterval:false，对齐 session-list-panel 惯例）。
+@@ -34,6 +34,7 @@ import {
+   QuotaPill,
+   CtxUsageBar,
+   resolveCtxWindowTokens,
++  resolveQuotaPillProviderId,
+   formatQuotaResetTime,
+   mapUsageTiersToViews,
+   QUOTA_REFRESH_INTERVAL_MS,
+@@ -44,7 +45,7 @@ import {
+ } from "../ctx-usage-bar";
+ import {
+   getProviderQuota,
+-  listProviders,
++  listUsableProviders,
+   queryUsage,
+ } from "@/lib/api/llm-providers";
+ import type {
+@@ -57,12 +58,12 @@ vi.mock("@/lib/api/llm-providers", async (importOriginal) => ({
+   ...(await importOriginal<
+     typeof import("@/lib/api/llm-providers")
+   >()),
+-  listProviders: vi.fn(),
++  listUsableProviders: vi.fn(),
+   getProviderQuota: vi.fn(),
+   queryUsage: vi.fn(),
+ }));
+ 
+-const mockListProviders = vi.mocked(listProviders);
++const mockListProviders = vi.mocked(listUsableProviders);
+ const mockGetProviderQuota = vi.mocked(getProviderQuota);
+ const mockQueryUsage = vi.mocked(queryUsage);
+ 
+@@ -384,16 +385,34 @@ describe("QuotaPill 刷新策略常量", () => {
+   });
+ });
+ 
++// ── resolveQuotaPillProviderId：配置条暂存优先（2026-11-04 FR-01）────────
++
++describe("resolveQuotaPillProviderId（配置条暂存优先）", () => {
++  it("暂存有值 → 用暂存值（即便会话供应商不同）", () => {
++    expect(resolveQuotaPillProviderId("p-new", "p-old")).toBe("p-new");
++  });
++
++  it("暂存空串（本机默认）→ null，不回落到会话旧供应商", () => {
++    expect(resolveQuotaPillProviderId("", "p-old")).toBeNull();
++  });
++
++  it("未暂存（undefined）→ 用会话已生效供应商；会话也为空 → null", () => {
++    expect(resolveQuotaPillProviderId(undefined, "p-old")).toBe("p-old");
++    expect(resolveQuotaPillProviderId(undefined, null)).toBeNull();
++  });
++});
++
+ // ── QuotaPill：全供应商聚合 + 30s 轮询（quick-e4d0551f）──────────────────
+ 
+ describe("QuotaPill", () => {
+-  it("无可查用量供应商 → 整体不渲染，不发起任何额度查询", async () => {
++  it("选中不可查供应商 → 面显示「不支持」，不发起额度查询、不顶替其他家数据", async () => {
+     mockListProviders.mockResolvedValue([
+       provider({ id: "p-anth", name: "Anthropic", base_url: "https://api.anthropic.com" }),
+     ]);
+-    const { container } = renderPill(<QuotaPill providerId="p-anth" />);
+-    await waitFor(() => expect(mockListProviders).toHaveBeenCalled());
+-    expect(container).toBeEmptyDOMElement();
++    renderPill(<QuotaPill providerId="p-anth" />);
++    const pill = await screen.findByTestId("quota-pill");
++    expect(pill).toHaveTextContent("不支持");
++    expect(pill.getAttribute("title")).toContain("Anthropic");
+     expect(mockGetProviderQuota).not.toHaveBeenCalled();
+     expect(mockQueryUsage).not.toHaveBeenCalled();
+   });
+@@ -417,10 +436,38 @@ describe("QuotaPill", () => {
+     expect(await screen.findByTestId("quota-pill")).toHaveTextContent("80%");
+   });
+ 
+-  it("有可查供应商但暂时无数据（quota=null）→ 灰字提示，不渲染胶囊", async () => {
+-    mockListProviders.mockResolvedValue([provider()]);
++  it("选中可查供应商无数据（quota=null）→ 面显示「无数据」，不顶替其他家数据", async () => {
++    mockListProviders.mockResolvedValue([
++      provider(),
++      provider({ id: "p-kimi", name: "Kimi", base_url: "https://api.kimi.com" }),
++    ]);
+     mockGetProviderQuota.mockResolvedValue(quotaResp(null));
++    mockQueryUsage.mockResolvedValue({
++      success: true,
++      data: [
++        {
++          plan_name: "Kimi·5小时窗",
++          unit: "%",
++          total: 100,
++          used: 30,
++          remaining: 70,
++        },
++      ],
++    } satisfies UsageResult);
+     renderPill(<QuotaPill providerId="p-zhipu" />);
++    const pill = await screen.findByTestId("quota-pill");
++    expect(screen.getByTestId("quota-pill-no-data")).toBeInTheDocument();
++    expect(pill).toHaveTextContent("无数据");
++    expect(pill.getAttribute("title")).toContain("智谱GLM");
++    await waitFor(() => expect(mockQueryUsage).toHaveBeenCalledWith("p-kimi"));
++    // 选中智谱无数据时不得改显 Kimi 的 70%。
++    expect(pill.textContent).not.toContain("70%");
++  });
++
++  it("providerId=null 且可查供应商均无数据 → 灰字提示，不渲染胶囊（旧聚合行为）", async () => {
++    mockListProviders.mockResolvedValue([provider()]);
++    mockGetProviderQuota.mockResolvedValue(quotaResp(null));
++    renderPill(<QuotaPill providerId={null} />);
+     expect(await screen.findByTestId("quota-empty-hint")).toHaveTextContent(
+       "暂无供应商额度信息",
+     );
+@@ -545,6 +592,138 @@ describe("QuotaPill", () => {
+     expect(detail.textContent).toContain("悬浮 2 秒立即刷新");
+   });
+ 
++  it("配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据", async () => {
++    mockListProviders.mockResolvedValue([
++      provider(),
++      provider({
++        id: "p-kimi",
++        name: "Kimi",
++        base_url: "https://api.kimi.com",
++        models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
++      }),
++      provider({
++        id: "p-anth",
++        name: "Anthropic",
++        base_url: "https://api.anthropic.com",
++      }),
++    ]);
++    mockGetProviderQuota.mockResolvedValue(
++      quotaResp({
++        model: "glm-4.7",
++        windows: [{ label: "5小时窗", left: 80, reset: null }],
++      }),
++    );
++    mockQueryUsage.mockResolvedValue({
++      success: true,
++      data: [
++        {
++          plan_name: "Kimi·5小时窗",
++          unit: "%",
++          total: 100,
++          used: 30,
++          remaining: 70,
++        },
++      ],
++    } satisfies UsageResult);
++    const { rerender } = renderPill(<QuotaPill providerId="p-zhipu" />);
++    expect(await screen.findByTestId("quota-pill")).toHaveTextContent("80%");
++
++    // 暂存切到 Kimi（会话尚未发送）：面立即改显 Kimi 的数据，不残留智谱 80%。
++    rerender(<QuotaPill providerId="p-kimi" />);
++    await waitFor(() =>
++      expect(screen.getByTestId("quota-pill")).toHaveTextContent("70%"),
++    );
++    expect(screen.getByTestId("quota-pill").textContent).not.toContain("80%");
++
++    // 暂存切到不可查供应商 → 面立即变「不支持」，不残留 Kimi/智谱数据
++    // （判别性断言：旧「排序优先」实现此步会继续显示可查家的百分比）。
++    rerender(<QuotaPill providerId="p-anth" />);
++    await waitFor(() =>
++      expect(screen.getByTestId("quota-pill")).toHaveTextContent("不支持"),
++    );
++    expect(screen.getByTestId("quota-pill").textContent).not.toContain("%");
++
++    // 取消暂存（回落到会话已生效的智谱）→ 面回到智谱数据。
++    rerender(<QuotaPill providerId="p-zhipu" />);
++    await waitFor(() =>
++      expect(screen.getByTestId("quota-pill")).toHaveTextContent("80%"),
++    );
++  });
++
++  it("选中共享供应商 → 面显示「不支持」且不查询该家额度（额度属属主）", async () => {
++    mockListProviders.mockResolvedValue([
++      provider({
++        id: "p-shared",
++        name: "共享智谱",
++        base_url: "https://open.bigmodel.cn/api/anthropic",
++        is_shared: true,
++        shared_by_name: "王鹏",
++      }),
++      provider(),
++    ]);
++    mockGetProviderQuota.mockResolvedValue(
++      quotaResp({
++        model: "glm-4.7",
++        windows: [{ label: "5小时窗", left: 80, reset: null }],
++      }),
++    );
++    renderPill(<QuotaPill providerId="p-shared" />);
++    const pill = await screen.findByTestId("quota-pill");
++    expect(pill).toHaveTextContent("不支持");
++    expect(pill.getAttribute("title")).toContain("共享智谱");
++    // 共享行不可查；只对自有智谱发起查询，绝不拿自有额度顶替共享供应商。
++    await waitFor(() => expect(mockGetProviderQuota).toHaveBeenCalledWith("p-zhipu"));
++    expect(mockGetProviderQuota).not.toHaveBeenCalledWith("p-shared");
++    expect(pill.textContent).not.toContain("80%");
++  });
++
++  it("选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶", async () => {
++    mockListProviders.mockResolvedValue([
++      provider({ id: "p-anth", name: "Anthropic", base_url: "https://api.anthropic.com" }),
++      provider(),
++      provider({
++        id: "p-kimi",
++        name: "Kimi",
++        base_url: "https://api.kimi.com",
++        models: [{ name: "kimi-k2", multimodal: "auto", roles: ["sonnet"], one_m: false }],
++      }),
++    ]);
++    mockGetProviderQuota.mockResolvedValue(
++      quotaResp({
++        model: "glm-4.7",
++        windows: [{ label: "5小时窗", left: 80, reset: null }],
++      }),
++    );
++    mockQueryUsage.mockResolvedValue({
++      success: true,
++      data: [
++        {
++          plan_name: "Kimi·5小时窗",
++          unit: "%",
++          total: 100,
++          used: 30,
++          remaining: 70,
++        },
++      ],
++    } satisfies UsageResult);
++    renderPill(<QuotaPill providerId="p-anth" />);
++    const pill = await screen.findByTestId("quota-pill");
++    expect(pill).toHaveTextContent("不支持");
++
++    fireEvent.click(pill);
++    expect(await screen.findByText("模型剩余额度")).toBeInTheDocument();
++    const detail = screen.getByText("模型剩余额度").parentElement!;
++    // 选中供应商置顶 + 状态说明；其余可查供应商仍可查看。
++    expect(detail.textContent).toContain("Anthropic");
++    expect(detail.textContent).toContain("该供应商暂不支持额度查询");
++    expect(detail.textContent).toContain("智谱GLM · glm-4.7");
++    expect(detail.textContent).toContain("Kimi · kimi-k2");
++    const anthIdx = detail.textContent!.indexOf("Anthropic");
++    const zhipuIdx = detail.textContent!.indexOf("智谱GLM");
++    expect(anthIdx).toBeGreaterThanOrEqual(0);
++    expect(zhipuIdx).toBeGreaterThan(anthIdx);
++  });
++
+   it("余额类供应商（DeepSeek）：浮层显示金额（¥/$）而非百分比", async () => {
+     mockListProviders.mockResolvedValue([
+       provider({ id: "p-ds", name: "DeepSeek", base_url: "https://api.deepseek.com" }),
+@@ -691,13 +870,13 @@ describe("QuotaPill", () => {
+     await vi.advanceTimersByTimeAsync(0);
+     expect(screen.getByTestId("quota-pill")).toHaveTextContent("70%");
+ 
+-    // 30s 后轮询拿到 is_valid=false → 条目被清除（不留陈旧假数据），回落灰字提示。
++    // 5 分钟后轮询拿到 is_valid=false → 条目被清除（不留陈旧假数据），
++    // 选中供应商回落「无数据」状态面（2026-11-04 FR-03，不再整体灰字提示）。
+     await vi.advanceTimersByTimeAsync(QUOTA_REFRESH_INTERVAL_MS);
+     await vi.advanceTimersByTimeAsync(0);
+-    expect(screen.getByTestId("quota-empty-hint")).toHaveTextContent(
+-      "暂无供应商额度信息",
+-    );
+-    expect(screen.queryByTestId("quota-pill")).not.toBeInTheDocument();
++    expect(screen.getByTestId("quota-pill-no-data")).toBeInTheDocument();
++    expect(screen.getByTestId("quota-pill")).toHaveTextContent("无数据");
++    expect(screen.queryByTestId("quota-empty-hint")).not.toBeInTheDocument();
+   });
+ });
+ 
+diff --git a/frontend/src/components/sessions/ctx-usage-bar.tsx b/frontend/src/components/sessions/ctx-usage-bar.tsx
+index e7802602b..2fccc7679 100644
+--- a/frontend/src/components/sessions/ctx-usage-bar.tsx
++++ b/frontend/src/components/sessions/ctx-usage-bar.tsx
+@@ -33,7 +33,7 @@ import { Gauge } from "lucide-react";
+ import {
+   detectUsageProvider,
+   getProviderQuota,
+-  listProviders,
++  listUsableProviders,
+   queryUsage,
+   type LlmProviderRead,
+   type LlmProviderRoleMapping,
+@@ -369,8 +369,9 @@ export function CtxUsageRing({
+ //     （quick-e4d0551f 首版 30s 固定轮询；quick-7fd9ce7f 用户二次反馈改默认
+ //     5 分钟，胶囊上悬浮满 2 秒再立刻刷一次——低频轮询下主动查看拿新数据，
+ //     mouseLeave 即取消，单次悬浮最多触发一次，refresh 自带 in-flight 防重入）。
+-//   - providerId 语义变更：从「门控渲染（null 不渲染）」弱化为「展示排序优先
+-//     提示」，本机默认会话也照常聚合展示全部可查供应商额度。
++//   - providerId 语义（2026-11-04-session-quota-pill-follow-provider 恢复为
++//     「当前选中供应商」）：有值时面/浮层首位严格跟随该供应商，不可查/无数据
++//     显示明确状态；null（本机默认）才聚合展示全部可查供应商额度。
+ 
+ /** reset（ISO8601）→ 「MM-DD HH:mm」本地时间；无法解析原样返回（不编造）。 */
+ export function formatQuotaResetTime(iso: string | null | undefined): string {
+@@ -414,6 +415,62 @@ export interface ProviderQuotaEntry {
+   tiers: QuotaTierView[];
+ }
+ 
++/**
++ * 胶囊面展示模型（2026-11-04-session-quota-pill-follow-provider FR-02~05）：
++ *   - entry：选中供应商有额度数据 → 面/浮层首位都用它；
++ *   - unsupported：选中供应商不在可查名单（detectUsageProvider=null）→ 明确状态；
++ *   - no-data：选中供应商可查但本轮无数据 → 明确状态；
++ *   - aggregate：未指定供应商（本机默认）→ 保留原聚合行为。
++ * 选中供应商 id 在列表中找不到（已删除 / 列表尚未含）时回落 aggregate。
++ */
++export type QuotaFace =
++  | { kind: "entry"; provider: LlmProviderRead; entry: ProviderQuotaEntry }
++  | { kind: "unsupported"; provider: LlmProviderRead }
++  | { kind: "no-data"; provider: LlmProviderRead }
++  | { kind: "aggregate"; entries: ProviderQuotaEntry[] };
++
++/** 纯函数：选中供应商 + 已取额度条目 → 面展示模型（导出供单测）。 */
++export function resolveQuotaFace(
++  providerId: string | null | undefined,
++  providers: readonly LlmProviderRead[],
++  entries: ReadonlyMap<string, ProviderQuotaEntry>,
++): QuotaFace {
++  const selected = providerId
++    ? (providers.find((p) => p.id === providerId) ?? null)
++    : null;
++  if (selected) {
++    const entry = entries.get(selected.id);
++    if (entry) return { kind: "entry", provider: selected, entry };
++    // 共享供应商（2026-10-30-provider-user-share）：额度属于属主账户，
++    // usage/quota 端点只允许属主查询；接收方一律按「不支持」展示，不回落聚合
++    // （否则会拿自己的别家额度顶替，评审 P1）。
++    if (selected.is_shared === true) {
++      return { kind: "unsupported", provider: selected };
++    }
++    return detectUsageProvider(selected.base_url) == null
++      ? { kind: "unsupported", provider: selected }
++      : { kind: "no-data", provider: selected };
++  }
++  const list = [...entries.values()].sort((a, b) =>
++    a.providerName.localeCompare(b.providerName, "zh-CN"),
++  );
++  return { kind: "aggregate", entries: list };
++}
++
++/**
++ * 额度胶囊当前供应商 id 解析（FR-01）：配置条暂存值优先（空串=本机默认→null），
++ * 未暂存时用会话已生效值。导出供页面接线与单测共用。
++ */
++export function resolveQuotaPillProviderId(
++  stagedProviderId: string | null | undefined,
++  sessionProviderId: string | null | undefined,
++): string | null {
++  if (stagedProviderId !== undefined && stagedProviderId !== null) {
++    return stagedProviderId || null;
++  }
++  return sessionProviderId ?? null;
++}
++
+ /** 鉴权失效标记（usage 两态之确定性失败，refresh 据此清除该家条目）。 */
+ class QuotaAuthInvalidError extends Error {}
+ 
+@@ -499,8 +556,9 @@ async function fetchProviderEntry(
+ 
+ export interface QuotaPillProps {
+   /**
+-   * 当前会话供应商 id（quick-e4d0551f 起仅作展示排序优先提示，不再门控渲染；
+-   * null/undefined=本机默认 → 胶囊照常聚合展示全部可查供应商额度）。
++   * 当前选中的供应商 id（2026-11-04-session-quota-pill-follow-provider 起语义
++   * 恢复为「选中供应商」：有值时胶囊面/浮层首位必须是该供应商，不可查/无数据
++   * 显示明确状态；null/undefined=本机默认 → 保留原聚合展示行为）。
+    */
+   providerId: string | null | undefined;
+   /**
+@@ -511,20 +569,22 @@ export interface QuotaPillProps {
+ }
+ 
+ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+-  // 全量供应商列表：聚合展示的基础（列表查询轻，5 分钟慢刷新兜新增供应商）。
++  // 可用供应商列表（自己的 + 共享给自己的）：与会话配置条候选同源，确保
++  // 选中共享供应商时也能解析到它（2026-11-04 评审 P1——own-only 列表会让
++  // 共享供应商落空并回落聚合显示别家额度）。列表查询轻，5 分钟慢刷新。
+   const providersQ = useQuery({
+-    queryKey: ["llmProviders", "quota-pill"],
+-    queryFn: listProviders,
++    queryKey: ["llmProviders", "usable", "quota-pill"],
++    queryFn: listUsableProviders,
+     staleTime: 5 * 60_000,
+     refetchInterval: 5 * 60_000,
+   });
+-  // 可查用量供应商（detectUsageProvider 非空才发查询，同 UsageFooter 预判，
+-  // 省得对不可查供应商白跑一趟——后端也会兜底 success=false）。data 未就绪时
+-  // 兜底空数组须内联进 useMemo，避免每次渲染生成新引用破坏 memo（eslint 506）。
++  // 可查用量供应商：跳过共享行（额度端点仅属主可查，接收方查询必失败）+
++  // detectUsageProvider 非空才发查询（同 UsageFooter 预判，省白跑一趟）。
++  // data 未就绪时兜底空数组须内联进 useMemo，避免每次渲染生成新引用破坏 memo。
+   const detectable = useMemo(
+     () =>
+       (providersQ.data ?? []).filter(
+-        (p) => detectUsageProvider(p.base_url) != null,
++        (p) => p.is_shared !== true && detectUsageProvider(p.base_url) != null,
+       ),
+     [providersQ.data],
+   );
+@@ -596,23 +656,28 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+   }, [clearHoverTimer, refresh]);
+   useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
+ 
+-  // 展示排序：当前会话供应商优先，其余按名称稳定序。
+-  const sortedEntries = useMemo(() => {
+-    const list = [...entries.values()];
+-    list.sort((a, b) => {
+-      if (a.providerId === providerId) return -1;
+-      if (b.providerId === providerId) return 1;
+-      return a.providerName.localeCompare(b.providerName, "zh-CN");
+-    });
++  // 面展示模型：选中供应商优先（FR-01~04），未指定供应商 → 聚合（FR-05）。
++  const face = useMemo(
++    () => resolveQuotaFace(providerId, providersQ.data ?? [], entries),
++    [providerId, providersQ.data, entries],
++  );
++  // 浮层「其余可查供应商」：排除选中家，按名称稳定序（选中家由 face 单独置顶）。
++  const otherEntries = useMemo(() => {
++    const list = [...entries.values()].filter(
++      (e) => face.kind === "aggregate" || e.providerId !== providerId,
++    );
++    list.sort((a, b) => a.providerName.localeCompare(b.providerName, "zh-CN"));
+     return list;
+-  }, [entries, providerId]);
++  }, [entries, face.kind, providerId]);
+ 
+   // 列表加载中 / 拉取失败 → 静默不渲染（弱依赖 R-05，不闪错误态）。
+   if (providersQ.isPending || providersQ.isError) return null;
+-  // 没有任何可查用量供应商 → 无信息可展示。
+-  if (detectable.length === 0) return null;
+ 
+-  if (sortedEntries.length === 0) {
++  const hasSelection = face.kind !== "aggregate";
++  // 未指定供应商且一家可查供应商都没有 → 无信息可展示（旧行为）。
++  if (!hasSelection && detectable.length === 0) return null;
++
++  if (face.kind === "aggregate" && face.entries.length === 0) {
+     // 有可查供应商但暂时一家都没取到数据 → 灰字提示（胶囊本体不渲染）。
+     return (
+       <span
+@@ -624,61 +689,95 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+     );
+   }
+ 
+-  const face = sortedEntries[0]!;
+-  const restCount = sortedEntries.length - 1;
+-  // 2026-10-22-session-composer-slim FR-03 / D-001：图标面只显示当前会话
+-  // 供应商的首个百分比窗口（排序已把会话供应商置顶）；纯余额类显示余额金额；
+-  // 模型名/其余窗口/重置时间/「等 N 家」全部收进点击浮层与 title。
+-  const facePctTiers = face.tiers.filter((t) => t.leftPct != null);
+-  const headTier = facePctTiers[0] ?? face.tiers[0] ?? null;
++  // 2026-10-22-session-composer-slim FR-03 / D-001：面只显示首个百分比窗口
++  // （选中供应商 / 聚合首位）；纯余额类显示余额金额；其余收进浮层与 title。
++  let headTier: QuotaTierView | null = null;
++  let faceLabel: string;
++  if (face.kind === "entry") {
++    const e = face.entry;
++    headTier = e.tiers.filter((t) => t.leftPct != null)[0] ?? e.tiers[0] ?? null;
++    faceLabel = `${e.providerName}${e.model ? ` · ${e.model}` : ""}`;
++  } else if (face.kind === "aggregate") {
++    const e = face.entries[0]!;
++    headTier = e.tiers.filter((t) => t.leftPct != null)[0] ?? e.tiers[0] ?? null;
++    faceLabel = `${e.providerName}${e.model ? ` · ${e.model}` : ""}`;
++  } else {
++    faceLabel = face.provider.name;
++  }
++
+   const headPct = headTier?.leftPct ?? null;
+-  const faceReset = headTier?.reset ?? null;
+-  const faceLabel = `${face.providerName}${face.model ? ` · ${face.model}` : ""}`;
++  const restCount =
++    face.kind === "aggregate" ? face.entries.length - 1 : otherEntries.length;
+   const restHint = restCount > 0 ? `；另有 ${restCount} 家可查` : "";
+-  const pillTitle =
+-    headPct != null
+-      ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
+-          faceReset ? `｜${formatQuotaResetTime(faceReset)} 重置` : ""
+-        }${restHint}（点击查看全部明细）`
+-      : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
++
++  let pillTitle: string;
++  if (face.kind === "unsupported" || face.kind === "no-data") {
++    const state = face.kind === "unsupported" ? "暂不支持额度查询" : "额度暂无数据";
++    pillTitle = `${faceLabel}｜${state}${
++      restCount > 0 ? `（点击查看其他 ${restCount} 家）` : "（点击查看明细）"
++    }`;
++  } else {
++    const reset = headTier?.reset ?? null;
++    pillTitle =
++      headPct != null
++        ? `${faceLabel}｜${headTier?.label ?? "额度"}剩 ${headPct}%${
++            reset ? `｜${formatQuotaResetTime(reset)} 重置` : ""
++          }${restHint}（点击查看全部明细）`
++        : `${faceLabel}｜${formatQuotaBalance(headTier?.balance ?? null)}${restHint}（点击查看全部明细）`;
++  }
++
++  const renderEntrySection = (e: ProviderQuotaEntry) => (
++    <div key={e.providerId}>
++      <div className="font-medium text-foreground">
++        {e.providerName}
++        {e.model ? (
++          <span className="text-muted-foreground"> · {e.model}</span>
++        ) : null}
++      </div>
++      <div className="mt-0.5 flex flex-col gap-1">
++        {e.tiers.map((t, i) => (
++          <div key={i}>
++            <div className="flex items-center justify-between">
++              <span>{t.label} 剩余</span>
++              <b
++                className={`font-semibold ${
++                  t.leftPct == null ? "" : quotaLeftToneClass(t.leftPct)
++                }`}
++              >
++                {t.leftPct != null
++                  ? `${t.leftPct}%`
++                  : formatQuotaBalance(t.balance)}
++              </b>
++            </div>
++            {t.reset ? (
++              <div className="text-[11px] text-muted-foreground">
++                {formatQuotaResetTime(t.reset)} 重置
++              </div>
++            ) : null}
++          </div>
++        ))}
++      </div>
++    </div>
++  );
+ 
+   const detail = (
+     <div style={{ width: 264 }}>
+       <div className="text-xs font-medium text-foreground">模型剩余额度</div>
+       <div className="mt-1.5 flex flex-col gap-2 text-xs text-muted-foreground">
+-        {sortedEntries.map((e) => (
+-          <div key={e.providerId}>
+-            <div className="font-medium text-foreground">
+-              {e.providerName}
+-              {e.model ? (
+-                <span className="text-muted-foreground"> · {e.model}</span>
+-              ) : null}
+-            </div>
+-            <div className="mt-0.5 flex flex-col gap-1">
+-              {e.tiers.map((t, i) => (
+-                <div key={i}>
+-                  <div className="flex items-center justify-between">
+-                    <span>{t.label} 剩余</span>
+-                    <b
+-                      className={`font-semibold ${
+-                        t.leftPct == null ? "" : quotaLeftToneClass(t.leftPct)
+-                      }`}
+-                    >
+-                      {t.leftPct != null
+-                        ? `${t.leftPct}%`
+-                        : formatQuotaBalance(t.balance)}
+-                    </b>
+-                  </div>
+-                  {t.reset ? (
+-                    <div className="text-[11px] text-muted-foreground">
+-                      {formatQuotaResetTime(t.reset)} 重置
+-                    </div>
+-                  ) : null}
+-                </div>
+-              ))}
++        {/* 选中供应商置顶（FR-04）：有数据列明细，无数据/不可查列状态说明；
++            其余可查供应商按名称序跟随（aggregate 态即全体按名称序）。 */}
++        {face.kind === "entry" ? renderEntrySection(face.entry) : null}
++        {face.kind === "unsupported" || face.kind === "no-data" ? (
++          <div>
++            <div className="font-medium text-foreground">{face.provider.name}</div>
++            <div className="mt-0.5 text-[11px] text-muted-foreground">
++              {face.kind === "unsupported"
++                ? "该供应商暂不支持额度查询"
++                : "额度数据暂不可用，稍后自动重试"}
+             </div>
+           </div>
+-        ))}
++        ) : null}
++        {otherEntries.map(renderEntrySection)}
+         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+           数据来自各供应商额度接口，每 5 分钟自动刷新；胶囊上悬浮 2 秒立即刷新。
+         </div>
+@@ -703,11 +802,25 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+           aria-hidden
+           className={`shrink-0 text-brand-600 ${mobile ? "h-3 w-3" : "h-3.5 w-3.5"}`}
+         />
+-        {headPct != null ? (
+-          <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
+-        ) : headTier?.balance ? (
+-          <span>{formatQuotaBalance(headTier.balance)}</span>
+-        ) : null}
++        {face.kind === "entry" || face.kind === "aggregate" ? (
++          headPct != null ? (
++            <span className={quotaLeftToneClass(headPct)}>{headPct}%</span>
++          ) : headTier?.balance ? (
++            <span>{formatQuotaBalance(headTier.balance)}</span>
++          ) : null
++        ) : (
++          // 2026-11-04 用户口径：状态胶囊面只留短文案（「不支持」/「无数据」），
++          // 供应商名与完整说明在 title / 点击浮层里。
++          <span
++            data-testid={
++              face.kind === "unsupported"
++                ? "quota-pill-unsupported"
++                : "quota-pill-no-data"
++            }
++          >
++            {face.kind === "unsupported" ? "不支持" : "无数据"}
++          </span>
++        )}
+       </button>
+     </Popover>
+   );
+@@ -718,8 +831,9 @@ export function QuotaPill({ providerId, mobile = false }: QuotaPillProps) {
+ 
+ export interface CtxUsageBarProps extends CtxUsageRingProps {
+   /**
+-   * 当前会话供应商 id（传 QuotaPill 作展示排序优先提示；null=本机默认，
+-   * 胶囊照常聚合展示全部可查供应商额度——quick-e4d0551f 语义变更）。
++   * 当前选中的供应商 id（页面接线取「配置条暂存值优先，未暂存用会话已生效值」
++   * ——见 resolveQuotaPillProviderId；null=本机默认，胶囊聚合展示全部可查
++   * 供应商额度）。
+    */
+   providerId?: string | null;
+   /** ql-20260915-013：mobile 紧凑形态——额度胶囊只显百分比（明细点击浮层）。 */
+@@ -734,7 +848,7 @@ export function CtxUsageBar({
+   // FR-06 caps 门控：provider 明确且 getProviderCaps(provider).ctx_usage=false
+   // （未知引擎名命中回退 false）→ 只渲染 QuotaPill 不渲染 CtxUsageRing；
+   // null/未传旁路门控照常渲染环（不因门控丢现有功能，环仍有未知态「—」兜底）。
+-  // providerId 语义与 QuotaPill 行为不动（额度查询照旧）。
++  // providerId 仅透传给 QuotaPill（选中供应商优先展示，见 QuotaPillProps）。
+   // 2026-09-14-session-ctx-compact task-06：provider 经 ...ringProps 透传给环
+   // （压缩按钮 caps 门控消费，见 CtxUsageRingProps.provider 注释）。
+   const ctxSupported =

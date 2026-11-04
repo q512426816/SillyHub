@@ -53,7 +53,7 @@ updated_at: 2026-09-16 09:45:00
 - `ctx-usage-bar.tsx`（FR-08 / D-009 / D-014，输入框上方一行组件）：
   - `CtxUsageRing`：环形上下文用量（props 含 usedTokens——父层 SSE turn usage + attach 历史 logs 累计后传入，本组件不累计）。
   - `QuotaPill({ providerId, mobile? })`：额度紧凑图标（2026-10-22-session-composer-slim FR-03 / D-001）——面上只显示「Gauge 图标 + 当前选中供应商首窗口百分比」（纯余额类显示金额），低量按 ≤50% 黄 / ≤20% 红着色；模型名、各窗口、重置时间、「等 N 家」收进点击 Popover 明细与 title。自调 `getProviderQuota`，5 分钟轮询 / 悬浮 2 秒刷新 / keep-last-good 语义不变（`formatQuotaResetTime` 导出）。
-  - 选中供应商优先（2026-11-04-session-quota-pill-follow-provider）：`providerId` 有值时面/浮层首位严格跟随该供应商，由 `resolveQuotaFace` 产出四态——有数据（entry）/ 不可查（unsupported，面显示「不支持」）/ 可查暂无数据（no-data，面显示「无数据」）/ 未指定（aggregate，保留全量聚合）；浮层选中供应商置顶，其余可查供应商按名称序跟随。会话页接线取「配置条暂存值优先，未暂存用会话已生效值」，切换供应商（未发送）即时跟随。
+  - 选中供应商优先（2026-11-04-session-quota-pill-follow-provider）：`providerId` 有值时面/浮层首位严格跟随该供应商，由 `resolveQuotaFace` 产出四态——有数据（entry）/ 不可查（unsupported，面显示「不支持」）/ 可查暂无数据（no-data，面显示「无数据」）/ 未指定（aggregate，保留全量聚合）；浮层选中供应商置顶，其余可查供应商按名称序跟随。会话页接线取「配置条暂存值优先，未暂存用会话已生效值」（`resolveQuotaPillProviderId`），切换供应商（未发送）即时跟随。供应商目录用 `listUsableProviders`（含共享），共享供应商按「不支持」展示且不查询其额度（额度端点仅属主可查）。
   - `CtxUsageBar`：Ring+Pill 组合条。
   - 分母三级降级链 `resolveCtxWindowTokens(roleMapping, fallbackModel)`（D-014）：
     - 供应商 role mapping 勾选 1M（one_m=true，injector 模型名后缀 [1m]）→ 1_000_000。

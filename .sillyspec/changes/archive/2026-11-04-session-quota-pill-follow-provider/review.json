@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-04-session-quota-pill-follow-provider",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3e91e3a44893f1cb98505f181e817b3857656980",
+  "findings": [
+    {
+      "severity": "P1",
+      "status": "resolved",
+      "title": "选中共享供应商时胶囊回落聚合，显示其他供应商额度（FR-01/FR-02/FR-04 被违反）",
+      "evidence": "首轮证据：QuotaPill 供应商清单为 listProviders()（own-only，ctx-usage-bar.tsx:552-557），配置条候选为 listUsableProviders()（own+共享，session-config-bar.tsx:535-539），resolveQuotaFace 在 providerId 不在列表时回落 aggregate（ctx-usage-bar.tsx:437-446），而 inject_gates.py:297-302/:583-586 明确允许共享供应商被会话选中——选中共享供应商时胶囊面/浮层按自营可查家聚合渲染。复审 73bcc7c1c 已修复：providersQ 改用 listUsableProviders（ctx-usage-bar.tsx:570-579），detectable 排除 is_shared 行（:585-590，额度端点仅属主可查），resolveQuotaFace 对选中共享供应商直接返回 unsupported（:441-448）；新增用例「选中共享供应商 → 面显示『不支持』且不查询该家额度」通过。",
+      "location": "frontend/src/components/sessions/ctx-usage-bar.tsx:441"
+    },
+    {
+      "severity": "P2",
+      "status": "resolved",
+      "title": "FR-01 绑定用例对旧实现同样通过（非判别性），配置条暂存优先级接线零测试",
+      "evidence": "首轮证据：切换用例两家供应商都可查，旧『providerId 排序置顶』实现同样全绿；session-panel-page.tsx 的 stagedConfig 三元式无测试。复审 73bcc7c1c 已修复：抽出导出纯函数 resolveQuotaPillProviderId(staged, session)（ctx-usage-bar.tsx:461-473）供页面接线（session-panel-page.tsx:6569-6572），新增 3 个单测覆盖暂存有值/空串→null/未暂存回落会话值（ctx-usage-bar.test.tsx:388-404）；切换用例补『可查 → 不可查（断言面无百分比）→ 可查』判别步骤，旧实现此步会继续显示可查家百分比而失败。",
+      "location": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx:388"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "代码注释残留旧口径（design 与主要注释已同步，剩一处）",
+      "evidence": "首轮所列 design.md:13 短文案契约、resolveQuotaFace(providerId, providers, entries) 签名说明、文件头与 CtxUsageBarProps 注释均已同步。剩余一处为 ctx-usage-bar.tsx:851 的「providerId 语义与 QuotaPill 行为不动」。复审 3e91e3a4 已修复：该行改为「providerId 仅透传给 QuotaPill（选中供应商优先展示，见 QuotaPillProps）」，增量仅此 1 行注释（git diff 73bcc7c1c 3e91e3a4 无逻辑/测试改动）。",
+      "location": "frontend/src/components/sessions/ctx-usage-bar.tsx:851"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "成立：providersQ.isPending 门控避免把未就绪列表误判不可查，额度条目晚到由 no-data→entry 自动翻转（design 已声明短暂「无数据」闪现，边界已裁决：可接受）。残余：胶囊 usable 列表 5 分钟慢刷新、配置条 30 秒——刚共享给你的供应商在胶囊缓存刷新前被选中仍会短暂落 aggregate，属缓存新鲜度边界，可接受。",
+    "并发": "成立：entries 走函数式 setEntries，inflightRef 防重入 + cancelledRef 防卸载/重跑后回写均真实存在且本次未改动；providerId 变化不触碰写路径。边界已裁决：可接受。",
+    "切换": "成立：stagedConfig 随 sessionId effect 重置（session-panel-page.tsx:1189-1195），跨会话不长期串台；effect 在渲染后执行，切换首帧可能沿用上一会话暂存 providerId（一帧瞬态，配置条既有展示同模式）。边界已裁决：可接受。",
+    "作用域": "已修复：胶囊供应商目录与配置条候选同源（listUsableProviders），共享供应商可解析且按「不支持」展示，detectable 排除 is_shared 行避免对属主专属额度端点发起必败查询；entries 仍为组件本地、按供应商 id 聚合，不跨工作区。边界已裁决：可接受。"
+  },
+  "reviewedAt": "2026-11-04T14:34:25+08:00"
+}

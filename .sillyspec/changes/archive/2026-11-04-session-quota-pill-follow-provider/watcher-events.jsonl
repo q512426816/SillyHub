@@ -1,0 +1,20 @@
+{"ts":1793771875730,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1793771875730,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1793771903339,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793771916641,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793771920104,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793771936629,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793771946719,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793772136204,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
+{"ts":1793772146243,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793772399050,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793772443460,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793772443460,"kind":"task-done","stage":"tasks","detail":"checked 0→6","provisional":true}
+{"ts":1793772453946,"kind":"commit","stage":null,"detail":"3b37b2475","provisional":true}
+{"ts":1793773116660,"kind":"gate-run","stage":"verify","detail":"门实测 passed（8.6s） · 20261104061834","provisional":true}
+{"ts":1793773606916,"kind":"commit","stage":null,"detail":"815d784bb","provisional":true}
+{"ts":1793773627155,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793773634074,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793773682054,"kind":"commit","stage":null,"detail":"73bcc7c1c","provisional":true}
+{"ts":1793773705337,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793774043399,"kind":"commit","stage":null,"detail":"3e91e3a44","provisional":true}

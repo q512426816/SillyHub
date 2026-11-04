@@ -8299,3 +8299,117 @@ superseded_by：FR-daemon-330
 摘要：验证面
 全文：.sillyspec/changes/archive/2026-10-28-change-detail-side-assets-scroll/requirements.md#FR-05
 最近确认：1c284302f17b3561362dd04f2d262a1b2cd64a61
+
+## FR-frontend-090 配置条切换供应商（暂存未发送）后，底部额度胶囊立即按新供应商展示，不再显示其他供应商的数据
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：暂存切换供应商；取消暂存
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-01
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「配置条暂存切换供应商（providerId 变化）→ 胶囊面立即改用新供应商数据」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active
+
+## FR-frontend-091 选中供应商不支持额度查询时，胶囊明确显示该供应商名与「暂不支持额度查询」，不渲染其他家额度数据
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：选中 OpenCode Go
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-02
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 面显示「不支持」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active
+
+## FR-frontend-092 选中供应商可查但本次无数据时，胶囊显示该供应商名与「额度暂无数据」
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：智谱 quota 为空
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-03
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中可查供应商无数据（quota=null）→ 面显示「无数据」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active
+
+## FR-frontend-093 点击胶囊浮层仍可查看其余可查供应商的额度，且选中供应商置顶
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：选中不可查供应商 + 其他家可查
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-04
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「选中不可查供应商 → 浮层仍可查看其余可查供应商，且选中供应商置顶」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active
+
+## FR-frontend-094 未指定供应商（本机默认）时保持原有全部可查供应商聚合展示行为
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：本机默认
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-05
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「providerId=null（本机默认）→ 照常聚合展示全部可查供应商额度」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active
+
+## FR-frontend-095 相关单测更新并通过，lint 通过
+变更：2026-11-04-session-quota-pill-follow-provider
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-11-04-session-quota-pill-follow-provider/requirements.md#FR-06
+最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-04-session-quota-pill-follow-provider:flow:测试绑定FR-06
+  tests: frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx「QuotaPill 全套用例」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-04-session-quota-pill-follow-provider
+  status: active

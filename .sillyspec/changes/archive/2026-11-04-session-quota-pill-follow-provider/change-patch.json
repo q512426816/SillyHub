@@ -1,0 +1,86 @@
+{
+  "change": "2026-11-04-session-quota-pill-follow-provider",
+  "baseline": "7bcfe6065a249ff914a61830a1e803a7472cc3aa",
+  "head": "3e91e3a44893f1cb98505f181e817b3857656980",
+  "files": [
+    ".sillyspec/docs/frontend/modules/components-sessions.md",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+    "frontend/src/components/sessions/ctx-usage-bar.tsx"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 399,
+    "deletions": 96
+  },
+  "savedAt": "2026-11-04T06:34:36.246Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7bcfe6065a249ff914a61830a1e803a7472cc3aa",
+    "totals": {
+      "files": 4,
+      "additions": 399,
+      "deletions": 96
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/frontend/modules/components-sessions.md",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 11,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx",
+        "additions": 194,
+        "deletions": 15,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/sessions/ctx-usage-bar.tsx",
+        "additions": 192,
+        "deletions": 78,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ac71f8b00f8353c2a4b039901b2e26d07d4bef0f857c598b35748576d906bf46",
+  "patchStatus": "ok"
+}
