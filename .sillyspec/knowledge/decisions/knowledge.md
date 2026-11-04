@@ -130,3 +130,57 @@ supersedes：D-004@v1
 文件：.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md, .sillyspec/docs/SillyHub/modules/frontend_components.changelog.md, .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md, backend/app/core/config.py, backend/app/main.py, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/tests/test_vector_search.py, backend/app/modules/knowledge/vector_router.py, backend/app/modules/knowledge/vector_search.py, backend/pyproject.toml, backend/uv.lock
 最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
 理由：最大风险：真模型首查秒级 embed 延迟（700-2400 条）+ 首次模型下载 90MB——已卸线程池不卡事件循环；生产建议镜像预烤模型（文档在 FastembedEmbedder docstring）；workspace 语料超万条时首查可感——当前量级（本体系最大 2400）无虞，超限再引增量索引。次风险：fastembed/ONNX 依赖体积（镜像 +~200MB）——用户已拍板接受；embedding 质量对极短条目（纯标题无理由）弱——语料契约本就含理由文本，模板保证在场。死路（放弃）：①API embedding（litellm/openai）——用户指出 litellm 平台侧已去，且要 key 要钱要外网；②统计向量（TF-IDF/n-gram）——与 CLI 本地层同构重复建设，语义增益零；③pgvector——2400 条暴力余弦毫秒级，数据库往返反而更慢且加迁移负担；④daemon sync 挂点灌索引——免 daemon 改动的懒构建已覆盖，挂点属过早优化。
+
+## D-knowledge-001@v1 2026-09-25-knowledge-anchor-match-tolerance——在 `parser.py` 新增纯函数 `anchor_match_key`（小写 + 只保留 `0-9a-z_` 与中文，丢 emoji/点号/短横/斜杠等全
+状态：implemented
+变更：2026-09-25-knowledge-anchor-match-tolerance
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-25-knowledge-anchor-match-tolerance/design.md
+文件：backend/app/modules/knowledge/hits.py, backend/app/modules/knowledge/parser.py, backend/app/modules/knowledge/tests/test_hits.py, backend/app/modules/knowledge/tests/test_parser.py
+最近确认：未记录
+理由：在 `parser.py` 新增纯函数 `anchor_match_key`（小写 + 只保留 `0-9a-z_` 与中文，丢 emoji/点号/短横/斜杠等全部符号）；`HitsService.stats` 聚合前用它建「归一键 → 条目锚点集合」解析表，命中锚点先精确比对（既有行为恒优先），未中且归一键唯一候选才回退到条目锚点，歧义/未中保持原锚点原样。 改两处：`backend/app/modules/knowledge/parser.py`（新常量 + 新函数）、`backend/app/modules/knowledge/hits.py`（stats 内解析闭包 + 聚合循环一行）。**展示层零变化**——条目 anchor 字符串、DTO 字段、前端都不动，只是聚合键从「命中侧原样字符串」换成「解析后的条目锚点」。 选这个落点的理由：条目锚点是本仓按当前文件标题现算的 slug，命中锚点是 CLI 写 INDEX 路由行时的原样字符串，两侧由不同规则/不同人/不同版本维护，实测三类系统性漂移（emoji 前缀、点号、短横折叠）导致逐字比较必然漏计；改 CLI 写侧属跨仓且存量 INDEX 会被 CLI 重写覆盖，改本仓 INDEX.md 会被 CLI 下一次生成覆盖，只有平台侧归一容错是自洽且可本地验证的修法。
+
+## D-knowledge-002@v1 2026-09-27-governance-rpc-actions——①单源收敛：daemon 新增 KnowledgeGovernanceHandler（runtime-handler.ts 同文件，runSillyspecCm
+状态：implemented
+变更：2026-09-27-governance-rpc-actions
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-27-governance-rpc-actions/design.md
+文件：backend/app/modules/knowledge/router.py, backend/app/modules/knowledge/service.py, backend/app/modules/knowledge/tests/test_governance.py, frontend/src/components/knowledge/__tests__/governance-cards.test.tsx, frontend/src/components/knowledge/governance-cards.tsx, frontend/src/lib/knowledge.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/runtime-handler.ts, sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+最近确认：未记录
+理由：①单源收敛：daemon 新增 KnowledgeGovernanceHandler（runtime-handler.ts 同文件，runSillyspecCmd 扩 cwd 可选参）——knowledge.digest RPC（root_path 元字符黑名单→cwd=仓库根 spawn sillyspec knowledge digest --json，CLI JSON 信封透传；旧版 CLI→method_not_found、超时→timeout、非 JSON→internal）与 knowledge.action RPC（kind 白名单 repair-paths/redomain 硬编码；域名 [a-z0-9-]+ 元字符防线——spawn shell:true 命令串拼接注入面）；daemon.ts 注册两 handler。backend governance_signals RPC 优先（RuntimeLiveService._resolve_binding 解绑定→ws_hub.send_rpc 60s），任何失败（离线/超时/未绑定/未注册）回退本地 _compute（degrade 不 502）；响应加 source（daemon-rpc|local）与 actions_available。②动作回传：POST /knowledge/governance/actions（KNOWLEDGE_WRITE；kind/域名 422 校验）→RPC 执行→输出尾部透传。frontend：GovernanceOut +source/actions_available；actions_available 时坏绑定卡[执行 repair]按钮、伪域卡[迁移到…]输入目标域按钮（[a-z0-9-]+ 前端预校验），useMutation+invalidateQueries；local 模式按钮隐藏。
+
+## D-knowledge-003@v1 2026-10-10-dump-gzip-thread-offload——24h 审查发现 `GET /knowledge/graph/dump` 在 async 端点内同步执行 `json.dumps` + `gzip.compre
+状态：implemented
+变更：2026-10-10-dump-gzip-thread-offload
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-10-dump-gzip-thread-offload/design.md
+文件：backend/app/modules/knowledge/router.py, backend/app/modules/knowledge/tests/test_graph.py
+最近确认：未记录
+理由：24h 审查发现 `GET /knowledge/graph/dump` 在 async 端点内同步执行 `json.dumps` + `gzip.compress`（默认 level 9）——大图（2026-10-09-knowledge-graph-fullmap 真图实测 5855 节点/MB 级 payload）该 CPU 段达百 ms~秒级，期间事件循环上全部并发请求（含 SSE 心跳/日志流推送）被阻塞。方案：把序列化+压缩收进单个同步闭包 `_serialize_compress`，经 `asyncio.to_thread` 卸载到工作线程执行。选 to_thread 而非降 compresslevel：降档只缩短阻塞时长不消除阻塞，卸载根治且响应字节零变化（同函数同参数）；选单闭包而非两段分别卸载：json.dumps 的 str 中间产物（MB 级）不必跨线程往返，一次切换开销最小。
+
+## D-knowledge-004@v1 2026-10-15-platform-vector-search——效果评估清偿批 B1 平台面（用户拍板本地小模型方案）：CLI 向量召回层 2026-09-29 发布即对接本端点，平台从未实现（404 半个月实证；CLI 侧
+状态：implemented
+变更：2026-10-15-platform-vector-search
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-15-platform-vector-search/design.md
+文件：backend/app/core/config.py, backend/app/main.py, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/tests/test_vector_search.py, backend/app/modules/knowledge/vector_router.py, backend/app/modules/knowledge/vector_search.py, backend/pyproject.toml, backend/uv.lock
+最近确认：未记录
+理由：效果评估清偿批 B1 平台面（用户拍板本地小模型方案）：CLI 向量召回层 2026-09-29 发布即对接本端点，平台从未实现（404 半个月实证；CLI 侧已收紧为显式开启+404 短路，见 sillyspec 仓 2026-10-15-vector-gate-tighten）。本变更补齐平台端四件： ① **端点** `POST /api/spec/knowledge/vector-search`（vector_router.py，独立 router 不入 /workspaces/{id}/knowledge/* 族——路径在 /spec/* 命名空间、shpsync token 鉴权单通道，对齐 platform_sync router 形态）。鉴权复用 require_platform_sync 三通道分流，但**只接受 shpsync_ workspace token**（scope.workspace_id 非 None；shk_live_/JWT 凭据有效也 403——并集 scope 表达不了「检索单一 workspace 语料」，且 CLI 固化 Bearer shpsync_）。 ② **embedding = fastembed 本地 ONNX 小模型**（`BAAI/bge-small-zh-v1.5`，512 维，镜像内 ~90MB 首用自动下载，零 key 零 API 零持续成本；`Settings.knowledge_embedding_model` 可配）。lazy import 不阻塞启动；初始化任何异常缓存为不可用态（进程级一次），端点 fail-soft 返回 `{ok, results:[], model_ready:false, reason}`——CLI 按空 results 静默降级本地词面层（与 404 时代降级契约同语义）。 ③ **索引** = 进程内 per-workspace 按文件集指纹 `(name, mtime_ns, size)` 懒构建缓存。**设计偏差（相对提案）**：daemon sync 挂点灌索引 → 查询时懒构建（语料 700-2400 条秒级，免 daemon 改动，文件增删改自动失效自愈）。 ④ **语料与相似度**：workspace spec 树 `knowledge/decisions/*.md` 条目（CLI `buildResultFromPlatform` 只认该前缀），embedding 文本 = `id+标题+理由`（rejected 条目照常入索引——策略面 CLI 本地解析，「平台只做语义召回」原则）；归一化点积纯 Python（不引 numpy 耦合）。检索主体经 run_in_threadpool 卸载（首查秒级不卡事件循环）。 依赖：pyproject 增 `fastembed>=0.4`（uv lock 已同步）；测试不依赖 fastembed（embedder 全 fake 注入）。
+
+## D-knowledge-005@v1 2026-11-03-distill-prompt-fix——答：纯 prompt 文样工程，只改 `backend/app/modules/knowledge/distill.py` 的 `build_distill_p
+状态：implemented
+变更：2026-11-03-distill-prompt-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-11-03-distill-prompt-fix/design.md
+文件：backend/app/modules/knowledge/distill.py, backend/app/modules/knowledge/tests/test_distill.py
+最近确认：未记录
+理由：答：纯 prompt 文样工程，只改 `backend/app/modules/knowledge/distill.py` 的 `build_distill_prompt` 拼装面（resume 式 source_line 一句、propose_cmd 命令模板、spec_note 落盘指引、新增公共「传参规则 + 回流确认」段、提炼要求补查重/幂等/数量条目），不动 dispatch、取数、导出渲染逻辑。方案依据：用户转写的两轮提示词评审反馈 + 本机 sillyspec 3.34.0 实证（--from 受支持；--spec-dir 悬空时 propose 静默 mkdir 孤儿树；platform sync 静默忽略 --spec-dir、根解析走 cwd/.sillyspec-platform.json 指针；knowledge search 必须 --query 传参；propose 同题幂等 update）。命令模板换单引号 body 从源头规避 shell 展开损坏；spec_note 改核验回落规则替代失实的「自动上行」承诺；回流确认段把验证动作显式化进提示词。
+
+## D-knowledge-006@v1 2026-11-03-knowledge-search-hardening——答：落地用户拍板的 B+D+C 三项止血（A 治本另立 brainstorm，不在本变更内）。
+状态：implemented
+变更：2026-11-03-knowledge-search-hardening
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/design.md
+文件：backend/app/modules/knowledge/search.py, backend/app/modules/knowledge/tests/test_knowledge_search.py, deploy/docker-compose.yml, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+最近确认：未记录
+理由：答：落地用户拍板的 B+D+C 三项止血（A 治本另立 brainstorm，不在本变更内）。B：backend `mem_limit` 2500m→3500m——2026-11-03 生产诊断实证（宿主 dmesg：10 月 40 次、11-02 2 次 cgroup OOM kill，被杀者 oom_score_adj=0 的模型 worker 子进程，anon-rss ~2.4G；2500m 对「服务本体 ~460M + 嵌入/翻译双 worker 并存」峰值偏紧），宿主 7.5G 下全栈限额总和升至 ~4.25G 仍充裕。D：`KnowledgeSearchState.updated_at` 补 `onupdate`（对齐 mcp_registry/model.py 先例）——该列原只有 `default_factory`，同步成功不刷新，DB 恒显示建行时间，本次排障先被误导；onupdate 是 SQLAlchemy 客户端侧行为，不改列 DDL，无需迁移。C：前端等待文案与降级徽标对齐真实机制——等待文案改「增量同步」口径；徽标按 `reason` 区分 `index_not_built`（索引未预建）与其余（模型不可用）。搜索同步的架构性改造（内联差量嵌入移出请求路径）留给 A 立项头脑风暴，本变更不触碰 search_sync 编排。

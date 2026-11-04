@@ -195,6 +195,15 @@
 - unmapped → [decisions/unmapped.md](decisions/unmapped.md)
 - components-daemon → [decisions/components-daemon.md](decisions/components-daemon.md)
 - rbac → [decisions/rbac.md](decisions/rbac.md)
+- test-utils → [decisions/test-utils.md](decisions/test-utils.md)
+- build → [decisions/build.md](decisions/build.md)
+- agent-skills → [decisions/agent-skills.md](decisions/agent-skills.md)
+- components-agent-log → [decisions/components-agent-log.md](decisions/components-agent-log.md)
+- app-mobile-pages → [decisions/app-mobile-pages.md](decisions/app-mobile-pages.md)
+- components-changes → [decisions/components-changes.md](decisions/components-changes.md)
+- hooks-message-queue → [decisions/hooks-message-queue.md](decisions/hooks-message-queue.md)
+- scripts → [decisions/scripts.md](decisions/scripts.md)
+- components-mobile → [decisions/components-mobile.md](decisions/components-mobile.md)
 
 ## FR 需求索引
 - host-fs-handler → [fr/host-fs-handler.md](fr/host-fs-handler.md)

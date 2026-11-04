@@ -1384,10 +1384,405 @@ supersedes：D-003@v1
 否决理由：token 数字全程不动只换文案，不满足用户 P0 裁决 C（估算补显），治标不治本。
 复潮条件：daemon 侧改动长期不可行（引擎面冻结）时可作为降级兜底单独启用。
 
-
 ## D-unmapped-084@v1 : PPM 个人工作台头像维持首字占位（用户头像功能非目标）
 状态：implemented
 原编号：D-003@v1
 锚点：未记录
 最近确认：41c3b37
 理由：2026-09-10-account-avatar-upload——PPM 已上线模块不动，WorkbenchProfile.avatar_text 维持首字；展示范围圈定为个人中心+顶栏+群聊（用户选定）。后续要接入再单独立变更。
+
+## D-frontend-025@v1 2026-09-25-change-detail-assets-usability——本变更四条修复全在「展示与跳转」层，不新增数据源，延续 D-001@v1（沉淀资产=服务端解析 spec 树镜像）与「git/锚点逻辑单一源在工具」两条既有决策
+状态：implemented
+变更：2026-09-25-change-detail-assets-usability
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/design.md
+文件：backend/app/modules/change/assets.py, backend/app/modules/change/router.py, backend/app/modules/change/schema.py, backend/app/modules/change/tests/test_assets.py, docs/sillyspec/knowledge-hits-anchor-drift-and-upload-stall.md, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx, frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/changes/scope-audit-command-card.tsx, frontend/src/components/knowledge/entry-card-list.tsx, frontend/src/components/mobile/mobile-change-detail.tsx, frontend/src/lib/changes.ts
+最近确认：未记录
+理由：本变更四条修复全在「展示与跳转」层，不新增数据源，延续 D-001@v1（沉淀资产=服务端解析 spec 树镜像）与「git/锚点逻辑单一源在工具」两条既有决策： 1. 范围对账降级态（FR-05）：卡面按 `degraded_reason` 分支渲染——有降级原因时不渲染三态 chip，改显降级原因 + 口径说明；已归档变更补一句「文件面为当前工作区未提交窗口」并由变更详情页传入 archived 标志。根因是 CLI 降级为「实际侧 only 视图（不出三态列）」时行内无 verdict 字段，前端把 undefined 计成 0 仍照画三个 chip（本机跑 `sillyspec scope-audit --json` 实证）。 2. 沉淀资产卡三组入口：FR/决策行改跳知识库页 URL 参数（`?file=&anchor=`）并落到条目卡；测试绑定行给「看测试文件」入口，弹窗内复用 explorer 的 `FilePreview`（读仓库文件，spec 镜像里没有测试文件）；归档留档列出 change-patch.json 的 files 清单，点击看 change.patch 中该文件的切片（后端切片 + 复用 DiffView）。 3. 知识库页补 URL 参数消费（FR-01/02 的落位端）：新增 `?file=`/`?anchor=` 解析 + 前缀归一 + 条目级滚动；`entry-card-list` 的结构化条目卡补 `data-entry-anchor`（原只有手册形态有，FR/决策条目因此无法作为滚动落点）。 4. 路径校验复用 `change/scope_audit.py::normalize_scope_file_path`（拒 `..`/绝对路径/pathspec magic），不新写一份校验。
+
+## D-frontend-026@v1 2026-09-26-sillyspec-command-queue——daemon.ts `_runSillySpecCommand` 的两臂忙拒（`_sillyspecCommandInFlight` 标志 + `executo
+状态：implemented
+变更：2026-09-26-sillyspec-command-queue
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-26-sillyspec-command-queue/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/sillyspec-platform-command.test.ts
+最近确认：未记录
+理由：daemon.ts `_runSillySpecCommand` 的两臂忙拒（`_sillyspecCommandInFlight` 标志 + `executor.isUpgradeInFlight()`）改为单一 FIFO 串行队列：布尔标志换 `_sillyspecCommandQueueTail` promise 链尾，每条命令 `.then(run, run)` 排尾——前一条完成（含防御 reject 出口）后下一条自动执行；npm 升级臂从「立即记 failed」改为出队执行前轮询等待（`SILLYSPEC_COMMAND_UPGRADE_POLL_MS`=1s，定时器 unref 对齐 manager deferred 重查惯例——npm 正在替换 CLI bin，与其并发 spawn 有半安装件风险，必须等）。选排队而非忙拒+前端自动重试：命令幂等且秒级（resolve/ghost_cleanup 实测 0.2-0.7s + 秒级），FIFO 最简且保序；原 D-001 拒排队裁决依据「单管理员低频场景」被生产实证推翻（2026-09-25 sillyspec 工作区两条裁决与升级链/彼此并发双双被拒，用户判「忙拒绝没必要」）。
+
+## D-frontend-027@v1 2026-09-27-prototype-pipeline——把本会话已验证的「原型即实现」试点固化为常设管线：视图源码迁入 `frontend/src/components/prototype/`（页面类五视图 tsx，
+状态：implemented
+变更：2026-09-27-prototype-pipeline
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-27-prototype-pipeline/design.md
+文件：.gitignore, frontend/.gitignore, frontend/package.json, frontend/prototype-dist/change-center.html, frontend/prototype-dist/change-detail.html, frontend/prototype-dist/index.html, frontend/prototype-dist/session-portal.html, frontend/prototype-dist/sillyspec-flow.html, frontend/prototype-dist/workspace-list.html, frontend/prototype-dist/workspace-overview.html, frontend/scripts/prototype-build.mjs, frontend/src/components/prototype/README.md, frontend/src/components/prototype/__tests__/flow-diagram.test.tsx, frontend/src/components/prototype/__tests__/prototype-smoke.test.tsx, frontend/src/components/prototype/change-center-view.tsx, frontend/src/components/prototype/change-detail-view.tsx, frontend/src/components/prototype/demo-chrome.tsx, frontend/src/components/prototype/flow-diagram.tsx, frontend/src/components/prototype/session-portal-view.tsx, frontend/src/components/prototype/sillyspec-flow-view.tsx
+最近确认：未记录
+理由：把本会话已验证的「原型即实现」试点固化为常设管线：视图源码迁入 `frontend/src/components/prototype/`（页面类五视图 tsx，import 生产 primer 组件与 themes.ts token，fixture 数据）；编译器收编为 `frontend/scripts/prototype-build.mjs`（tsc 编译视图子图 → react-dom/server 静态渲染 → Tailwind 按项目配置一次编译 → 逐视图内联为单文件 HTML，附三主题切换与轻交互 vanilla JS），`pnpm prototype:build` 一键触发，产物落 `frontend/prototype-dist/` 入仓对账（重编译 diff 必须为空——原型不可能与源码分家的机械保证）。 流程描述类原型（无对应页面）走同一条管线：新增 FlowDiagram 原语（节点/边 JSON 源 → BFS 分层 → SVG 绝对定位渲染，颜色全 CSS var token，零新增依赖），配一个真实流程示例视图（SillySpec 变更流程状态机）。原型分型规约（页面类/流程类/规则类）落 `.sillyspec/docs/SillyHub/scan/PROTOTYPE.md`。
+
+## D-frontend-028@v1 2026-09-27-session-portal-ia-restructure——诊断（三子代理全量功能清点佐证）：会话门户"乱"的根源不是样式而是信息架构——中栏头部单行挤 9+ 元素（标题/ID/状态/共享徽标/机器/工作区/后台目录/子
+状态：implemented
+变更：2026-09-27-session-portal-ia-restructure
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/design.md
+文件：docs/sillyspec/2026-09-27-spec-sync-413-and-nested-runtime.md, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/page.tsx, frontend/src/app/globals.css, frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx, frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx, frontend/src/components/changes/detail/change-stage-header.tsx, frontend/src/components/daemon/__tests__/session-panel-runs-request-dedup.test.tsx, frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/daemon/__tests__/session-usage-panel-mount.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/primer/__tests__/primer-atoms.test.tsx, frontend/src/components/primer/__tests__/primer-structures.test.tsx, frontend/src/components/primer/counter.tsx, frontend/src/components/primer/empty-state.tsx
+最近确认：未记录
+理由：诊断（三子代理全量功能清点佐证）：会话门户"乱"的根源不是样式而是信息架构——中栏头部单行挤 9+ 元素（标题/ID/状态/共享徽标/机器/工作区/后台目录/子代理目录/视图tab/搜索/打断）；垂直方向最多 11 层堆叠（AgentLog折叠栏→TaskExecutionPanel→后台提示→UsageBar→消息流→PlanApproval→队列条→定时条→输入栏→配置条→CtxUsageBar）；同类信息散落多处（任务 3 处、用量 2 处）；左栏筛选区 5 控件纵排；右列仅文件预览/子代理详情时出现，平时空置。 方案（收纳而非删除）：①中栏右列（现有子代理详情列）扩展为「收起/详情/子代理」三模式——详情模式收纳 SessionUsageBar、TaskExecutionPanel 与概览元信息（MetaPanel 分组），查看类信息有了统一归处；②头部两层化——主行只留标题+状态+高频操作，元信息（#id 复制/机器/工作区/共享徽标）降级次行 muted 小字；③底部收敛——desktop 移除消息流上方用量条与任务面板（移入右栏），操作类（计划批准/队列/定时/输入/配置）原位保留；④左栏筛选紧凑化——搜索+状态同行、机器/智能体/关联合并紧凑排布。改 `session-panel-page.tsx`（右列+头部+底部）与 `session-list-panel.tsx`（筛选区）两个主文件，`sessions-portal.tsx` 层零改动（文件预览列/群聊/四分支不波及）。视觉沿用上一轮 primer 组件体系（StateLabel/MetaPanel）与主题 token。选此方案因为它把"乱"的根因（无收纳层）解决掉，同时 render 组织层重组不动任何状态机，功能零丢失可对照验收。
+
+## D-frontend-029@v1 2026-09-28-change-detail-header-overflow——两处 CSS 约束补齐（与列表行 2026-09-28-change-ux-detail-batch ① 同类陷阱）： 1. `frontend/src/com
+状态：implemented
+变更：2026-09-28-change-detail-header-overflow
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-28-change-detail-header-overflow/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/components/layout/__tests__/page-header.test.tsx, frontend/src/components/layout/page-header.tsx
+最近确认：未记录
+理由：两处 CSS 约束补齐（与列表行 2026-09-28-change-ux-detail-batch ① 同类陷阱）： 1. `frontend/src/components/layout/page-header.tsx`：header flex 行的左侧内容列 `<div>` 补 `min-w-0`——flex 项默认 min-width:auto，其内 nowrap 长文（详情页描述行 w-full+truncate）的 min-content 把该列撑到 1861px（生产实测），溢出 header（1228px）并产生页面级横向滚动（scrollWidth 2219 > 视口 1600）。补 min-w-0 后整条收缩链打通：列可收缩 → p/副标题 flex-wrap 受限 → 描述 span w-full=受限宽 + truncate 生效出省略号。组件级修复覆盖全部 41 个使用 PageHeader 的页面。 2. 详情页标题 `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx:244`：flex 行内 `<span className="truncate">` 补 `min-w-0`——同为 flex 项 min-width:auto 陷阱，超长标题目前无法收缩截断，防下一起同型报告。 方案选择：改组件而非详情页局部包一层 overflow-hidden——根因在 PageHeader 的宽度约束链，组件级修复一处收口全部使用方；且 min-w-0 只放宽收缩下限，对正常宽度内容零视觉影响。 文件变更清单（自声明，收口对账面）： - `frontend/src/components/layout/page-header.tsx`（task-01：左列 div 补 min-w-0 + 注释） - `frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx`（task-02：标题 truncate span 补 min-w-0 + 注释） - `frontend/src/components/layout/__tests__/page-header.test.tsx`（task-03：新增回归测试 3 用例） - `.sillyspec/changes/2026-09-28-change-detail-header-overflow/*`（变更四件套 + visual-evidence.md + before-prod-1600.png）
+
+## D-frontend-030@v1 2026-09-28-change-ux-detail-batch——纯前端八点体验修正（用户实测反馈逐条对号）：①列表行描述 span 补 min-w-0——flex 项默认 min-width:auto，长文 nowrap 撑
+状态：implemented
+变更：2026-09-28-change-ux-detail-batch
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx, frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/changes/detail/change-stage-actions.tsx, frontend/src/components/changes/detail/quicklog-linked-card.tsx, frontend/src/components/changes/platform-sync-section.tsx, frontend/src/components/changes/scope-audit-command-card.tsx
+最近确认：未记录
+理由：纯前端八点体验修正（用户实测反馈逐条对号）：①列表行描述 span 补 min-w-0——flex 项默认 min-width:auto，长文 nowrap 撑破行宽溢出覆盖右列阶段/时间与 meta 行影响模块，min-w-0 收缩后 truncate 生效；②详情页 PageHeader subtitle 追加描述行（w-full 独占 + truncate + title 悬浮）；③平台同步常驻卡收进工具条「平台同步」按钮 + antd Drawer（destroyOnHidden），组件加 drawerHint prop：未绑定数据源时抽屉内出中性提示而非空白；④ChangeStageActions thin 分支改 return null（协议长文案退役，出身拦截保留）；⑤ChangeAssetsCard 默认展开（useState(true)）+ 自 aside 移主栏 + 分组改 md:grid-cols-2 网格、每组 h-64 固定高度 flex-col + 内层 overflow-y-auto；⑥详情页移除 ChangeAgentRunLog 挂载及其 agentStatus 取数链（getAgentStatus/refreshAgentStatus/panelRunId 全退，组件保留供 mobile-change-detail）；⑦QuicklogLinkedCard 空列表/加载中/失败一律不渲染；⑧ScopeAuditCommandCard 去头部说明副标题、DegradedNotice 双段压单行（保留「不出三态」口径与归档指路）。
+
+## D-frontend-031@v1 2026-09-28-quicklog-title-overflow——三处改动（frontend/src/components/changes/quicklog-table.tsx）： 1. DataTable 加 `tableL
+状态：implemented
+变更：2026-09-28-quicklog-title-overflow
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-28-quicklog-title-overflow/design.md
+文件：frontend/src/components/changes/__tests__/quicklog-table.test.tsx, frontend/src/components/changes/quicklog-table.tsx
+最近确认：未记录
+理由：三处改动（frontend/src/components/changes/quicklog-table.tsx）： 1. DataTable 加 `tableLayout="fixed"`——antd 默认 auto 布局下列宽按内容 min-content 协商，标题列（唯一无 width 列）实际分得 ~400px 而标题按钮 `max-w-[420px]` 自适应内容宽，按钮连同 truncate span 直接越过单元格右界压进负责人/影响模块列（生产实测 elRight 875 > cellRight 854，用户 sillyspec 工作区实证）；fixed 布局下标题列稳定分得剩余宽度，截断有确定边界。 2. 标题按钮 `max-w-[420px]` → `block w-full min-w-0 max-w-[420px]`——宽度跟随单元格（宽屏保留 420 视觉上限，窄屏收缩），内部 block truncate span 到边界出省略号。 3. StatusColumn 外层 `inline-flex` → `flex`、备注 `max-w-[160px]` → `max-w-full`——同型隐患：状态列 width 130，固定 160px 上限的备注可越过自身单元格。 放弃方案：仅给标题列配 antd column.ellipsis——只裁单行文本，破坏标题+ql_id 两行结构；仅删 420 上限不换 fixed——auto 布局下 nowrap 内容 min-content 仍会撑爆协商。 文件变更清单（自声明，收口对账面）： - frontend/src/components/changes/quicklog-table.tsx（task-01/02/03 三处） - frontend/src/components/changes/__tests__/quicklog-table.test.tsx（task-04 回归锁定扩展） - .sillyspec/changes/2026-09-28-quicklog-title-overflow/*（变更产物）
+
+## D-frontend-032@v1 2026-09-28-remove-liveness-overview-card——纯删除性前端小改：从工作区详情页（`frontend/src/app/(dashboard)/workspaces/[id]/page.tsx`）摘除 `<Ag
+状态：implemented
+变更：2026-09-28-remove-liveness-overview-card
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-28-remove-liveness-overview-card/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/agent-log/agent-liveness-overview-card.tsx
+最近确认：未记录
+理由：纯删除性前端小改：从工作区详情页（`frontend/src/app/(dashboard)/workspaces/[id]/page.tsx`）摘除 `<AgentLivenessOverviewCard>` 挂载与 import，删除组件文件 `frontend/src/components/agent-log/agent-liveness-overview-card.tsx`，并清掉 `page.test.tsx` 里对该组件的 vi.mock（无断言引用）。选删除而非「无数据时隐藏」：排查实证（2026-09-28）活性上报链路在真实部署从未建立——本机库 platform_agent_logs 724/725 行 state NULL（唯一非 NULL 是 manual_test 手工测试行）、daemon 连远程 crrcdt.ppdmq.top、各 workspace local.yaml 无 platform token 使 daemon liveness 循环空转零上报——卡片对用户恒显示「未知（100）」，无信息量且误导；修复链路（daemon 指回 + token 下发 + 持续在线）成本远超一张总览卡的价值，用户裁决去掉。数据层不动：GET /api/agent-logs 与 listWorkspaceAgentLogs 保留（会话列表 use-session-liveness 仍在用），liveness-badge 五态徽章保留（agent 日志面板行徽章仍在用）。
+
+## D-frontend-033@v1 2026-09-29-change-detail-timeline-files-polish——三处纯展示层优化，不动数据链路： 1. 时间线卡（change-timeline-card.tsx）：事件轴从 border-dashed 平铺改为「节点圆点
+状态：implemented
+变更：2026-09-29-change-detail-timeline-files-polish
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-29-change-detail-timeline-files-polish/design.md
+文件：backend/app/modules/change/service.py, backend/app/modules/change/tests/test_files_router.py, frontend/src/components/__tests__/change-file-tree.test.tsx, frontend/src/components/change-file-tree.tsx, frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx, frontend/src/components/changes/detail/change-timeline-card.tsx, frontend/src/components/files/__tests__/file-preview-modal.test.tsx, frontend/src/components/files/__tests__/preview-registry.test.ts, frontend/src/components/files/__tests__/structured-views.test.tsx, frontend/src/components/files/file-preview-modal.tsx, frontend/src/components/files/preview-registry.ts, frontend/src/components/files/previewers/index.ts, frontend/src/components/files/previewers/json-previewer.tsx, frontend/src/components/files/previewers/jsonl-previewer.tsx, frontend/src/components/files/structured-views.tsx, frontend/src/components/mobile/mobile-change-detail.tsx, frontend/src/lib/change-files.ts
+最近确认：未记录
+理由：三处纯展示层优化，不动数据链路： 1. 时间线卡（change-timeline-card.tsx）：事件轴从 border-dashed 平铺改为「节点圆点 + 连线」竖向时间轴结构（借用 primer Timeline 的视觉语言但行距收紧，事件密集场景 primer 本体 pb-5 太占空间，不直接复用）；卡内容区限高 max-h 内部滚动；事件超过 30 条默认只渲染最近 30 条 + 「展开全部」切换（useState）。 2. watcher-events.jsonl 预览：后端 _TEXT_SUFFIXES 补 .jsonl（当前被判非文本，内容预览完全不可用，这是用户诉求的根因）；前端 structured-views.tsx 新增 tryParseJsonl + JsonlView（通用逐行视图）+ watcher-events.jsonl 专用表格视图（时刻/kind 中文徽章/阶段/详情，ts epoch ms 转本地时刻）；preview-registry EXT_MAP 加 jsonl 键、新建 jsonl-previewer、file-preview-modal RENDERER_MAP 注册、JsonPreviewer 对 .jsonl 文件名兜底转发（防后端 mime 报 application/json 时走 json 分支）、change-file-tree FilePreview 加 jsonl 分支（内联）。 3. 中文名映射：change-file-tree.tsx 内置固定产物名 → 中文映射表（proposal.md→变更提案 等 14 项，按近三日 49 个变更目录统计）；树节点主显中文名 + muted 小字原名，内容区标题同理；下载/全屏预览 meta.name 保留原文件名（下载文件不被改名）。
+
+## D-frontend-034@v1 2026-09-29-issue-row-grid-misalign——一行核心修复：frontend/src/components/primer/issue-row.tsx 行组件在 leading 缺席时由渲染 null 改为渲
+状态：implemented
+变更：2026-09-29-issue-row-grid-misalign
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-29-issue-row-grid-misalign/design.md
+文件：frontend/src/components/primer/__tests__/primer-structures.test.tsx, frontend/src/components/primer/issue-row.tsx
+最近确认：未记录
+理由：一行核心修复：frontend/src/components/primer/issue-row.tsx 行组件在 leading 缺席时由渲染 null 改为渲染空占位 div（aria-hidden），与同文件 IssueRowHeader 既有占位先例（:117 `{leading ? <div>{leading}</div> : <div />}`）对齐。 机理：ISSUE_ROW_GRID 四轨 [auto, auto, minmax(0,1fr), auto] 首轨为 leading 插槽（批量模式勾选框）。无占位时普通行子元素左移一格——主体列落进第 2 轨 auto（按内容 max-content 撑宽）、右列内容落进第 3 轨 minmax(0,1fr)（可缩到 0）：长描述行第 2 轨吃满可用宽、第 3 轨被压到比右列内容窄，右列 flex justify-end 布局的内容**向左溢出画出自身容器盒**（生产实测：容器盒 left 1519 而内容 step-sub-row left 1083），与描述文字互相叠压——即用户报告的 desc(basis-full truncate) × step-sub-row 重叠（sillyspec 工作区归档 unclear-req-to-brainstorm 行 Playwright 复现，包围盒交集 true）。补占位后主体落 1fr 轨（可收缩、truncate 有确定边界）、右列落 auto 轨（按内容定宽、永不左溢）。 此前三轮修复未触此根因的教训：测量一直比对右列容器盒界（1519）而其内容已左溢出盒（1083）——凡 flex/grid 容器 justify-end + overflow，判定必须量内容元素而非容器盒。 文件变更清单（自声明，收口对账面）： - frontend/src/components/primer/issue-row.tsx（task-01：leading 空占位） - frontend/src/components/primer/__tests__/primer-structures.test.tsx（task-02：占位回归用例） - .sillyspec/changes/2026-09-29-issue-row-grid-misalign/*（变更产物）
+
+## D-frontend-035@v1 2026-09-29-jump-empty-turn-dup——session-panel-page.tsx handleJumpToTurn 单轮直达路径两处修补：①新增 `jumpEmptyJumpedRunIdsRef
+状态：implemented
+变更：2026-09-29-jump-empty-turn-dup
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-29-jump-empty-turn-dup/design.md
+文件：frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：session-panel-page.tsx handleJumpToTurn 单轮直达路径两处修补：①新增 `jumpEmptyJumpedRunIdsRef`（Set&lt;string&gt;）幂等标记——直达拉回的日志装配后无可渲染正文（segments/output 全空，群聊空 user_input 形态）时记名该 run，该轮后续点击直接定位高亮、不再发 run_id 请求；会话切换时重置（新会话同名 run 日志形态可能不同）。②prepend 门控——零正文（或装配无产出）不再 prepend：run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会造装饰键（jump-&lt;该轮最旧日志id&gt; 恒相同）撞 React key 的重复空块。用 ref 而非 state：handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），原 loadedTurn 查找受陈旧闭包拖累本就不可靠（本次诊断实证），ref 读取恒当前。
+
+## D-frontend-036@v1 2026-09-30-assets-testfile-nodeid-anchor——只改前端读侧归一纯函数 `normalizeTestFilePath`（frontend/src/components/changes/detail/chang
+状态：implemented
+变更：2026-09-30-assets-testfile-nodeid-anchor
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-30-assets-testfile-nodeid-anchor/design.md
+文件：frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx
+最近确认：未记录
+理由：只改前端读侧归一纯函数 `normalizeTestFilePath`（frontend/src/components/changes/detail/change-assets-card.tsx，2026-09-26-assets-testfile-path-resolve / 2026-09-27-assets-testfile-bracket-note 同一函数的续修）：在既有「」注解剥离之后新增两步——取首个用例锚界符（:: / # / >）之前的路径段，再剥尾部粘联的全角括号注解残段（未闭合截断形与闭合形）。选这个方案因为它就是 2026-09-26-binding-anchor-fidelity 落定契约（tests[] 带锚原样收录、文件面剥锚、展示面保持完整锚点）的读侧补齐——CLI 侧 testAnchorFile 已统一剥锚，平台读侧此前只落了「」一种形态，:: 形整串进 basename 必零命中。TestFileBody 的 basename 派生与 resolveTestFilePath 的等值/后缀比较均消费同一归一结果，一处修改两处生效；不改数据侧（归档 test-trace 是冻结审计件，先例 2026-09-26 摘录保真坑同判不可补）。
+
+## D-frontend-037@v1 2026-10-07-ci-failures-sweep——main 上 backend-ci 5 用例 + frontend-ci 3 用例失败，逐一核对生产契约后确认全部为测试侧债（生产代码零改动）：①迁移链尾锚测试
+状态：implemented
+变更：2026-10-07-ci-failures-sweep
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-07-ci-failures-sweep/design.md
+文件：backend/app/modules/change/tests/test_files_router.py, backend/app/modules/daemon/tests/test_attachment_pipeline.py, backend/app/modules/workspace/tests/test_archived_write_guard.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/knowledge/__tests__/precipitate-dialog.test.tsx, frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+最近确认：未记录
+理由：main 上 backend-ci 5 用例 + frontend-ci 3 用例失败，逐一核对生产契约后确认全部为测试侧债（生产代码零改动）：①迁移链尾锚测试自带「新迁移接续后锚前移」约定（测试注释原文），20261006200000 成为新 head 后锚未随动——更新锚与注释；②test_files_router fixture 取 items[0] 依赖 updated_at desc 排序，fixture 内归档 change（目录在 changes/archive/ 子树）在 CI Linux 同刻 mtime 下稳定排首，拼 changes/<key>/ 写 watcher-events.jsonl FileNotFoundError——fixture 固定选取 location=="active" 行；③群装配用例 member 夹具缺 D-003 新增的 config_snapshot 属性——补属性并顺势断言 model_name 透传/None 兜底两形态；④归档守卫用例断言停留在已退役的懒激活分支语义——改断言现行 409 TOOL_REPORT_TAKEOVER_INVALID，docstring 注明写入口兜底链。选测试侧修复而非改生产：每处均有生产侧契约依据（后端 schema/查表实态/特性 docstring），属规则 9 允许的「测试逻辑/夹具过时」情形。
+
+## D-frontend-038@v1 2026-10-07-ci-sweep-jsonl-mock——frontend-ci 第 4 处失败（2026-10-07-ci-failures-sweep 首轮排查时 tail 截断漏看）：onlyoffice-pre
+状态：implemented
+变更：2026-10-07-ci-sweep-jsonl-mock
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-07-ci-sweep-jsonl-mock/design.md
+文件：frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx
+最近确认：未记录
+理由：frontend-ci 第 4 处失败（2026-10-07-ci-failures-sweep 首轮排查时 tail 截断漏看）：onlyoffice-preview.test.tsx 枚举式 vi.mock("../previewers") 缺 fa799e68b（2026-09-29）新增的 JsonlPreviewer 导出，file-preview-modal.tsx 的 RENDERER_MAP 引用该导出时在模块作用域炸掉，整套件收集失败。修法：mock 补一行桩导出并更新注释溯源；顺带审计全仓其余枚举式 previewers mock（仅 file-preview-modal.test.tsx 一处，已含 JsonlPreviewer，无需动）。选测试侧补桩而非改生产：测试文件自有注释即约定「枚举式工厂须随桶文件新导出同步补齐」，属既定惯例漏补，生产桶导出契约无恙。
+
+## D-frontend-039@v1 2026-10-08-shared-assertion-surfaces——两轮 CI 清偿复盘：14 个失败用例中 9 个同模式——生产契约变更只更新了本变更内测试，漏了散落在其它文件钉住同一契约的断言（六面：迁移链尾锚/daemon
+状态：implemented
+变更：2026-10-08-shared-assertion-surfaces
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/design.md
+文件：backend/app/modules/llm_provider/schema.py, frontend/src/components/files/previewers/index.ts, frontend/src/components/workspace-tabs.tsx, frontend/src/lib/provider-caps.ts, sillyhub-daemon/src/daemon.ts
+最近确认：未记录
+理由：两轮 CI 清偿复盘：14 个失败用例中 9 个同模式——生产契约变更只更新了本变更内测试，漏了散落在其它文件钉住同一契约的断言（六面：迁移链尾锚/daemon 心跳参长/前端 TABS 数量/caps 全对象/previewers 枚举 mock/backend 词表对账正则）。方案是把这些「共享断言面」显性登记：①knowledge/testing-gotchas.md 新增条目逐面登记（契约源→钉子测试→动作），INDEX.md 挂关键词索引——flow start 知识注入与子代理 INDEX 查询可命中，这是工具链原生提醒通道；②五个契约源码处加一行同步提醒注释（schema.py/daemon.ts/workspace-tabs.tsx/provider-caps.ts/previewers/index.ts），动手改契约的人当场可见。选注释+知识库而非自动生成清单脚本：登记一次成本低、命中面即改契约现场与 flow start 两处，自动方案（AST 扫描钉子）复杂度不成比例。
+
+## D-frontend-040@v1 2026-10-09-graph-raf-settle——`graph-canvas.tsx` 的 force 引擎 rAF 循环加收敛截止：新增导出纯函数 `forceSettled`（Verlet 步后 x−px
+状态：implemented
+变更：2026-10-09-graph-raf-settle
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-09-graph-raf-settle/design.md
+文件：frontend/src/components/knowledge/__tests__/graph-canvas.test.ts, frontend/src/components/knowledge/graph-canvas.tsx
+最近确认：未记录
+理由：`graph-canvas.tsx` 的 force 引擎 rAF 循环加收敛截止：新增导出纯函数 `forceSettled`（Verlet 步后 x−px 即本帧位移，全节点位移和 < FORCE_SETTLE_EPSILON=0.25 判静止，NaN 防御）+ 组件内 `forceLiveRef`/`forceSettledFramesRef` 两 ref。循环的力场块加 `forceLiveRef.current` 门：步进后累计连续静止帧，达 FORCE_SETTLE_FRAMES=30 即置 false 停步进，并在该帧未交互时做终局 fitView（承接收敛跟随）；数据重建 effect 与拖拽命中分支复位重启。选「停步进保留 rAF 渲染循环」而非「取消 rAF 按需重启」：渲染循环本就有 dirty 早退（非 dirty 帧仅一个空回调，成本可忽略），取消/重启 rAF 需要在所有 dirty 置位点接线，改动面大收益边际。连续 30 帧守卫防弹簧转折点瞬时零速误判（单帧判定会在振荡系统上早停）；拖拽活跃守卫（dragRef 非空不判静止）防被拖节点位移恒零导致的误停冻结（首轮评审 P1 修复）；forceSettled 对 px/py 的 NaN 同防御（NaN>x 恒 false 缝隙，首轮评审 P3 修复）。
+
+## D-frontend-041@v1 2026-10-10-change-patch-cross-repo-view——纯前端读侧适配，单文件改动：`frontend/src/components/files/structured-views.tsx` 的 `ScopeAudit
+状态：implemented
+变更：2026-10-10-change-patch-cross-repo-view
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/design.md
+文件：frontend/src/components/files/__tests__/structured-views.test.tsx, frontend/src/components/files/structured-views.tsx
+最近确认：未记录
+理由：纯前端读侧适配，单文件改动：`frontend/src/components/files/structured-views.tsx` 的 `ScopeAuditView`（scope-audit.json 独立报告与 change-patch.json 的 scopeAudit 子对象共用同一渲染）增量渲染跨仓冻结面。数据链：sillyspec 仓变更 2026-10-10-cross-repo-patch-freeze（已归档，commit e7a50f35）已把 `scopeAudit.repos[]`（key/anchor/totals/degraded/degradedReason/patch/patchSha256）冻结进 change-patch.json；平台文件预览链（change-file-tree 内联预览 + json-previewer 全屏弹窗）把 JSON 全文交给 `knownJsonView` → `ChangePatchView` → `ScopeAuditView`——在这一个渲染函数补齐，两个入口同时生效，后端/daemon 零改动。 视觉形态对齐变更中心 scope-audit-command-card 的跨仓分组渲染（2026-09-20-scope-audit-cross-repo-platform 已上线范式）：主仓 brand 色标识、锚点 chip、三态 chips。一处差异：daemon 链的 `anchor_label` 短哈希是 daemon 投影产出，冻结件里没有——前端从 `anchor.base` 自行短化（`slice(0, 7)`）。patch 正文折叠块默认收起，展开后复用 `DiffView`（自带 2000 行增量渲染，大 diff 不铺满）。
+
+## D-frontend-042@v1 2026-10-13-load-earlier-full-turn——问题根因：`handleLoadEarlier`（session-panel-page.tsx）按 `(ts,id)` 复合游标固定 `HISTORY_PAGE
+状态：implemented
+变更：2026-10-13-load-earlier-full-turn
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/design.md
+文件：frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx, frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：问题根因：`handleLoadEarlier`（session-panel-page.tsx）按 `(ts,id)` 复合游标固定 `HISTORY_PAGE_SIZE=400` 行翻页，页边界与「已加载窗口最旧行」边界都会把一轮（run） 切成两半——触顶加载后顶部那轮只有后半段（提问在更早未加载区）；「回到会话开头」 复用同一翻页链路，到头后跨页同轮分裂成多个轮块（每页独立 `logsToTurns` 装配）。 方案（轮边界对齐）：翻页拉回一页后判两类跨界轮——① 窗口侧：页轮集合 ∩ 窗口终态 轮集合（新增模块级纯函数 `collectCrossBoundaryRuns`，经 `turnsRef` 快照镜像读取， 不进回调 deps）；② 页顶侧：满页时发 `limit=1` 探查请求（同 before 复合游标语义） 取紧邻更早一行，与页内最旧行同 run 即被切。命中的跨界轮用既有 `run_id` 直达端点 （`getAgentSessionLogs({runId, slim})`，先例：handleJumpToTurn 单轮直达）拉整轮行， 当页该轮行替换为整轮行重新装配，并在 prepend 的 `setTurnState` updater 里摘掉窗口 内同轮终态旧块——一轮收敛为单个完整块（提问 + 全部输出同块）。游标推进取合并后 行集的最旧行。选此方案而非「续拉整页直到轮边界」：后者多拉无关行且仍分裂显示； 选此方案而非「重写装配层做跨块段合并」：直达整轮重装天然产出单块，改动收敛在 handleLoadEarlier 一个函数内，SSE 实时链路零触碰。
+
+## D-frontend-043@v1 2026-10-14-decision-anchor-change-qualified——根因：`decisions/unmapped.md` 等聚合文件里多个变更各有同名决策号（实证：D-003@v1 出现 3+ 次），既有锚 `文件#决策号` 不
+状态：implemented
+变更：2026-10-14-decision-anchor-change-qualified
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-14-decision-anchor-change-qualified/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx, frontend/src/components/knowledge/entry-card-list.tsx
+最近确认：未记录
+理由：根因：`decisions/unmapped.md` 等聚合文件里多个变更各有同名决策号（实证：D-003@v1 出现 3+ 次），既有锚 `文件#决策号` 不唯一，`querySelector` 命中文件序第一个同号卡——沉淀资产卡弹窗（上一变更新增）与知识库页深链滚动都会落错卡。修复采用「复合锚」：结构化条目卡新增 `data-entry-anchor-qualified="文件#变更号#决策号"`（变更号取条目自身的「变更：」字段，与仓库既有跨变更引用约定 `变更名#D-xxx@vN` 同构），裸锚保留兼容。 改动三点：① `entry-card-list.tsx` DecisionCard 输出复合属性（id+变更字段齐备才输出）；② `change-assets-card.tsx` 资产卡新增 `changeKey` prop（变更详情页已有 `change.change_key`，一处透传），FR/决策行深链 anchor 参数带变更号前缀，弹窗定位先试复合锚再退裸锚；③ `knowledge/page.tsx` 深链滚动对含 `#` 的 anchor 先试复合属性、查无退裸锚。知识触达/手册/INDEX 锚点不动。
+
+## D-frontend-044@v1 2026-10-14-session-bottom-switch-remount——第三层根因：SPA 内列表点击切换会话时 SessionPanelPage/TurnTimeline 不卸载重挂，滚动判定 refs 跨会话残留（上滚读历史后
+状态：implemented
+变更：2026-10-14-session-bottom-switch-remount
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-14-session-bottom-switch-remount/design.md
+文件：frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：第三层根因：SPA 内列表点击切换会话时 SessionPanelPage/TurnTimeline 不卸载重挂，滚动判定 refs 跨会话残留（上滚读历史后 isNearBottomRef=false）→ 新会话贴底跟随被守卫拦下（真浏览器复现：会话 A 上滚→切 f231ca18→停距底 3963px）。前两轮修复（length 分量/被动增高）只覆盖整页加载路径。修法：React 惯例——同组件不同实体用 key 隔离：page/dialog 两处 <TurnTimeline> 挂 key={会话标识}，切换即重挂载、全部滚动状态归零（初始贴底语义恢复）。agent-replay-body（本地回放单会话展示）不 key 化。
+
+## D-frontend-045@v1 2026-10-14-session-preview-defect-fixes——上一变更（2026-10-14-session-turn-preview-cards）上线实测两缺陷，本修复最小改面两处： ①失败轮点不动——根因：单轮「有内容
+状态：implemented
+变更：2026-10-14-session-preview-defect-fixes
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-14-session-preview-defect-fixes/design.md
+文件：frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx, frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts, frontend/src/components/daemon/session-panel/preview-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：上一变更（2026-10-14-session-turn-preview-cards）上线实测两缺陷，本修复最小改面两处： ①失败轮点不动——根因：单轮「有内容」判定（anyBody/hasBody/loadedHasBody 共 5 处）只认 segments/output，额度耗尽失败轮（日志含 user_input 无答复）被判零正文进幂等黑名单，点击短路无响应。修法：5 处统一口径补「非空 prompt 也是可渲染正文」（用户消息气泡本身是内容；失败详情卡由 runs 快照 error_detail 经既有 enrichDisplayTurns 注入，块进来即渲染）。真零正文（prompt/output 双空，群聊空 user_input）维持 2026-09-29 幂等语义——探针实证空串不被放行。 ②轮号错乱——根因：logsToTurns 按批次局部编号（初始窗口末块=12、单轮直达恒 1、翻页各批各起 1），归并层有大纲权威 seq 却未盖到已加载块，与预览卡/导航轮号错位穿帮。修法：归并层透传时盖章（stampOutlineSeq：seq 不一致才克隆），WeakMap 按原引用缓存产物——流式期间每 delta 重派生 displayTurns 不因盖章全量克隆（TurnRow memo 不击穿），seq 已一致零克隆。
+
+## D-frontend-046@v1 2026-10-15-ci-recurrence-guard——把 2026-10-15-fix-ci-red 灭火中归因的三类本地拦截面缺口机制化：① 断言面闸门规则⑦ requires 补齐三件套（admin/menus
+状态：implemented
+变更：2026-10-15-ci-recurrence-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/design.md
+文件：.claude/CLAUDE.md, backend/.pre-commit-config.yaml, backend/tests/test_check_assertion_surfaces.py, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx, scripts/check-assertion-surfaces.py
+最近确认：未记录
+理由：把 2026-10-15-fix-ci-red 灭火中归因的三类本地拦截面缺口机制化：① 断言面闸门规则⑦ requires 补齐三件套（admin/menus 序钉 + menu-permissions.test.ts 数量锚 + permission.test.ts 分区条目）——历史事故正是「只重算序钉漏数量锚」，闸门当时只盯序钉；② 新增规则⑨ openapi.json 契约源 → 前端+daemon 双 api-types 生成物同提交——规则 21 长期只写前端义务，daemon 漏生成无人记得；③ pre-push 新增 ci-fast-gate 快检（frontend/daemon typecheck + 双 gen:types:check，与 CI 同源四命令前移到推送时）。同步 CLAUDE.md 第 21 条与 knowledge/testing-gotchas.md（脚本 docstring 规定的两处同步登记）。选扩展既有闸门而非新建脚本：改契约必须同提交配对测试的防呆模式 2026-10-11 已实证有效，本次只是补规则；pre-push 而非 pre-commit 放 typecheck——每次提交跑 1 分钟太重，推送是 CI 前最后闸口。
+
+## D-frontend-047@v1 2026-10-15-graph-type-cluster——用户实测反馈：neighbors 等查询切片的力场布局里不同类型节点混成一坨。
+状态：implemented
+变更：2026-10-15-graph-type-cluster
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-15-graph-type-cluster/design.md
+文件：frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx, frontend/src/components/knowledge/__tests__/graph-canvas.test.ts, frontend/src/components/knowledge/graph-canvas.tsx
+最近确认：未记录
+理由：用户实测反馈：neighbors 等查询切片的力场布局里不同类型节点混成一坨。现 slice 力场只有斥力（成对近距）+ 边弹簧 + 向心 0.004 三种力，无任何让同类型靠近的力；而 >200 节点的静态降级 staticLayout 已按类型分环。本变更让力场面对齐该语义：在 stepForceLayout 每步弹簧段之后新增「类型内聚」力——先统计各类型有限坐标节点的质心，再对每个节点施加朝本类型质心的弱牵引（TYPE_COHESION_PULL，量级与 CENTER_PULL 同数量级、略强）。同类成簇、异类被对称斥力推开出块；跨类型边弹簧照常拉出"桥"，正好呈现用户草图期望的形态。选质心牵引而非固定扇区锚：零配置自适应任意类型数、不与既有向心/弹簧参数打架、单成员类型自动零力。
+
+## D-frontend-048@v1 2026-10-17-session-envelope-rev-stale-guard——改 `frontend/src/stores/session.ts`：SessionState 新增单调 rev 计数器（持久化进信封）——setTokens/
+状态：implemented
+变更：2026-10-17-session-envelope-rev-stale-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-17-session-envelope-rev-stale-guard/design.md
+文件：frontend/src/stores/session.test.ts, frontend/src/stores/session.ts
+最近确认：未记录
+理由：改 `frontend/src/stores/session.ts`：SessionState 新增单调 rev 计数器（持久化进信封）——setTokens/setUser/clear 三个用户驱动变更加一，storage 回放不自行加一而是采纳远端 rev；回放守卫先判 rev（远端更旧 = 迟到旧值，整体忽略），再走既有的差异比对（乒乓切断逻辑原样保留）。 选此方案依据：迟到旧信封覆盖新值的危害是「已登出/已续票标签页被幽灵复活」（2026-10-17-session-replay-pingpong-fix 评审 P3-3），窗口虽小但属刚出过 11 小时生产事故的同源子系统；rev 是最小充分方案——单调性天然定义「谁新谁旧」，不依赖时钟，不改 persist 中间件。旧形状信封无 rev 字段自动回落既有内容比对，混合版本标签页安全（新版代码的静默路径会饿死任何它参与的环）。
+
+## D-frontend-049@v1 2026-10-17-session-replay-pingpong-fix——改 `frontend/src/stores/session.ts` 的跨标签 storage 回放监听器：回放前先与本地当前状态逐字段比对——accessTo
+状态：implemented
+变更：2026-10-17-session-replay-pingpong-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-17-session-replay-pingpong-fix/design.md
+文件：frontend/src/stores/session.test.ts, frontend/src/stores/session.ts
+最近确认：未记录
+理由：改 `frontend/src/stores/session.ts` 的跨标签 storage 回放监听器：回放前先与本地当前状态逐字段比对——accessToken/refreshToken 字符串直比，user 用键序无关稳定键（键排序后序列化）比较——只对真实差异字段 setState，全等时静默返回（不 setState 即不产生 persist 写盘）。 选此方案依据：乒乓环路的自持能量来自「回放→persist 写盘→对方 storage 事件→回放」，从回放侧掐掉同值写盘即让环路失去自持条件（生产实证 2026-10-17：两标签各持不同过期 token，/api/auth/me 每秒 10 条 401 刷屏 11 小时）；同时不改 persist 配置、不动任何调用方，真实跨标签同步语义完整保留，改动面最小。
+
+## D-frontend-050@v1 2026-10-19-preview-card-empty-turn-fix——根因：切换档案产生「纯切换轮」（backend inject.py silent_config_switch，inject.py:608）——建 run 刻意零
+状态：implemented
+变更：2026-10-19-preview-card-empty-turn-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-19-preview-card-empty-turn-fix/design.md
+文件：docs/releases/2026-10-19-013-205a79f71.md, docs/releases/2026-10-19-014-5b9c2ce4c.md, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx, frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts, frontend/src/components/daemon/session-panel/preview-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：根因：切换档案产生「纯切换轮」（backend inject.py silent_config_switch，inject.py:608）——建 run 刻意零日志（实测会话 54317e42 第 2/4/7 轮均 0 条日志、started_at 空、无 engine_anchor）。刷新后轮次大纲（agent_runs 全量投影）包含该轮，归并层把「大纲有、无实质内容」一律合成「未加载 · 点击展开」预览卡；点击后单轮直达查回 0 条日志走 empty 静默短路（session-panel-page.tsx fetchAndAttachTurn）并记入零正文幂等黑名单，卡片永久展不开且无反馈。 方案（前端两处小改）：① preview-merge.ts 新增 isContentlessTerminalItem 判定（started_at 空 + error_code 空 + 摘要双空 + previewTurnStatusOf 映射 completed/killed 终态），命中该类大纲条目不再合成预览卡——turns 有命中（孤儿配置行/已加载空壳）原引用透传并盖 seq（恢复 2026-10-14 design 非目标「静默配置切换轮紧凑配置行语义保留」），无命中不生成条目（深历史静默轮回到 preview-cards 之前的不可见语义）；② handleExpandPreview 对 empty 结果补 notify.warning 轻提示，兜底消灭「点了没反应」。判据核心是 started_at：正常轮派发引擎后必有值，纯切换轮从未派发恒空；群聊空 user_input 轮（2026-09-29 幂等语义）、失败族（失败卡是内容）、活跃族（后续可能出内容）都被 started_at/error_code/终态三条件天然排除，行为零变化。 追加（真机验收发现，同缺陷家族第三面——导航跳转链路）：③ 修复上线后真机点左侧导航的静默轮刻度弹「操作失败」——直达链路对零日志轮走 notify.error("该轮次日志不存在…")，纯字符串被 errMessage 吞成默认「操作失败」（errors.ts misuse guard），且无内容终态轮本就不该报错。修法：isContentlessTerminalItem 导出复用（单一判定源），handleJumpToTurn 命中即早退——不发请求，直接定位高亮既有配置行并记幂等；三处固定文案（直达零日志 / 回退翻页到头 / 展开失败）改 notify.warning 原文；prefetchNearbyTurns 跳过无内容邻居不再发无效请求。
+
+## D-frontend-051@v1 2026-10-20-preset-engine-endpoint——前端两文件：①`config/llmProviderPresets.ts`——预设类型加可选 `codex: { base_url; default_model
+状态：implemented
+变更：2026-10-20-preset-engine-endpoint
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-20-preset-engine-endpoint/design.md
+文件：docs/releases/2026-10-20-005-6fa3a31.md, frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx, frontend/src/components/llm-providers/__tests__/llmProviderPresets.test.ts, frontend/src/components/llm-providers/llm-provider-form.tsx, frontend/src/config/llmProviderPresets.ts
+最近确认：未记录
+理由：前端两文件：①`config/llmProviderPresets.ts`——预设类型加可选 `codex: { base_url; default_model? }`，智谱 GLM 与 OpenCode Go 两条声明实测过的 codex 端点；②`components/llm-providers/llm-provider-form.tsx`——预设应用抽成按引擎分派（claude 形态=现有行为，codex 形态=覆盖端点+模型+清 env），引擎勾选 onChange 加联动：勾 Codex 且选中预设带覆盖 → 切 codex 形态并自动取消 Claude（平台一条凭证一个端点，两引擎同勾必有一坏）；取消 Codex → 回 claude 形态。选「勾选联动」而非「预设拆两条」（OpenCode Go Codex 预设另列）：预设选择器已拥挤、且用户先选供应商再选引擎是自然顺序，联动把「这家供应商对 codex 需要别的端点」这一平台约束显性化。
+
+## D-frontend-052@v1 2026-10-20-session-error-visibility——生产实证（会话 71419980）：backend close_run_steps.py:277 把 SDK status=error_during_execu
+状态：implemented
+变更：2026-10-20-session-error-visibility
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-20-session-error-visibility/design.md
+文件：docs/releases/2026-10-20-003-50dfdf2.md, frontend/src/components/agent-log/__tests__/run-error-item.test.tsx, frontend/src/components/agent-log/run-error-item.tsx, frontend/src/components/daemon/__tests__/page-helpers-error-visibility.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx
+最近确认：未记录
+理由：生产实证（会话 71419980）：backend close_run_steps.py:277 把 SDK status=error_during_execution（涵盖全部模型错误：429/断流/codex spawn 失败）统一落 error_code=interactive_interrupted；前端 runTerminalTurnStatus（快照路径）与 deriveTurnTerminalStatus（实时路径）据此把该类轮归 killed「已中止」且不回填 errorDetail → RunErrorItem 错误卡永不渲染，真实错误（error_detail.raw）对用户完全不可见。 修复利用既有事实做精确区分：模型失败 = interactive_interrupted **且 error_detail 非空**（daemon classifyModelError 产物，模型错误键存在）；真打断 = interactive_interrupted 且 error_detail 空。两处渲染路径按此精化：① 快照路径（page-helpers.tsx enrichOne）terminal 判定为 killed 但 meta.status=failed 时尝试 buildErrorLogItem(meta.error_detail)，可解析则升级为 failed（status failed + errorDetail 回填，错误卡渲染），真打断维持 killed；② 实时路径（session-panel-page.tsx 终态回调）错误详情拉取条件扩展，拉回 error_detail 可解析则翻 status=failed + errorDetail；③ RunErrorItem raw 首行摘要默认渲染。选此方案而非后端拆新 error_code：后者需 daemon/backend/前端三方发版且存量 run 无法重写，error_detail 判定对存量数据即刻生效。
+
+## D-frontend-053@v1 2026-10-21-proto-data-exposure-guard——三步收口两条风险：①真实会话导出数据从 `frontend/public/__proto/` 移至 `frontend/.proto-staging/`——Ne
+状态：implemented
+变更：2026-10-21-proto-data-exposure-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-21-proto-data-exposure-guard/design.md
+文件：.gitignore, frontend/.gitignore
+最近确认：未记录
+理由：三步收口两条风险：①真实会话导出数据从 `frontend/public/__proto/` 移至 `frontend/.proto-staging/`——Next.js 只静态服务 `public/`，移出即断「免鉴权可下载」暴露通道，且该目录不进构建产物（数据从此物理上无法随部署分发）；②`staged-session-export.ts` 读取路径常量随迁（`["public","__proto",...]` → `[".proto-staging",...]`），`view.tsx` 移除对 public URL 的运行时 fetch 兜底（数据不在可 fetch 面，兜底成死码），4 处注释同步真实位置；③根/前端 `.gitignore` 补 `/.tmp/`、`backend/pytest-of-*/`、`frontend/.proto-staging/`、`frontend/public/__proto/`、`*.TMP`——审查实证这五类残留全部裸奔在 untracked 面，多 agent 共享仓下「禁目录级 add」只是纪律，gitignore 才是机制。 选「移出」而非「脱敏后留 public/」：导出含 1271 条真实日志，逐条脱敏成本高，而 dev 预览恰恰依赖真实文本形态（字号/密度/长文本折行都是评审对象）；移出服务面零成本达成同等安全目标，SSR 读盘路径保留真实数据可用性。
+
+## D-frontend-054@v1 2026-10-22-file-card-hide-empty——把「无数据的轮级文件变更卡」从**渲染降级卡**改成**不出卡**：唯一判定点收敛在纯映射 `toFileChangesCardProps`（`frontend
+状态：implemented
+变更：2026-10-22-file-card-hide-empty
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-file-card-hide-empty/design.md
+文件：frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-summary.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/file-changes-summary.tsx, frontend/src/components/daemon/file-changes/turn-file-changes.ts, frontend/src/components/daemon/turn-timeline.tsx
+最近确认：未记录
+理由：把「无数据的轮级文件变更卡」从**渲染降级卡**改成**不出卡**：唯一判定点收敛在纯映射 `toFileChangesCardProps`（`frontend/src/components/daemon/file-changes/turn-file-changes.ts`）——`capability="tool_only"` / `snapshot=null` / `status=failed|unavailable` 三条分支一律 `return null`，轮级挂载层（`turn-timeline.tsx` 已是「`null` 不出卡」语义）零改动，因此不会出现「映射改了但挂载层还占位」的错位。 会话级汇总同步收窄：`aggregateTurnFileChanges` 跳过无可信快照的轮（不再计入 `degradedTurns`、不再把状态压到 `partial`），`FileChangesSummary` 在 `totalFiles === 0` 时整卡零渲染，「其中 N 轮无工作区快照（仅工具编辑）」提示行删除。选这个方案的理由：缺陷是**呈现策略**而不是数据链路——daemon 侧实测无故障（0.2.0 采集器 `status=ok` / 46 files / 165ms），历史轮本来就拿不到快照（部署前的轮没有 `daemon_run_snapshots` 行），所以只需在「无信息」的判定处收口，不动 DTO、不动后端、不动 daemon。
+
+## D-frontend-055@v1 2026-10-22-file-changes-card-fix——daemon 采集器（`sillyhub-daemon/src/interactive/turn-file-changes.ts`）把「文件清单真相源」从 `g
+状态：implemented
+变更：2026-10-22-file-changes-card-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-file-changes-card-fix/design.md
+文件：frontend/e2e/proto-file-card.spec.ts, frontend/src/app/proto/session-file-changes/page.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-changes.test.ts, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-changes.ts, sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/turn-file-changes-types.ts, sillyhub-daemon/src/interactive/turn-file-changes.ts, sillyhub-daemon/tests/interactive/session-manager-turn-file-changes.test.ts, sillyhub-daemon/tests/interactive/turn-file-changes.test.ts
+最近确认：未记录
+理由：daemon 采集器（`sillyhub-daemon/src/interactive/turn-file-changes.ts`）把「文件清单真相源」从 `git status` 单源改为 **status ∪ `git diff --name-status <baselineHead>`**：status 覆盖未提交/未跟踪，baseline→工作区的 name-status 覆盖轮内已提交改动；行数统一取 `git diff --numstat <baselineHead>`。采集过程改为分阶段记录（status / name-status / numstat），任一 diff 阶段超时只降级行数或状态精度，不再丢弃已完成清单。预算按工作区分层：默认 1500ms，`/mnt/` 挂载 ≥8000ms，超时后进程内自动升级到 15000ms 封顶，并支持 `SILLYHUB_FILE_CHANGES_TIMEOUT_MS` 覆盖。前端把 DTO 的 `status` 带进视图模型，渲染状态徽标；未跟踪/mtime 行不再显示 +0 −0；删除行不可点击；「改N次」改为编辑调用次数（daemon 侧不再按工具名去重）；notice 按 reason+collectMs 生成文案，并在 notice 态渲染共享工作区提示。
+
+## D-frontend-056@v1 2026-10-23-askuser-history-live-sync——根因：dialogHistory（驱动对话/进度内容流 AskUser 穿插渲染的数据源）只在 sessionId 变化的 effect 里 REST 拉一次，
+状态：implemented
+变更：2026-10-23-askuser-history-live-sync
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-askuser-history-live-sync/design.md
+文件：backend/app/core/client_ip.py, backend/app/modules/auth/router.py, backend/app/modules/daemon/model.py, backend/app/modules/daemon/router/heartbeat.py, backend/app/modules/daemon/router/version.py, backend/app/modules/daemon/runtime/service.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/network_context.py, backend/migrations/versions/20261023090000_add_daemon_instances_network_info.py, backend/tests/modules/daemon/test_network_context.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/file-changes-card.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/file-changes-card.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/session-panel/__tests__/refetch-dialog-history.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+最近确认：未记录
+理由：根因：dialogHistory（驱动对话/进度内容流 AskUser 穿插渲染的数据源）只在 sessionId 变化的 effect 里 REST 拉一次，SSE 两个 permission 事件（onPermissionRequest ~1674 / onPermissionResolved ~1687）都只维护 pendingRequests——待答卡原先渲染在时间线内容流内，提问实时可见掩盖了历史不实时；2026-10-22-askuser-dock-inputbar 把卡迁到输入框位置后，内容流对提问/回答完全无实时回显（刷新页面才显示）。 方案：在 page-helpers 新增共享函数 `refetchDialogHistory(sessionId, setDialogHistory, seqRef)`（带序号防护的重拉动作函数；评审 P3 收敛：原稿契约名 createDialogHistoryRefetch 系笔误，实态为直接执行型函数），两挂载点（session-panel-page / session-panel-dialog）在 onPermissionRequest 与 onPermissionResolved 回调里各调用一次重拉——提问到达时后端 dialogs 已落库 pending 项（fetchPendingDialogs 同源可证），resolved 时答案已写库（backend 落库后推事件），重拉即得权威数据。前端不手工把 SSE 事件转 SessionDialogRead（resolved 事件不含 answers，伪造会与后端不一致）；事件频率为问答级（人答），重拉开销可忽略。
+
+## D-frontend-057@v1 2026-10-23-diff-copy-p3-cleanup——答：三处小清偿，全部在 turn-file-diff-dialog.tsx 与其测试。
+状态：implemented
+变更：2026-10-23-diff-copy-p3-cleanup
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-diff-copy-p3-cleanup/design.md
+文件：frontend/src/components/daemon/file-changes/__tests__/turn-file-diff-dialog.test.tsx, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx
+最近确认：未记录
+理由：答：三处小清偿，全部在 turn-file-diff-dialog.tsx 与其测试。①复制按钮由 `text={diffRowsToText(section.rows)}` 改 `getText={() => diffRowsToText(section.rows!)}`——CopyButton 的 getText 路径本就为「渲染期惰性、点击期取值」设计（注释明确「组件不在渲染期调用以保持惰性」），反之用 text 会在每次渲染（含流式/字体状态等任何重渲染）对全部 rows 做字符串拼接。②补丁区底部脚注（原「内容来自本轮 agent 日志…仅计入行数统计」）追加边界说明：复制文本为行级内容、不含 hunk 头、不可直接用于 git apply——把上一变更 design 声称而未落地的文案补上。③无补丁用例改为 `findByText` 等待说明文案（NO_PATCH 文案片段）出现后再断言无按钮，删除态同理（已等「本轮被删除」，保留）；loading 态不再作为 ready 判据。 不改 diffRowsToText 实现（纯函数正确性已由 5 个用例钉住）；不改 CopyButton 共享组件；不动归档件（FR-02 措辞矛盾属上一变更归档文档，不回改历史，教训记入本变更 requirement 语境）。
+
+## D-frontend-058@v1 2026-10-23-diff-dialog-pairing-fix——答：根因两层（第二层为评审修正后的关键发现）： **第一层（表象）**：`collectTurnFilePatches` 的②回退配对把无主补丁「按日志序塞给路
+状态：implemented
+变更：2026-10-23-diff-dialog-pairing-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-diff-dialog-pairing-fix/design.md
+文件：docs/sillyspec/active-pitfalls.md, docs/sillyspec/edit-patch-tool-use-id-missing.md, frontend/src/app/globals.css, frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff-dialog.tsx, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts, frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx, frontend/src/components/daemon/session-panel/initial-window-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-live-marquee.tsx, frontend/src/components/daemon/turn-timeline.tsx
+最近确认：未记录
+理由：答：根因两层（第二层为评审修正后的关键发现）： **第一层（表象）**：`collectTurnFilePatches` 的②回退配对把无主补丁「按日志序塞给路径命中目标文件的第一个未用编辑调用」——隐含假设「无主补丁都属于弹窗目标文件」，多文件编辑轮必然张冠李戴（2026-10-23 实证：会话 49c5c3ec / run 63130ca1，点 task-runner.test.ts 显示 design.md 内容）。 **第二层（真根因）**：①精确配对读的是日志行顶层 `entry.tool_use_id`，但 `agent_run_logs` **没有该列**（backend schema 注释明写「DB 无此列」，仅 slim 截断时由路由内存回填）——真实配对键在 `metadata.agent_event.call_id`（新轨事件逐行落库，`submit_steps.py:594/628`）。因此①在弹窗的真实 REST 链路上**从未生效**，全部补丁都落进②启发式配对，这才是错配的系统性成因。 **修法**：①配对键改为 `entryCallId(entry)`——`metadata.agent_event.call_id` 为主，回退顶层 `tool_use_id`（slim）与 content JSON 内 `tool_use_id`（旧轨）；id 索引全量预建（容忍乱序批次）。②回退改为**子代理轨道隔离 + 同轨唯一悬置**：按 `parent_tool_use_id` 分轨，候选取「同轨、日志序已出现、未消费的编辑族调用」，恰好一个才配、否则丢弃（平台支持后台子代理并行，跨轨配对会把 A 的补丁挂到 B 名下；同轨多悬置亦无法确证）。 为什么先误判为「数据面丢 id」：初版只看到补丁行顶层 `tool_use_id` 为空，误以为数据链丢键；独立评审核对 backend 后确认该字段本就不是 DB 列、真实键在 `metadata.agent_event.call_id`——根因属于前端读错来源，无需改数据面（FR-04 因此改为「事实登记」）。回退配对保留为旧轨/异常数据的兜底，按轨道隔离 + 同轨唯一悬置，宁缺勿错。
+
+## D-frontend-059@v1 2026-10-23-marquee-blank-track-fix——**根因**：`applyTarget` 在「达到 200 条上限后的窗口滑动」分支执行 `next = min(previousTarget, base) -
+状态：implemented
+变更：2026-10-23-marquee-blank-track-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-marquee-blank-track-fix/design.md
+文件：frontend/src/app/proto/session-live-marquee/page.tsx, frontend/src/components/daemon/__tests__/turn-live-marquee.test.tsx, frontend/src/components/daemon/turn-live-marquee.tsx
+最近确认：未记录
+理由：**根因**：`applyTarget` 在「达到 200 条上限后的窗口滑动」分支执行 `next = min(previousTarget, base) - step`。每新增一条事件都会滑动一次，目标就在上一次目标基础上再减一条宽度， 长期运行后 target/offset 无限负向，超过 track 内容总宽，整条轨道被推出视口——只剩状态点与 LIVE。 **修复**：把目标规则抽成纯函数 `resolveMarqueeTarget`： - 滑动（`slideStep != null`）→ 目标**回到 base**（最新条贴右缘的位置），不再累减； - 普通内容增长 → `min(previousTarget, base)`（只向更负，不回滚）。 视觉连续性由 offset 补偿实现：滑动瞬间 DOM 内容整体左移一条，先把 `offset += step`（并 clamp ≤ 0） 抵消视觉跳变，再把目标设为 base，由现有 rAF 缓出从补偿后的 offset 平滑滚回 base——每次滑动只前进一条， 位移不累积。原型页新增「长会话（210 条）」入口用于复现与核验。
+
+## D-frontend-060@v1 2026-10-23-session-first-load-ux——用户痛点：进入会话面板，轮次列表出现慢（大会话多等数秒）且加载中无任何动态指示。
+状态：implemented
+变更：2026-10-23-session-first-load-ux
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-session-first-load-ux/design.md
+文件：docs/sillyspec/active-pitfalls.md, docs/sillyspec/edit-patch-tool-use-id-missing.md, frontend/src/components/daemon/__tests__/turn-timeline-history-loading.test.tsx, frontend/src/components/daemon/file-changes/__tests__/turn-file-diff.test.ts, frontend/src/components/daemon/file-changes/turn-file-diff.ts, frontend/src/components/daemon/session-panel/__tests__/initial-window-merge.test.ts, frontend/src/components/daemon/session-panel/__tests__/session-first-load-staged.test.tsx, frontend/src/components/daemon/session-panel/initial-window-merge.ts, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx
+最近确认：未记录
+理由：用户痛点：进入会话面板，轮次列表出现慢（大会话多等数秒）且加载中无任何动态指示。根因两条： 1. **渲染门槛被 2026-10-23-session-first-window-turn-align 拉高**——establish() 内底窗日志（400 行）返回后还要串行走 buildInitialWindow（probe → 锚点轮直达 ≤2000 行 → 并行补 8 轮 ≤8×2000 行，3 个串行 RTT），全部完成才 setTurnState 首次渲染；大会话（40+ 轮、上万行日志）明显变慢。 2. **加载态缺失**——详情返回后、历史在飞时，TurnTimeline 在 `turns.length === 0` 分支渲染静态空态文案（「XX 已就绪」），无任何加载动画，用户以为页面卡死。 方案（两段化 establish + 骨架屏）： - **FR-02 分阶段渲染**：establish() 拆两段。第一段：底窗日志到达 → 既有 logsToTurns 装配 → setTurnState 立即渲染 + 写底窗游标（hasEarlier 满页即真）；第二段：buildInitialWindow 照旧在后台跑（请求链、AbortSignal、失败回退语义零变化），完成后把窗口结果相对已渲染底窗的**新增行**（按 log id 差集：锚点轮直达补齐段 + earlierRuns 各轮）经 logsToTurns 装配成轮块 prepend 进 turnState（复用「加载更早」的头部拼接语义，同 run 跨块由 #e 变体机制天然承接），游标推进到 adaptive.cursorLog。SSE 建流时序不变（仍在补拉完成后，streamCursor 语义零风险）。 - **FR-01 骨架屏**：新增 `initialHistoryLoading` state（sessionId 变化置 true，establish 尾部置 false）；SessionPanelPage 给 TurnTimeline 传可选 prop；TurnTimeline 在 turns 为空且该 prop 为真时渲染 3 张轮次卡片形状骨架（antd Skeleton，经 ConfigProvider 主题 token 着色，动画自带），替代静态空态分支。dialog 模式（session-panel-dialog.tsx 独立实现）不传新 prop，行为不变（本变更不触达）。 选择该方案而非「整体取消补拉」：first-window-turn-align 的轮次对齐目标（首屏窗口起点不落轮中段、轮首 user_input 不丢）仍由第二段达成，只是渲染时机前移；最终窗口状态与现版一致。
+
+## D-frontend-061@v1 2026-10-25-session-config-deferred-switch——答：根因是 `session-config-bar.tsx` 的 `executeSwitch` 在会话空闲态点选供应商/模型/档案时立即调 `injectSe
+状态：implemented
+变更：2026-10-25-session-config-deferred-switch
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-25-session-config-deferred-switch/design.md
+文件：docs/releases/2026-10-25-002-d21c3a70c.md, frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/daemon/session-panel/__tests__/config-change-line.test.ts, frontend/src/components/daemon/session-panel/page-helpers.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/sessions/__tests__/session-config-bar.test.tsx, frontend/src/components/sessions/session-config-bar.tsx
+最近确认：未记录
+理由：答：根因是 `session-config-bar.tsx` 的 `executeSwitch` 在会话空闲态点选供应商/模型/档案时立即调 `injectSession(sessionId, "")`（空 prompt 静默切换），后端 `inject.py` 为其建一个空的切换 run；思考档位则是点选即 POST `set-thinking-level`。用户要求点选不立即生效。 方案：**纯前端暂存，零后端改动**（执行期 D-001 用户定调修订：暂存静默无标记 + 时间线切换说明行）。面板页（`session-panel-page.tsx`）持有暂存 state（provider/model/profile/thinking_level 四字段），传给 `SessionConfigBar` 受控显示；组件在空闲态点选时不再 `executeSwitch`，改为上抛 `onStagedSwitch` patch（静默——控件直接显示暂存值，无「待生效」标记、无 toast，D-001）；选回当前生效值即取消该字段暂存（组件持当前值判定 cancel flag）。发送路径（空闲直发 `sendFromQueue`、忙轮排队 `sendToServerQueue`、历史重发 `handleResend`）在 `injectSession` options 中并入暂存的 provider/model/profile，暂存档位先调 `setSessionThinkingLevel`（失败警告不阻塞），受理成功后清暂存并 invalidate `agentSessionDetail`。暂存为空时请求形态与现状逐字段一致（零回归）。运行中点选保持现状（后端忙轮排队，本就不建轮）；ended/provisional 行为不变。 切换说明行（FR-06 / D-001）：`SessionTurnView` 新增 `configChangeLine`，`TurnRow` 轮块顶部独占一行渲染（形态对齐 system_event 虚线药丸）。双链路生成共用 `page-helpers.buildConfigChangeLine` 纯函数：**实时路**——发送受理成功时面板以「会话当前生效值 ⊕ 暂存值」预置占位轮（发送方前端权威，含会话级模型覆盖维度）；**历史路**——`enrichDisplayTurns` 排序后相邻轮快照对比（whoLine 扩 `modelName` = 档案快照 model；供应商/档案维度）。run 快照无会话级模型覆盖列（后端确认），历史路的模型维如实缺失、由实时路补足，不编造。 依据：`frontend/src/components/sessions/session-config-bar.tsx`（executeSwitch/props 契约）、`frontend/src/lib/daemon/sessions.ts`（injectSession options / setSessionThinkingLevel）、`backend/app/modules/daemon/session/service/inject.py`（带切换字段的普通消息即时生效）、`session-panel-page.tsx`（发送三路径 + provisional 暂存先例 ql-20260823-008）。
+
+## D-frontend-062@v1 2026-10-26-subagent-card-width-unify——2026-10-25-session-tab-visual-unify 把 agent 侧文本类信息块（TextSegmentView/PreambleSegm
+状态：implemented
+变更：2026-10-26-subagent-card-width-unify
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-26-subagent-card-width-unify/design.md
+文件：frontend/src/components/daemon/__tests__/task-line-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+最近确认：未记录
+理由：2026-10-25-session-tab-visual-unify 把 agent 侧文本类信息块（TextSegmentView/PreambleSegmentView/CompactSegmentView/TurnTriggerView/file 段容器/旧路径正文）统一到 `max-w-[calc(100%-120px)]`，但**过程类组件漏网**——用户 2026-10-26 实证：子代理卡片、进度视图工具调用行仍铺满整行。本变更补漏：turn-segment-views.tsx 内五个过程组件根容器统一加限宽——SubagentBlockView 两分支（`w-full self-stretch` → `w-full max-w-[calc(100%-120px)] self-start`，self-stretch 撤除防 flex 父容器 stretch 反噬，对齐 file 段容器先例）、TeamWorkerBlockView（同款）、ToolRowView / ThinkingRowView（根 div `w-full` → `w-full max-w-[calc(100%-120px)]`）、StderrRowView（根加 `max-w-[calc(100%-120px)]`，原本无 w-full 但在 flex-col 父容器里被 stretch 铺满）。 选 calc 相对值而非固定像素上限：弹窗版/整页版/移动端容器宽度不同，口径沿用已归档变更的裁决（固定值会在窄容器越界）。
+
+## D-frontend-063@v1 2026-10-26-subagent-task-meta-restore——生产实证（会话 83a96b92，2026-10-26 06:18 UTC）：daemon 同一毫秒批量落库四行（[TOOL_USE] Agent stdout
+状态：implemented
+变更：2026-10-26-subagent-task-meta-restore
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-26-subagent-task-meta-restore/design.md
+文件：frontend/src/components/daemon/__tests__/task-line-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+最近确认：未记录
+理由：生产实证（会话 83a96b92，2026-10-26 06:18 UTC）：daemon 同一毫秒批量落库四行（[TOOL_USE] Agent stdout 投影 / tool_call JSON（尾部 tool_use_id） / [TASK_STARTED]（parent 归属列） / [TOOL_RESULT] async 回执），DB 无二级排序键，历史回放喂入顺序不定——[TASK_STARTED] 先于 tool_call 段建立时 task 分支 findToolById 未命中即丢弃，段元数据（taskStatus/taskAsync）永久丢失；随后 async 回执按"桶内最近未配对 tool 段"配对把段翻成假终态（ok + 8~11 秒 endedAt 差值），metaStatus 优先级压不住 → 用户看到子代理卡片假"已完成"+ 冻结假时长（本地真实数据复现铁证：三段 taskStatus=null / durationText "00:08"/"00:11"）。 修法（装配器单文件内聚）：悬挂回填——task 分支 targetId 未命中且行带 parent_tool_use_id 时不再丢弃，写入 turn 链共享悬挂表（新 symbol PENDING_TASK_METAS，Map<parentToolUseId, TaskLineMeta[]>，挂载/流转模式同 SUPERSEDED_SEG_IDS：enumerable symbol 键随对象展开流转，attachInternals/transferAssemblerInternals 同步携带）；tool_use 段建立点（tool_use case 建段 + 步骤 1 stub→tool 合并后的段）按 resolvedToolUseId 查悬挂表，按到达序逐条 applyTaskMeta 回填并删条目。显示层零改动——subagentHeaderOf 既有"元数据 > 段三态"优先级回填后自然压住假终态（FR-02 是验收不是新代码）。
+
+## D-frontend-064@v1 2026-10-26-turn-phase-orphan-fallback——改 frontend/src/components/daemon/session-panel/turn-state.ts 的 applyTurnPhase 一处
+状态：implemented
+变更：2026-10-26-turn-phase-orphan-fallback
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-26-turn-phase-orphan-fallback/design.md
+文件：frontend/src/components/daemon/session-panel/session-panel-dialog.tsx, frontend/src/components/daemon/session-panel/session-panel-page.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+最近确认：未记录
+理由：改 frontend/src/components/daemon/session-panel/turn-state.ts 的 applyTurnPhase 一处：run_id 精确匹配（含 realRunId）未命中时，若 currentRunId 指向活跃轮（pending/running/interrupting）则把 {phase, at} 回退写入该轮，否则维持原丢弃。方案=「回退活跃轮」而非「暂存池」：借平台单会话单活跃 run 不变式（后端忙轮守卫+排队机制硬保证），零新增状态、零 TTL、零补写钩子；暂存池（缓存未命中事件+过期+两处补写）是补丁性质且复杂度更高，已与用户对比后否决。背景：生产实证（会话 221ac351）daemon 每轮正常上报（TRACE 记点成对）但事件跑赢 HTTP 响应（占位轮未换真实 run_id）时被前端按"孤 phase 丢弃"设计吞掉，间歇性永远卡「执行器已接收」超时警示；本机 daemon 事件路径快，竞态高发。
+
+## D-frontend-065@v1 2026-10-26-worktree-group-collapse——Git 日志页「工作区更改」卡的三个分组头（更改/未纳入版本管理/已忽略）原为纯展示 div（箭头字符写死），改为可点击 button + 折叠状态：组件内加
+状态：implemented
+变更：2026-10-26-worktree-group-collapse
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-26-worktree-group-collapse/design.md
+文件：frontend/src/components/git-log/__tests__/worktree-changes-card.test.tsx, frontend/src/components/git-log/worktree-changes-card.tsx
+最近确认：未记录
+理由：Git 日志页「工作区更改」卡的三个分组头（更改/未纳入版本管理/已忽略）原为纯展示 div（箭头字符写死），改为可点击 button + 折叠状态：组件内加 `groupOpen` state（`{ changed: true, untracked: false, ignored: false }`——用户实测反馈要求后两组默认收起省屏），三个分组头换成与目录行同款的 ChevronRight 旋转箭头按钮（aria-expanded + data-testid），内容区按开合条件渲染；收起态头行右缘显示该组计数（N 个文件 / N 项），收起不丢信息量。选这个方案是因为分组折叠与目录折叠在卡内已是同构交互（StatusTreeRows 的 toggleDir 先例），零新增依赖。
+
+## D-frontend-066@v1 2026-10-27-turn-phase-observability-monotonic——生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_event 信号丢失后前端 phase 停 delivered
+状态：implemented
+变更：2026-10-27-turn-phase-observability-monotonic
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-27-turn-phase-observability-monotonic/design.md
+文件：frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/turn-phase-report.test.ts
+最近确认：未记录
+理由：生产实证（2026-10-27 会话 7eff99e1，run 4f2e2cdd）：first_event 信号丢失后前端 phase 停 delivered 干等 141 秒；排障时发现 daemon 上报是 fire-and-forget，**桥层**（session-manager 转发点 daemon.ts:4887 起，inject_received/first_event 等运行时 phase 的必经路）失败仅 debug 日志——生产 info 级不可见；创建链五步（daemon.ts:9537 reportTurnPhase）已有首警 warn 惯例， 桥层是漏网点。另评估确认：steering 忙轮注入时 backend 会为同活跃轮再发 dispatched/delivered， 前端 applyTurnPhase 无条件 last-write-wins 会把已推进 phase **退化回投递段**（first_event 每 run 防重不会重发 → 卡投递段直到终态）——显示退化真实存在，需单调守卫。 三项改动（daemon 前端各一点）： 1. **桥层失败首警**（daemon.ts:4914-4937 两处）：debug 前补 warnOncePhaseFailure（对齐 9537 惯例：首警 warn 同 (session_id, phase) 去重 + debug 明细并存，成功仍静默）。 2. **applyTurnPhase 单调守卫**（turn-state.ts）：词表九值定序，回退写（新 phase 序 < 现值序，双方均词表内）静默丢弃；前跳/同值覆盖/词表外值透传维持 last-write-wins。 3. **log 退位集合扩展**：retireDeliveryPhase 的集合从 {dispatched, delivered} 增 inject_received（AI 已输出的场合「消息已送达 AI」同样失去展示意义），函数名保留。
+
+## D-frontend-067@v1 2026-10-27-turn-phase-stall-honest-ui——生产实证（2026-10-27 会话 7eff99e1）：会话忙时用户消息在 backend 排队/派发链路滞留 9 分钟（10:38 发出、10:47:36
+状态：implemented
+变更：2026-10-27-turn-phase-stall-honest-ui
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-27-turn-phase-stall-honest-ui/design.md
+文件：frontend/src/components/daemon/__tests__/turn-status-bar-phase.test.tsx, frontend/src/components/daemon/session-panel/turn-state.ts, frontend/src/components/daemon/turn-status-bar.tsx, frontend/src/lib/daemon/__tests__/session-stream-turn-phase.test.ts
+最近确认：未记录
+理由：生产实证（2026-10-27 会话 7eff99e1）：会话忙时用户消息在 backend 排队/派发链路滞留 9 分钟（10:38 发出、10:47:36 才注入 daemon，daemon.log 全程零 turn_phase 打点佐证）， 期间前端轮状态条唯一 phase=delivered 无限计时，用户等 141 秒截图误以为卡死。精确滞留 环节需 backend（腾讯云）日志，本变更只做纯前端显示层双兜底： 1. **停滞文案**（turn-status-bar.tsx）：dispatched/delivered 停留超 30 秒（沿用 PHASE_TIMEOUT_MS）时标签切 DELIVERY_STALL_LABEL「等待执行器开始处理」排队语义， 告知「尚未开始处理、可能在排队」而非干等计时；执行期阶段（skills_sync/spawning/…） 超时仍显词表文案，零变化。 2. **log 退位**（turn-state.ts）：log 事件有 DB 兜底必达——轮收到真实输出时仍挂的 dispatched/delivered 已失去展示意义，upsertTurn 内对 log 事件的 apply 结果统一过 retireDeliveryPhase 清除（page/dialog 双模式共用 upsertTurn 单点覆盖）。只清投递 两阶段，执行期阶段不越权清除。
+
+## D-frontend-068@v1 2026-10-28-change-detail-sessions-source-fix——核查结论（云端生产库直接取证）：`2026-10-26-mobile-four-page-layout-fix` 在库层只挂 1 个会话（ee002255，真执
+状态：implemented
+变更：2026-10-28-change-detail-sessions-source-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-28-change-detail-sessions-source-fix/design.md
+文件：backend/app/modules/agent/router.py, backend/app/modules/agent/tests/test_agent_sessions_include_ended.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_change_sessions_cap.py, backend/app/modules/daemon/router/session_crud.py, backend/app/modules/daemon/tests/test_sessions_list_filters.py, backend/app/modules/platform_sync/router.py, backend/app/modules/platform_sync/tests/test_hits_cli_direct.py, backend/app/modules/session_attachment/service.py, backend/app/modules/session_attachment/tests/test_capability.py, backend/openapi.json, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-sessions-source.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+最近确认：未记录
+理由：核查结论（云端生产库直接取证）：`2026-10-26-mobile-four-page-layout-fix` 在库层只挂 1 个会话（ee002255，真执行该变更的会话，首条输入即手机截图附件），全库各变更挂 2-3 会话均正常——**关联没乱，乱的是显示**。桌面变更详情页 `page.tsx` 把 `listWorkspaceAgentSessions(workspaceId)`（工作区全量会话）塞给概览侧栏「会话」区（slice(0,3)）与审批卡「绑定会话」（sessions[0]），与该变更零关联；叠加首条输入为附件时标题显示 `[附件:<uuid>` 前 30 字，形成「乱七八糟」观感。移动端 `mobile-change-detail.tsx` 数据源本就正确，不动。 修复分两端：① 前端 `page.tsx` 数据源换成既有 `listChangeSessions(workspaceId, changeId)`（change_session_links 真实关联，与后端审批注入 `_notify_bound_session` 同源），侧栏状态列改中文标签；② 后端新增共享标题剥离 helper，change/agent 两处窗口查询消费，daemon 侧在读展示时消费（存量 title_fallback 列不重算、零迁移）。

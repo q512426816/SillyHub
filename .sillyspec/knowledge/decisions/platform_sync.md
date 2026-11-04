@@ -42,3 +42,12 @@
 理由：否——动表结构与 D-005 冲突；现有 change/quicklog links 表已能表达「会话↔ctx」登记
 否决理由：违反已确认的「不动表结构」决策；现有 links 表能力足够
 复潮条件：ctx owner 解析出现性能问题或需要显式管理界面
+
+## D-platform_sync-001@v1 2026-09-25-tombstone-heal-archive——收编上个会话遗留半成品（代码+测试均已就绪，实测 16 passed）。
+状态：implemented
+变更：2026-09-25-tombstone-heal-archive
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-25-tombstone-heal-archive/design.md
+文件：backend/app/modules/platform_sync/service.py, backend/app/modules/platform_sync/tests/test_change_deleted_guard.py
+最近确认：未记录
+理由：收编上个会话遗留半成品（代码+测试均已就绪，实测 16 passed）。三块：①upsert_progress 已删拒收分支加复活通道——body 同名条目 status=='archived' 且行 location=='deleted' 时 _heal_deleted_row_to_archive 翻回 archive 走正常接受，否则维持原拒收；②两个私有 helper（_body_changes_status 墓碑终态判别 + 幂等翻行）；③_apply_cli_tombstone 的 archived 分支语义化 no-op（行为与原早退等价，注释钉住不软删镜像/不动 location）。与已提交的 dfdeedf27（change 侧三源并集+存量回翻迁移）互补：那侧治存量，本侧治增量通道。

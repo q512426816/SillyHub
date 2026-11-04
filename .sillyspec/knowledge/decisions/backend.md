@@ -1084,3 +1084,174 @@ supersedes：D-006@v1
 锚点：未记录
 最近确认：0069bb234ffa70ccfba04426ca885095484926fc
 理由：我的判断（评审核证采纳）：single-flight Future 携带成功/失败双态——构建方异常/断连时 Future 置失败并传播，等待者捕获后降级为自建（各自构建，失败不传染不悬挂）
+
+## D-backend-041@v1 2026-09-26-assets-testfile-path-resolve——纯展示层修复，两个文件：①`change-assets-card.tsx`——参考知识库页 `normalizeKnowledgeFileParam` 先例，导
+状态：implemented
+变更：2026-09-26-assets-testfile-path-resolve
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-09-26-assets-testfile-path-resolve/design.md
+文件：backend/app/modules/explorer/service.py, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx
+最近确认：未记录
+理由：纯展示层修复，两个文件：①`change-assets-card.tsx`——参考知识库页 `normalizeKnowledgeFileParam` 先例，导出同款风格纯函数 `normalizeTestFilePath`（反斜杠→斜杠、去 `./` 前缀）与 `resolveTestFilePath`（归一路径 × search 命中路径集的解析决策：等值 → 唯一后缀 → 排除 `.sillyspec/.runtime/` 副本后再判 → 候选列表/未命中），测试文件弹窗打开时按文件名调既有 `fetchSearch`（explorer GET /search）取命中集，交给纯函数决策后渲染 FilePreview（真实路径）或候选列表/中性提示；路径救回时弹窗标题旁标注原记录路径。②`backend/app/modules/explorer/service.py`——not_found 文案由「工作区目录可能已被移动或删除」改为中性「路径可能不完整，或文件已被移动/删除」（旧文案按整目录被删场景设计，任何寻径失败都套用，误导用户）。选前端解析而非后端 assets 聚合改写：仓库文件在用户本机（daemon 管），后端容器看不到真实仓库，路径探测只能走 explorer RPC，前端两级解析零后端契约变化；且不改归档冻结件（test-trace.json 是审计件，手改路径数据破坏 sha256 锚定链）。
+
+## D-backend-042@v1 2026-10-08-backend-dockerfile-apt-mirror-sjtu——backend Dockerfile runtime 层的 apt 源 sed 从 tuna 换为上海交大源。
+状态：implemented
+变更：2026-10-08-backend-dockerfile-apt-mirror-sjtu
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md
+文件：backend/Dockerfile
+最近确认：未记录
+理由：backend Dockerfile runtime 层的 apt 源 sed 从 tuna 换为上海交大源。故障事实（2026-10-08 上午实测）：tuna 对 `debian/dists/trixie/main/binary-amd64/Packages.xz`（9.6MB）持续 500/502/EOF（InRelease 等小文件正常），连续两次 `build-and-save.sh` 死于该层（各重试 3 次共 12 分钟）；本机到各国内源 http 形态普遍 ≈80KB/s，唯独 `https://mirror.sjtu.edu.cn` https 形态 8MB/5s 复测稳定（http 形态同样慢，故 sed 必须连协议一起换 https）。沿用 2026-07-13/2026-07-17 两次换源先例的最小改动模式：只改 sed 目标与注释，`apt-get install` 行逐字不动。
+
+## D-backend-043@v1 2026-10-08-backend-restart-fake-failed——线上实证（会话 968e58be，2026-10-08 11:28）：部署重启后端容器时，启动清理 `_cleanup_stale_runs_impl` 只看
+状态：implemented
+变更：2026-10-08-backend-restart-fake-failed
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-08-backend-restart-fake-failed/design.md
+文件：backend/app/modules/agent/service.py, backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/tests/modules/agent/test_stale_run_cleanup_liveness.py, backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
+最近确认：未记录
+理由：线上实证（会话 968e58be，2026-10-08 11:28）：部署重启后端容器时，启动清理 `_cleanup_stale_runs_impl` 只看 DB `status='running'` 就把仍在 daemon 上实际执行的轮判成 failed + SERVICE_RESTART_INTERRUPTED；daemon 6 分钟后跑完并 POST 成功结果，被 `close_interactive_run` 的终态幂等守卫（`interactive_run_close_already_terminal`）no-op 拒收， UI 永远显示假失败。修两处，互为防线： 1. **事前防误杀**（`backend/app/modules/agent/service.py`）：清理前查该 run 的 `agent_run_logs` 最新 `timestamp`（该列口径=后端收到上报时刻，正是"daemon 还在报"的信 号；有 `ix_agent_run_logs_run_timestamp` 联合索引）。距今 ≤ 宽限窗 10 分钟 → 跳过判死 保持 running；`AgentService.cleanup_stale_runs` 发现跳过项后 fire 一个延迟复扫后台任务 （睡满宽限窗再查一次，日志停止老化才判 failed），防止 daemon 真死时永卡 running。 宽限窗覆盖典型部署窗口（容器切换期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量）。 2. **事后能回正**（`backend/app/modules/daemon/run_sync/service/close_run_steps.py`）：终态 守卫放行唯一例外——run 为 failed + `error_code=SERVICE_RESTART_INTERRUPTED` 且本次上报 `status=success, is_error=false` 时，清掉误杀残留（error_code/error_detail/output_redacted 兜底文案）后落入正常收口流程（`_close_apply_terminal` 落 completed + usage/summary、 `_close_flip_session` 翻会话、post-commit 钩子重发 turn_completed 事件，前端实时收敛）。 迟到的失败结果不回正（不在本变更范围）：status 本就 failed，展示与语义一致，维持拒收。
+
+## D-backend-044@v1 2026-10-08-backend-skills-follow-cli——问题：平台侧 CLI 与技能是两股道——CLI 来自镜像 npm 层（SILLYSPEC_VERSION 空时被 Docker 层缓存冻结在首次构建版本，容器
+状态：implemented
+变更：2026-10-08-backend-skills-follow-cli
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/design.md
+文件：backend/Dockerfile, deploy/docker-compose.yml, deploy/scripts/build-and-save.sh
+最近确认：未记录
+理由：问题：平台侧 CLI 与技能是两股道——CLI 来自镜像 npm 层（SILLYSPEC_VERSION 空时被 Docker 层缓存冻结在首次构建版本，容器 3.26.0 vs latest 3.32.0 实证），技能来自仓库 `.claude/skills` 构建快照；任一侧自动前进都会与另一侧错位（本次用户诉求=要自动升级）。 方案：①技能源改为已安装 sillyspec 包自带的 `.claude/skills`（`COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills`）——同包同版天然 lockstep，CLI 升到哪技能跟到哪；②npm 层加 `SILLYSPEC_REFRESH` 时间戳 build-arg 爆破缓存，`build-and-save.sh` 每次打包导出新时间戳强制真拉 latest，并回显镜像内版本；③`deploy/.env` 的 pin 注释化，降级为应急回滚口。仓库 `.claude/skills` 等四镜像目录保留服务本地工具面（ZCode/Claude CLI），仍由 `sillyspec init` 手刷（低频）。
+
+## D-backend-045@v1 2026-10-08-ci-sweep-2-migration-anchor——backend-ci 唯一失败：迁移链尾锚测试仍钉 20261006200000，而并行会话 c1970cd37（2026-10-08-rbac-dead-pe
+状态：implemented
+变更：2026-10-08-ci-sweep-2-migration-anchor
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-08-ci-sweep-2-migration-anchor/design.md
+文件：backend/tests/test_align_platform_change_events_migration.py
+最近确认：未记录
+理由：backend-ci 唯一失败：迁移链尾锚测试仍钉 20261006200000，而并行会话 c1970cd37（2026-10-08-rbac-dead-permissions-cleanup）在第二轮清偿推送后落库新迁移 20261008100000_drop_dead_rbac_permissions 成为新 head。已核链结构（down_revision 接 20261006200000、单 head），按测试自带的「链尾锚随主线新迁移接续前移」约定，纯锚前移一行 + 注释链同步。生产零改动。
+
+## D-backend-046@v1 2026-10-11-alembic-single-head-guard——双闸拦截 alembic 迁移多头形态（2026-10-11 生产实证：并行变更 `20261011020000`/`20261011160000` 同父分叉未
+状态：implemented
+变更：2026-10-11-alembic-single-head-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-11-alembic-single-head-guard/design.md
+文件：backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py, backend/tests/test_migration_single_head.py, deploy/scripts/build-and-save.sh
+最近确认：未记录
+理由：双闸拦截 alembic 迁移多头形态（2026-10-11 生产实证：并行变更 `20261011020000`/`20261011160000` 同父分叉未合流即部署，backend `alembic upgrade head` 报 Multiple head revisions crash-loop，平台宕机约 2 分钟后回滚 + 手工 merge 修复）： 1. **CI 闸（PR 阶段）**：`backend/tests/test_migration_single_head.py` 用 alembic API（`ScriptDirectory.from_config(...).get_heads()`）断言 heads 恰一个——走 API 不 shell out，CI 与本地零环境差异；`.github/workflows/backend-ci.yml` 的 pytest 套件天然收录（testpaths 含 tests/），不新增 workflow。 2. **部署闸（打镜像阶段）**：`deploy/scripts/build-and-save.sh` 在 docker build 前新增 `[2.5/5]` 预检——`python -m alembic heads` 输出 `(head)` 行数 ≠1 即 exit 1（打印各 head + `alembic merge heads` 解法）；命令本身失败也 exit 1（提示 `uv sync`），fail-closed 不静默跳过——省掉「300M 镜像传上服务器才发现起不来」的往返。 选双闸而非单闸：CI 依赖 PR 流程存在（直推 main / 本地部署绕过 PR 时 CI 不拦截），部署脚本是打镜像的必经路径，两者互补。
+
+## D-backend-047@v1 2026-10-11-assertion-surface-guard——共享断言面漏同步钉子测试是复发 4+ 次的模式，提醒性手段（源码注释 + knowledge 条目，2026-10-08 登记）实证拦不住——本周 CI 清偿又
+状态：implemented
+变更：2026-10-11-assertion-surface-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/design.md
+文件：backend/.pre-commit-config.yaml, backend/tests/test_check_assertion_surfaces.py, frontend/src/lib/menu-permissions.ts, scripts/check-assertion-surfaces.py, sillyhub-daemon/src/protocol.ts
+最近确认：未记录
+理由：共享断言面漏同步钉子测试是复发 4+ 次的模式，提醒性手段（源码注释 + knowledge 条目，2026-10-08 登记）实证拦不住——本周 CI 清偿又见四处漏跟（迁移锚/TABS 数/菜单声明序/MSG 计数）。修法：机制化闸门前置到提交时刻——`scripts/check-assertion-surfaces.py`（Python stdlib，纯函数 evaluate 与 git 管道分离便于单测）实现 8 条规则（六面清单 + 本周新登记⑦⑧），挂进既有 pre-commit 框架（backend/.pre-commit-config.yaml，check-only 与 ruff 双钩同款）。选 pre-commit 而非 CI：漏同步在提交时刻拦下成本最低（修 1 次提交面），CI 拦下要等全量跑完；选 fail-closed 而非警告：警告类（注释/知识注入）已被实证无效，仓库规则 10 本就禁止绕钩。
+
+## D-backend-048@v1 2026-10-11-ci-red-batch-fix——5 处 CI 红灯全部属「生产契约变更漏同步钉子测试/生成物」一类技术债，生产代码零缺陷零改动：backend PublishIntent 测试夹具补上 21e
+状态：implemented
+变更：2026-10-11-ci-red-batch-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/design.md
+文件：backend/tests/modules/agent/test_agent_run_log_tool_kind.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx, frontend/src/components/git-log/__tests__/git-log-page.test.tsx, sillyhub-daemon/src/api-types.ts
+最近确认：未记录
+理由：5 处 CI 红灯全部属「生产契约变更漏同步钉子测试/生成物」一类技术债，生产代码零缺陷零改动：backend PublishIntent 测试夹具补上 21eb98d53 引入的必填位 `duration_api_ms=None`（production submit_commit.py 一直由关键字传入，仅手工构造的夹具漏更）；迁移链尾锚按测试自载的「随主线新迁移接续前移」惯例从 20261010190000 前移到 cc3c022b6 并入的 merge 迁移 c515ffd62859；frontend 两处钉子（menus 声明序 19/20/21、git-log TABS 16）按 8a928588f 组件页下线后的注册表现状重算为 17/18/19 与 15——正是 4746ac875 登记的「共享断言面」同款坑复现；daemon 漂移以 gen:types 重生成清偿（消费已提交 openapi.json，不碰后端）。
+
+## D-backend-049@v1 2026-10-15-server-logs-dockerfile-fix——改两处：① backend/Dockerfile 构建期 mkdir 行加 /data/logs 并入 chown app:app（对齐 /data/spec-
+状态：implemented
+变更：2026-10-15-server-logs-dockerfile-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-15-server-logs-dockerfile-fix/design.md
+文件：.zcode/skills/deploy-to-server/SKILL.md, backend/Dockerfile, backend/app/core/logging.py, backend/tests/test_server_log_filer.py, docs/releases/2026-10-16-007-2b1b58796.md
+最近确认：未记录
+理由：改两处：① backend/Dockerfile 构建期 mkdir 行加 /data/logs 并入 chown app:app（对齐 /data/spec-workspaces 既有惯例——容器内 app 用户运行，/data 属 root，运行期 mkdir 权限被拒是「日志文件尚未生成」的直接根因）；② backend/app/core/logging.py 的 configure_logging 降级分支向 stderr 打一条含「文件日志不可用」与异常原因的可见警告——原设计「静默降级」让权限缺陷在生产无从发现（页面只剩空态提示）。选 Dockerfile 预建而非改 compose volume：镜像自包含、不引入部署编排变更，与既有 /data 预建惯例同模式。
+
+## D-backend-050@v1 2026-10-19-change-assets-cross-repo-repos——跨仓冻结成功时，真实代码 diff 与各仓计数在 `change-patch.json` 的 `scopeAudit.repos[]`，而平台 assets 聚
+状态：implemented
+变更：2026-10-19-change-assets-cross-repo-repos
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-19-change-assets-cross-repo-repos/design.md
+文件：backend/app/core/config.py, backend/app/modules/change/assets.py, backend/app/modules/change/schema.py, backend/app/modules/change/tests/test_assets.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py, backend/openapi.json, deploy/.env.example, docs/releases/2026-10-19-013-d789317d.md, frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx, frontend/src/components/changes/detail/change-assets-card.tsx, frontend/src/components/files/structured-views.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
+最近确认：未记录
+理由：跨仓冻结成功时，真实代码 diff 与各仓计数在 `change-patch.json` 的 `scopeAudit.repos[]`，而平台 assets 聚合只读顶级 `files[]`——资产卡把「主仓面 0/模板文件」误显示成变更全貌。本次在 `ChangePatchMeta` 增 additive 的 `repos` 元数据投影（不搬运 patch 正文、不暴露 repoPath），DTO 字段保持 snake_case；前端资产卡在 repos 非空时复用既有 `ScopeAuditRepoSeg` 按仓渲染锚点/三态计数/降级说明，并把顶级统计标注为「主仓 patch」+ 指路 change-patch.json 全屏预览。`openapi.json` 与 `api-types.ts` 由既有生成器重生成，不手改。
+
+## D-backend-051@v1 2026-10-19-knowledge-build-switch-rollout——纯部署落地变更，零代码改动：① `deploy/.env`（gitignore）追加 `KNOWLEDGE_SEARCH_SERVER_BUILD=0`；② 顺
+状态：implemented
+变更：2026-10-19-knowledge-build-switch-rollout
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-19-knowledge-build-switch-rollout/design.md
+文件：backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py, deploy/.env.example, docs/releases/2026-10-19-013-d789317d.md
+最近确认：未记录
+理由：纯部署落地变更，零代码改动：① `deploy/.env`（gitignore）追加 `KNOWLEDGE_SEARCH_SERVER_BUILD=0`；② 顺带修复 postgres 镜像漂移——运行实例仍是 `postgres:16-alpine` 而 compose 早已声明 `pgvector/pgvector:pg16`，若不先切换，新 backend 启动时 pgvector 迁移会 fail-closed（CREATE EXTENSION vector 不可用）crash-loop——先拉镜像 recreate postgres（pgdata 卷沿用），再 `up --build --force-recreate -d backend`（Windows 注意项：不传 COMMIT_SHA 避免 apt 层重跑）；③ 端到端实测两未建索引工作区首搜；④ 发布记录 + `.env.example` 文档化 + known-issues 状态更新。选此方案的原因：开关代码已在前变更交付并有单测；部署面按 deploy skill 既有 routine 执行，沿用其验证/记录规范。
+
+## D-backend-052@v1 2026-10-19-translate-live-verify——2026-10-19-thinking-zh-translate 归档后的真机验证轮，联网实测暴露两处问题并修复： 1. **默认模型 repo 404**：h
+状态：implemented
+变更：2026-10-19-translate-live-verify
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-19-translate-live-verify/design.md
+文件：backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/tests/test_live_engine.py, backend/app/modules/translate/translate_worker.py
+最近确认：未记录
+理由：2026-10-19-thinking-zh-translate 归档后的真机验证轮，联网实测暴露两处问题并修复： 1. **默认模型 repo 404**：huggingface.co 直连被墙，hf-mirror.com 镜像可用；镜像 API 实测原默认 `michaelfeil/ct2fast-opus-mt-en-zh` 已不存在（api 401 / resolve 404，对照 Helsinki-NLP/opus-mt-en-zh 返回 200 排除镜像故障）。搜索镜像 ct2 格式候选后更换为 `jiangzhuo9357/opus-mt-en-zh-ct2`（config.json + model.bin 76MB int8 + source/target.spm 完整布局，917 下载量），config.py 默认值与 README 三处引用同步更换。 2. **EOS 协议缺失导致重复循环乱码**：真模型冒烟输出「代理代理代理…。 。 。」型乱码——根因是 ct2 的 opus-mt 转换 config 为 `add_source_eos: false`（调用方必须自行追加 `</s>`），worker 的 sentencepiece 分词回退路径没加 EOS → 解码端无终止信号，束搜重复生成到 max_decoding_length。修复：encode 尾追 EOS piece（从 spm eos_id 派生）、decode 剥离特殊 piece；修复后译文流畅（3 条 2.2s 含模型加载）。 3. 新增 env 门控 live 测试 `test_live_engine.py`（TRANSLATE_LIVE_TEST=1 才跑，默认 skip 零 CI 成本）：worker 子进程级 + POST 端点全链路级（真引擎零 mock），带 EOS 乱码指纹回归断言（同 2 字符片段连续重复 ≥8 次）与保护段（围栏/URL）原样保留断言。
+
+## D-backend-053@v1 2026-10-21-precommit-sandbox-entries——答：排查实锤（本变更前置探针，含 5bbb1a830 留痕互证）：agent 沙箱驱动把 python.exe 子树 IL 降为 Low（嵌套 token 同为
+状态：implemented
+变更：2026-10-21-precommit-sandbox-entries
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-21-precommit-sandbox-entries/design.md
+文件：backend/.pre-commit-config.yaml
+最近确认：未记录
+理由：答：排查实锤（本变更前置探针，含 5bbb1a830 留痕互证）：agent 沙箱驱动把 python.exe 子树 IL 降为 Low（嵌套 token 同为 qinyi 但 Mandatory Label S-1-16-4096，无 CodexSandboxUsers 组、Administrators deny-only）；由 python 发起的 msys 进程打不开 Medium 标签的 `\BaseNamedObjects\msys-2.0S5-*` 对象目录（NtCreateDirectoryObject 0xC0000022），且 uv/pnpm 默认缓存写 profile AppData 被驱动白名单拦截；node 子树不受影响（node→bash 正常、sillyspec CLI 收口实测可跑）。据此官方 runner 在 agent 会话不可用的根因是 hook entry 的 `bash -c` 包装（python→msys 嵌套）而非 runner 本身。修法：backend/.pre-commit-config.yaml 三条 pre-commit 阶段 entry 去 `bash -c` 直连，uv 统一 `--cache-dir .tmp/uv-cache` 重定向（仓内 gitignored，Low 子树可写）；ruff 失败提示文案移入配置注释（ruff 自身报错已含文件与规则，指引不丢失）；pre-push 两条（ci-fast-gate/docs-gate）不动——推送发生在用户终端 Medium 树，今天即可用，agent 会话不推送。
+
+## D-backend-054@v1 2026-10-22-change-delete-session-history-fix——根因是三个独立事实叠加：① `agent_runs.change_id` 外键为 `ON DELETE CASCADE`；② reparse 在磁盘 chang
+状态：implemented
+变更：2026-10-22-change-delete-session-history-fix
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-change-delete-session-history-fix/design.md
+文件：backend/app/modules/agent/model.py, backend/app/modules/agent/tests/test_agent_run_change_fk.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_reparse_delete_preserves_runs.py, backend/migrations/versions/20261022100000_agent_run_change_set_null.py, backend/scripts/restore_lost_session_turns.py, backend/tests/test_align_platform_change_events_migration.py, backend/tests/test_restore_lost_session_turns.py, docs/releases/2026-10-22-005-c2832fd.md
+最近确认：未记录
+理由：根因是三个独立事实叠加：① `agent_runs.change_id` 外键为 `ON DELETE CASCADE`；② reparse 在磁盘 change 目录消失时会物理删除 `changes` 行；③ `turn_count` 只在 inject 时 +1、从不随 run 删除回退。于是「删变更」这个与聊天无关的动作会级联物理删除会话 run 与日志，左栏计数却保持虚高。 修复分三层：DB 语义层把 `AgentRun.change_id` 改为 `ON DELETE SET NULL`（与 `AgentSession.change_id` 既有语义一致），保证任何物理删 change 的路径都不再带走 run/日志；应用层在 reparse 删除环内先显式解绑锚定 run 再删行（部署顺序无关、行为可观测），占坑回滚路径由 FK 语义兜底；数据层新增一次性回灌脚本，从 daemon 引擎原始 JSONL 重建本次丢失的 13 轮，并对账 `turn_count`。前端与列表查询不改（避免把 `turn_count` 改成实时聚合带来的性能与 tool_report 零语义风险）。
+
+## D-backend-055@v1 2026-10-22-fix-translate-cjk-segments——根因：`is_translation_worthy` 只在整条 item 上判定一次；中文正文夹英文代码块时，代码里的拉丁字符把整条的拉丁占比拉过阈值，整条通过
+状态：implemented
+变更：2026-10-22-fix-translate-cjk-segments
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-fix-translate-cjk-segments/design.md
+文件：backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_service.py
+最近确认：未记录
+理由：根因：`is_translation_worthy` 只在整条 item 上判定一次；中文正文夹英文代码块时，代码里的拉丁字符把整条的拉丁占比拉过阈值，整条通过后 `split_protected` 只保护代码/URL，剩余中文正文段仍以 `translatable=True` 送进 en→zh 模型，产出垃圾译文并置 `translated=true`（生产实测：`命令：`→`发件人:`，整段中文消失）。 修复：在 `chunking.py` 新增段级判定 `should_translate_segment`（只判语言占比：有汉字或拉丁字母且中文占比 <0.6 才送翻；纯符号/数字段不送），`service.py` 的送翻循环在切块前逐段调用，中文段保留原文；同时用 `translated_ids` 集合记录实际送翻（或缓存回填）过的条目，替换原 `_has_translation` 的粗粒度判定。
+
+## D-backend-056@v1 2026-10-22-fix-translate-pending——问题根因：生产容器未配置 `TRANSLATE_MODEL_DIR`，worker 子进程走 HuggingFace 下载且该域名在服务器不可达（`huggin
+状态：implemented
+变更：2026-10-22-fix-translate-pending
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-fix-translate-pending/design.md
+文件：backend/app/core/config.py, backend/app/modules/translate/README.md, backend/app/modules/translate/engine.py, backend/app/modules/translate/tests/test_engine.py, deploy/docker-compose.yml, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts
+最近确认：未记录
+理由：问题根因：生产容器未配置 `TRANSLATE_MODEL_DIR`，worker 子进程走 HuggingFace 下载且该域名在服务器不可达（`huggingface.co` 解析到被污染地址、TCP 不可达；实测 `hf-mirror.com:443` 可达），主进程 `REQUEST_TIMEOUT_SEC=300` 于是长时间阻塞；前端 POST 无超时，界面表现为永久「翻译中」。修复分三层：① 前端给该请求传 20 秒超时，超时走既有的「引擎不可用」降级与 60 秒退避链（复用现有 catch 分支，不改状态机）；② 后端把请求超时改为配置项并默认 20 秒，让任何异常慢路径快速 fail-soft；③ 子进程 stderr 由后台线程转入主进程日志，失败可查。部署侧用 `hf-mirror.com` 在服务器一次性下载 ct2 模型到宿主机 `deploy/models/opus-mt-en-zh`，compose 挂载并透传 `TRANSLATE_MODEL_DIR`，实现零下载加载。
+
+## D-backend-057@v1 2026-10-22-protect-cjk-source——生产复现确认：`opus-mt-en-zh` 的源端只有英文词表，遇到中文 token 时 tokenizer 产出 `<unk>`，束搜索随后陷入重复输出——
+状态：implemented
+变更：2026-10-22-protect-cjk-source
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-22-protect-cjk-source/design.md
+文件：backend/app/modules/translate/README.md, backend/app/modules/translate/chunking.py, backend/app/modules/translate/tests/test_chunking.py, backend/app/modules/translate/tests/test_service.py
+最近确认：未记录
+理由：生产复现确认：`opus-mt-en-zh` 的源端只有英文词表，遇到中文 token 时 tokenizer 产出 `<unk>`，束搜索随后陷入重复输出——`"合并键应该是工区不是厂房"` 被译成 `“\ ”`，`--title "单位级明细表合并键=工区（用户实测反馈）"` 变成一串反斜杠。根因在源端，调译后处理或段级跳过都治不了（中文引用与英文在同一自然段，段级判定按占比会整段放行）。 修复：在 `chunking._PROTECT_RE` 增加最高优先级的「中文片段」分支（汉字 + 中文/全角标点连续段），与围栏代码、行内代码、URL 同等待遇——不送翻、原样保留。送进模型的源文本因此不再含中文 token，解码崩溃消失；中文引用逐字保留，英文正文照常翻译。
+
+## D-backend-058@v1 2026-10-23-translate-budget-align——三处独立小修，均只动翻译模块，不改对外协议： 1. **前端超时动态化**（`frontend/src/lib/thinking-translate.ts`）：
+状态：implemented
+变更：2026-10-23-translate-budget-align
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-23-translate-budget-align/design.md
+文件：backend/app/modules/translate/engine.py, backend/app/modules/translate/service.py, backend/app/modules/translate/tests/test_engine.py, backend/app/modules/translate/tests/test_service.py, frontend/src/lib/__tests__/thinking-translate.test.ts, frontend/src/lib/thinking-translate.ts
+最近确认：未记录
+理由：三处独立小修，均只动翻译模块，不改对外协议： 1. **前端超时动态化**（`frontend/src/lib/thinking-translate.ts`）：删固定 `REQUEST_TIMEOUT_MS = 20_000`，改为 `requestTimeoutMsFor(entries)`——按「最坏后端块数」镜像后端 `engine._timeout_for` 公式（基准 20s + 每块 2.5s）再外加 5s HTTP/排队余量。后端块数估算：前端块 ≤1800 字符，后端 `chunking.CHUNK_MAX_CHARS=1000` 二次细切，每条前端块 ≤ `ceil(len/1000)` 个后端块。满批 16×1800 最坏 32 块 → 后端预算 97.5s → 前端兜底 102.5s（有界，防挂起性质保留）。选此方案而非收紧后端预算：e7ce2a101 的线性放宽是生产实测（16×1000 满批 21.5s>20s）驱动的正确修复，应保住它、让前端等待侧跟上，反向收紧会重新引入误杀。 2. **service.py 回填两段式**（`backend/app/modules/translate/service.py`）：扫描期缓存命中不再即时 `_fill_chunk`，改为「全体块（含命中块）按产生顺序入 `chunk_owners` 总账 + 命中译文暂存 `resolved` 字典」，推理成功后与推理译文合并，**按 `chunk_owners` 全序一次回填**——段内块序与原文一致。引擎失败路径不变（提前原文透传返回，已解析结果作废）。 3. **engine.py 读线程捕获队列**（`backend/app/modules/translate/engine.py`）：`_ensure_started` 先建局部 `responses` 队列，作参数传给 `_reader` 线程（构造时捕获），再赋给 `self._responses`——崩溃重启换新队列后，旧读线程的 EOF 哨兵/迟到响应只落入已废弃旧队列，不再污染新队列触发"translate worker exited"/"protocol mismatch"假崩溃。
+
+## D-backend-059@v1 2026-10-30-business-member-change-read——`business_member` 是 `is_system=true` 的系统内置角色，管理后台 `roles_service.update` 明确抛 `Ro
+状态：implemented
+变更：2026-10-30-business-member-change-read
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-30-business-member-change-read/design.md
+文件：backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py, backend/migrations/versions/20261030160000_grant_business_member_change_read.py, backend/tests/modules/auth/test_business_member_change_read_migration.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-timeline.tsx
+最近确认：未记录
+理由：`business_member` 是 `is_system=true` 的系统内置角色，管理后台 `roles_service.update` 明确抛 `RoleSystemProtected`，界面上改不了；系统角色的权限集由迁移定义。因此新增一条 独立 alembic 迁移 `20261030160000_grant_business_member_change_read.py`（down_revision 接当前 head `20261023090100`），用可移植 SQL 幂等插入 `(business_member, change:read)`， 并提供 downgrade 删除该行。不改历史迁移 `202607251600`（已部署不会再跑），也不在应用 启动时动态补权限（隐式、不可审计）。线上先以同一 SQL 落库并清缓存，使当前部署立即生效； 下次镜像重建时该迁移会正常记录 revision 并保持幂等。

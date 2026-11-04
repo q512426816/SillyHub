@@ -61,3 +61,21 @@
 理由：落选。sidecar 嵌入容器方案。
 否决理由：①小内存机器上模型常驻 200-300M 总常驻反而恶化；②compose 拓扑/镜像/部署脚本全动；③长轮询占连接；④索引优化治标。
 复潮条件：服务器升配 ≥4G 且嵌入查询成为高频热路径时重评。
+
+## D-deploy-002@v1 2026-10-09-msys-fonts-guard——两处独立小改：(1) `deploy/scripts/onlyoffice-restore-fonts.sh` 的两行字体解包 `docker exec -i
+状态：implemented
+变更：2026-10-09-msys-fonts-guard
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-09-msys-fonts-guard/design.md
+文件：.claude/skills/sillyhub-docker-deploy/SKILL.md, .codex/skills/sillyhub-docker-deploy/SKILL.md, deploy/scripts/onlyoffice-restore-fonts.sh
+最近确认：未记录
+理由：两处独立小改：(1) `deploy/scripts/onlyoffice-restore-fonts.sh` 的两行字体解包 `docker exec -i ... tar -C /usr/share/fonts/truetype/...` 补 `MSYS_NO_PATHCONV=1` 前缀——与同文件 mkdir（L41-42）与 fc-cache（L49）既有守卫形态完全一致，作者本知此坑仅这两行漏加（2026-10-09 风险审查实证；9d2702ffe 修 build-and-save.sh 时未覆盖此处）；补一行注释说明动机。(2) `.claude/skills/sillyhub-docker-deploy/SKILL.md` 与 `.codex/` 同名副本整文同步为 `.zcode` 现行版（cp 逐字拷贝）——85c8704a7 镜像瘦身只更新了 .zcode 副本，另两副本仍指导已退役的 claude-data 卷挂载与容器内 `claude --version` 验证（md5 实证漂移，最后改动 2026-08-13）。选整文 cp 而非逐段手改：三副本本就互为镜像，逐字一致可被 diff -q 验证，不引入转录错误。
+
+## D-deploy-003@v1 2026-10-14-litellm-retire——按用户 2026-10-14「彻底退役」拍板，从两个 compose 中整体删除 litellm 技术栈（`litellm` / `litellm-db` 服务
+状态：implemented
+变更：2026-10-14-litellm-retire
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-14-litellm-retire/design.md
+文件：deploy/docker-compose.dev.yml, deploy/docker-compose.yml, deploy/litellm-config.yaml, docs/sillyspec/finished/litellm-v1950-image-entrypoint-not-found.md
+最近确认：未记录
+理由：按用户 2026-10-14「彻底退役」拍板，从两个 compose 中整体删除 litellm 技术栈（`litellm` / `litellm-db` 服务块、`litellm-db-data` 卷、dev 侧网络附接注释）与唯一专属配置文件 `deploy/litellm-config.yaml`；本机四容器 stop+rm（命名卷数据保留可回滚）；坑记录移 finished/ 闭坑（服务器侧清理并入下次部署窗口，load-and-up.sh 已有 `config --services` 启动集打印，多出/缺少服务立见）。backend 代码面（admin API 注册、provider_config 的 litellm_model_name/litellm_base_url 语义）不动——平台对 openai_like 供应商的转换能力是运行时路径，退役的是基础设施供给，未来若重引转换网关再立新变更。

@@ -9,3 +9,12 @@
 文件：.sillyspec/changes/2026-10-07-taskboard-tasks-md/design.md, .sillyspec/changes/2026-10-07-taskboard-tasks-md/requirements.md, .sillyspec/changes/2026-10-07-taskboard-tasks-md/tasks.md, backend/app/modules/spec_workspace/tests/test_task_reparse_on_sync.py, backend/app/modules/task/parser.py, backend/app/modules/task/tests/test_parser.py, .sillyspec/changes/2026-10-07-taskboard-tasks-md/proposal.md
 最近确认：fbf4ae2753b9bbf2a14d929ecd2c900b533d6100
 理由：最大风险：thin 行 status 只有 draft/done 两态（看板中段列空）——勾选态是 tasks.md 唯一信号，不造无据状态；后续要更细可由 status 映射规则扩展。试过放弃：把注册表行也建成卡片式富结构（priority/owner 从行文猜测）——无据造数；放弃，只取确定字段。
+
+## D-task-001@v1 2026-10-27-task-parser-md-check-fallback——改 backend/app/modules/task/parser.py 单文件：`parse_tasks` 预读 tasks.md 建 key→勾选映射（`m
+状态：implemented
+变更：2026-10-27-task-parser-md-check-fallback
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-27-task-parser-md-check-fallback/design.md
+文件：backend/app/modules/task/parser.py, backend/app/modules/task/tests/test_parser.py
+最近确认：未记录
+理由：改 backend/app/modules/task/parser.py 单文件：`parse_tasks` 预读 tasks.md 建 key→勾选映射（`md_checked`），卡片解析（`_parse_task_file` 新增 `md_checked: bool | None = None` 参数）在 frontmatter **未显式写 status 键**时用该映射回退（[x]→done、[ ]→draft、无行→draft）；显式 status 仍优先（靠键存在性区分「未写」与「写了 draft」）。选此方案因根因实证明确（2026-10-28-bg-task-status-report：tasks.md 7/7 全勾解析全 draft——CLI 勾选协议活在 tasks.md checkbox，TaskCard 模板无 status 键，旧「卡片优先跳过注册表行」让勾选态无处进表），平台侧单点修复即通，不动 CLI/前端。注册表行循环仍只补卡片未覆盖 key（thin 单源零回归）。

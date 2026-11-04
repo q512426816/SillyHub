@@ -163,3 +163,12 @@ supersedes：D-007@v1
 文件：backend/app/main.py, backend/app/modules/agent/profile/seed.py, backend/app/modules/agent/tests/test_profile_seed.py
 最近确认：534cef161623ee81046dd08d697300c005071294
 理由：最大风险：协议文案把「新功能/大改动」也错误降级进极速通道——文案显式写入规模定级与拒绝降级条款（新功能提示改走完整 brainstorm 流程）。放弃方案 A（加为第三条 `is_system_default=True` 默认档案）：会进 `resolve_profile` 兜底链改变所有未选档案会话的默认人格（破坏零回归），且 seed 去重按 provider 与既有 claude 默认档冲突；放弃方案 B（仅用管理 API 在当前库建一条数据）：DB 重置即丢（规则 11 允许重置）、不可复现，不符合「平台预置」语义。
+
+## D-agent-001@v1 2026-10-09-stale-recheck-scope——改 `backend/app/modules/agent/service.py` 的 stale run 清理链一处，修 2026-10-09 风险审查实证的三
+状态：implemented
+变更：2026-10-09-stale-recheck-scope
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-09-stale-recheck-scope/design.md
+文件：backend/app/modules/agent/service.py, backend/tests/modules/agent/test_stale_run_recheck.py
+最近确认：未记录
+理由：改 `backend/app/modules/agent/service.py` 的 stale run 清理链一处，修 2026-10-09 风险审查实证的三缺陷（原实现来自 2026-10-08-backend-restart-fake-failed）：(1) **范围收窄**——`_cleanup_stale_runs_impl` 之后的排期不再用「全系统任意 running 轮日志新鲜」作条件，新增 `_deferred_run_ids(session)`（单 group-by 查询取 running 轮最新日志时刻，宽限窗内者即启动跳过项）作为复扫链唯一追踪集合快照；`_recheck_stale_runs_loop(deferred_run_ids)` 只对该集合工作，集合清空即退出，启动后新开的轮永不进判死面（长期僵尸归还 patrol）。(2) **daemon 活性门**——新增 `_run_daemon_alive(session, run_id) -> bool | None`（链路 run 最新 lease（updated_at 倒序首见即定）→ runtime → daemon 实例；True=online 或心跳宽限窗内，False=offline 且心跳停滞超窗，None=链路不可解析），复扫对日志停滞的追踪轮：alive=True 保持追踪，False/None 才判死（None 退回纯 recency，防永卡兜底不缩小）。(3) **韧性 + 锁粒度**——循环体逐迭代 try/except（连续失败 ≥ `_RECHECK_MAX_CONSECUTIVE_ERRORS`=5 才 log.error 放弃）；启动清理与复扫都把 recency 判定移到 FOR UPDATE 之前（快照元数据完整的恢复分支仍先加行锁），逐轮 commit 即时释放行锁。判死字段写入提取共用助手 `_mark_stale_run_failed`（字段语义不变，error_code 是 FR-02 回正例外条件的匹配键）。

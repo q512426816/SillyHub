@@ -99,3 +99,21 @@ supersedes：D-003@v1
 文件：backend/app/modules/daemon/linked_repos_sync.py, backend/app/modules/workspace/linked_repos/model.py, backend/app/modules/workspace/linked_repos/router.py, backend/app/modules/workspace/linked_repos/schema.py, backend/app/modules/workspace/linked_repos/service.py, backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py, backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py, backend/openapi.json, frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx, frontend/src/components/workspace/linked-repos-card.tsx, frontend/src/components/workspace/linked-repos-form.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/linked-repos.ts
 最近确认：0f7af00fe
 理由：不做。自动匹配只提示（local-echo 回显时标 matched_workspace），确认后由用户手动挂载；双向自动会在两表间形成同步循环面；路径复用涉及跨工作区权限边界，均留 v2 候选。
+
+## D-workspace-001@v1 2026-10-11-snapshot-timeout-distinct——router 的 get_local_snapshot 把 except-All 拆为三类精确捕获：DaemonRuntimeOffline→daemon_of
+状态：implemented
+变更：2026-10-11-snapshot-timeout-distinct
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-11-snapshot-timeout-distinct/design.md
+文件：backend/app/modules/daemon/linked_repos_sync.py, backend/app/modules/workspace/linked_repos/router.py, backend/app/modules/workspace/linked_repos/schema.py, backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py, backend/openapi.json, frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx, frontend/src/components/workspace/linked-repos-card.tsx, frontend/src/lib/api-types.ts, frontend/src/lib/linked-repos.ts
+最近确认：未记录
+理由：router 的 get_local_snapshot 把 except-All 拆为三类精确捕获：DaemonRuntimeOffline→daemon_offline（无 WS 连接）、DaemonRpcTimeout→**daemon_timeout**（新态：连接在但 15s 无响应，生产实证根因=daemon 自更新换文件进程未重启跑旧代码，旧 dispatch 对未知 method 静默）、其余→offline 兜底+log.exception 可观测性。前端 timeout 占位文案引导重启进程。schema 枚举/前端类型/gen:types 同步五态。
+
+## D-workspace-002@v1 2026-10-12-init-permission-relax——`POST /api/workspaces/{id}/init`（`backend/app/modules/workspace/router.py:457`）
+状态：implemented
+变更：2026-10-12-init-permission-relax
+原编号：D-000@v1
+锚点：.sillyspec/changes/archive/2026-10-12-init-permission-relax/design.md
+文件：backend/app/modules/workspace/router.py, backend/tests/modules/workspace/test_init_permission.py
+最近确认：未记录
+理由：`POST /api/workspaces/{id}/init`（`backend/app/modules/workspace/router.py:457`） 的权限依赖从 `require_permission(Permission.WORKSPACE_WRITE)` 改为 `require_permission(Permission.WORKSPACE_READ)`，并把 docstring 里的 "鉴权收紧为 workspace-scoped（task-09）"注释更新为修订后的口径。 选这个方案的依据：①init 的语义是"为当前成员初始化本地副本"（D-002/D-009）， 服务层 `AgentService.start_init_dispatch` 本就强制发起者必须有成员 daemon 绑定（`MemberBindingResolver.resolve_member_binding` 无绑定即 409 MemberBindingNotFound），权限门只是第二道闸——降为 `workspace:read` （= 是本工作区成员）后，防线仍由成员绑定+归档区禁写 （`WorkspaceService.ensure_writable`）兜底；②2026-08-14-security-audit-remediation FR-09 的核心意图是 workspace 隔离（非本工作区成员即便全局有写权限也 403）， 本变更保留隔离、只调档位，是修订不是回退；③生产实证 developer 成员 （181144@spdemo）被挡在初始化之外，而开发者正是需要初始化本地环境的日常角色。 测试先行：新建 `tests/modules/workspace/test_init_permission.py`， developer 成员（角色仅 `workspace:read`，与生产权限精简后的真实种子一致） 期望 409 而非 403（旧实现下先红），非成员期望 403（守护 FR-09 隔离不回退）， activate 非成员仍 403（FR-04 不动面）。
