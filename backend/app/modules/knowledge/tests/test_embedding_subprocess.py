@@ -7,6 +7,7 @@
 - 行协议往返（假 worker 回显 [[len(t)] for t in texts]）
 - 闲置自灭后重启（假 worker idle_exit_sec=1 → 1.2s 后进程自退 → 再 embed 重启）
 - 连续崩溃 3 次进入退避（available=False / retry_at 未来）与退避到点恢复
+- embed(timeout_sec=) 紧预算：沉默 worker 挂起按传入限时放弃（非 300s 缺省）
 - get_embedder fail-soft（构造异常缓存原因；崩溃退避期返回 None+reason）
 - _index_cache_put/get LRU 上限淘汰与新鲜度刷新
 - worker 纯函数（_reader EOF 哨兵 / _reset_oom_score 跨平台 fail-soft）
@@ -61,6 +62,16 @@ import sys
 sys.exit(3)
 """
 
+# 沉默 worker：读请求但永不响应（模拟模型下载死连等/推理死锁——挂起态）。
+_SILENT_WORKER = """
+import sys, time
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    time.sleep(60)
+"""
+
 
 @pytest.fixture()
 def fake_worker_path(tmp_path: Path) -> Path:
@@ -73,6 +84,13 @@ def fake_worker_path(tmp_path: Path) -> Path:
 def crash_worker_path(tmp_path: Path) -> Path:
     p = tmp_path / "crash_worker.py"
     p.write_text(_CRASH_WORKER, encoding="utf-8")
+    return p
+
+
+@pytest.fixture()
+def silent_worker_path(tmp_path: Path) -> Path:
+    p = tmp_path / "silent_worker.py"
+    p.write_text(_SILENT_WORKER, encoding="utf-8")
     return p
 
 
@@ -140,6 +158,23 @@ def test_proxy_crash_count_resets_on_success(fake_worker_path: Path):
         assert proxy.consecutive_crashes == 2
         assert proxy.embed(["ok"]) == [[2.0]]  # 成功清零
         assert proxy.consecutive_crashes == 0
+    finally:
+        proxy.close()
+
+
+def test_proxy_embed_timeout_sec_tight_budget(silent_worker_path: Path):
+    """embed(timeout_sec=) 紧预算（2026-11-05-knowledge-vector-async-refresh FR-04）：
+    worker 挂起（读请求永不响应）时按传入限时抛 EmbeddingSubprocessError 并杀子进程，
+    不拖满 300s 缺省批预算。"""
+    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(silent_worker_path))
+    try:
+        t0 = time.monotonic()
+        with pytest.raises(EmbeddingSubprocessError):
+            proxy.embed(["q"], timeout_sec=0.5)
+        elapsed = time.monotonic() - t0
+        assert elapsed < 5.0, f"按传入限时放弃（实际 {elapsed:.2f}s——用了 300s 缺省？）"
+        # 缺省路契约不回归：不传 timeout_sec 仍是 REQUEST_TIMEOUT_SEC 批预算
+        assert EmbeddingSubprocessProxy.REQUEST_TIMEOUT_SEC == 300.0
     finally:
         proxy.close()
 

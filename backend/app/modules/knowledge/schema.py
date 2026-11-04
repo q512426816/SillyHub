@@ -634,12 +634,17 @@ class VectorSearchResultItem(BaseModel):
 
 
 class VectorSearchOut(BaseModel):
-    """检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"""
+    """检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
+
+    index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
+    已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
+    不受影响，字段供观测与测试断言。"""
 
     ok: bool = True
     results: list[VectorSearchResultItem]
     model_ready: bool = True
     reason: str | None = None
+    index_sync: str | None = None
 
 
 # ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────

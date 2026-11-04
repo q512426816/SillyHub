@@ -67,12 +67,14 @@ async def _search_payload(
         embedder,
         settings.knowledge_embedding_model,
         embedder_error=embedder_error,
+        server_build=settings.knowledge_search_server_build,
     )
     return VectorSearchOut(
         ok=True,
         results=out["results"],
         model_ready=out["model_ready"],
         reason=out["reason"],
+        index_sync=out.get("index_sync"),
     )
 
 

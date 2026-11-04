@@ -50,6 +50,22 @@ RUN uv venv /opt/venv \
  && uv pip install --python /opt/venv/bin/python --no-cache -e . \
  && uv pip install --python /opt/venv/bin/python --no-cache alembic
 
+# 2026-11-05-knowledge-vector-async-refresh：预烤 bge-small-zh-v1.5——容器内首用下载在
+# 生产网络（HF 不可达/受限）下分钟级挂起，是 CLI 向量端点冷启根因之一。缓存布局以
+# TextEmbedding 初始化为准，预烤走同一初始化路径（勿改手抓文件）；hf-mirror 与本文件
+# npmmirror/tsinghua/aliyun 国内源策略一致；fail-soft：镜像源失败仅告警不破构建（回退
+# 首用下载现状——端点已去嵌入化，下载挂起不再拖请求）。层位在 venv 后、源码 COPY 前：
+# 源码变更不重烤模型。chmod a+rX：runtime 以非 root user app 运行，缓存只需读。
+ARG EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+RUN if FASTEMBED_CACHE_PATH=/opt/fastembed-cache \
+      HF_ENDPOINT=https://hf-mirror.com \
+      /opt/venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='${EMBEDDING_MODEL}')"; then \
+      chmod -R a+rX /opt/fastembed-cache; \
+    else \
+      echo "WARN: embedding model pre-bake failed (mirror unreachable?) - runtime falls back to first-use download"; \
+      mkdir -p /opt/fastembed-cache; \
+    fi
+
 COPY . .
 
 
@@ -68,6 +84,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/app \
     COMMIT_SHA=${COMMIT_SHA:-} \
+    FASTEMBED_CACHE_PATH=/opt/fastembed-cache \
     PATH="/opt/venv/bin:${PATH}"
 
 # Non-root runtime user
@@ -101,6 +118,10 @@ WORKDIR /app
 # npm/npx/claude/sillyspec 二进制与 node_modules——agent 执行全在宿主 daemon，容器只做
 # API/分发（技能文件如下方 COPY；daemon bundle 走静态分发）。瘦身约数百 MB。
 COPY --from=builder /opt/venv /opt/venv
+# 2026-11-05-knowledge-vector-async-refresh：预烤模型缓存随镜像分发（预烤失败时为空目录，
+# 运行时回退首用下载）；FASTEMBED_CACHE_PATH 已在上文 ENV 指向同路径——embedding_worker
+# 的 TextEmbedding 默认缓存解析到本目录，容器内初始化零网络下载。
+COPY --from=builder /opt/fastembed-cache /opt/fastembed-cache
 COPY --from=builder /build /app
 
 # Daemon distribution files (pre-built on host, injected via the additional
