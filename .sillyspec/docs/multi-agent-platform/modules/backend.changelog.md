@@ -143,3 +143,4 @@
 - 2026-11-03-knowledge-search-hardening | 知识搜索止血：内存扩容、同步时间戳与文案修正
 - 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
 - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
+- 2026-11-05-knowledge-vector-async-refresh | CLI 向量检索端点读路径去嵌入化

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-05-knowledge-vector-async-refresh",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_cold_query_returns_immediately_and_background_builds」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-05-knowledge-vector-async-refresh"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_stale_index_serves_old_results_and_reschedules」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-05-knowledge-vector-async-refresh"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_server_build_disabled_skips_scheduling」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-05-knowledge-vector-async-refresh"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_query_embed_timeout_degrades_fail_soft」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-05-knowledge-vector-async-refresh"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-06",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_index_fingerprint_cache_and_invalidation」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-05-knowledge-vector-async-refresh"
+    }
+  ]
+}

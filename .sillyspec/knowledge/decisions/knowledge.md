@@ -184,3 +184,12 @@ supersedes：D-004@v1
 文件：backend/app/modules/knowledge/search.py, backend/app/modules/knowledge/tests/test_knowledge_search.py, deploy/docker-compose.yml, frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
 最近确认：未记录
 理由：答：落地用户拍板的 B+D+C 三项止血（A 治本另立 brainstorm，不在本变更内）。B：backend `mem_limit` 2500m→3500m——2026-11-03 生产诊断实证（宿主 dmesg：10 月 40 次、11-02 2 次 cgroup OOM kill，被杀者 oom_score_adj=0 的模型 worker 子进程，anon-rss ~2.4G；2500m 对「服务本体 ~460M + 嵌入/翻译双 worker 并存」峰值偏紧），宿主 7.5G 下全栈限额总和升至 ~4.25G 仍充裕。D：`KnowledgeSearchState.updated_at` 补 `onupdate`（对齐 mcp_registry/model.py 先例）——该列原只有 `default_factory`，同步成功不刷新，DB 恒显示建行时间，本次排障先被误导；onupdate 是 SQLAlchemy 客户端侧行为，不改列 DDL，无需迁移。C：前端等待文案与降级徽标对齐真实机制——等待文案改「增量同步」口径；徽标按 `reason` 区分 `index_not_built`（索引未预建）与其余（模型不可用）。搜索同步的架构性改造（内联差量嵌入移出请求路径）留给 A 立项头脑风暴，本变更不触碰 search_sync 编排。
+
+## D-knowledge-007@v1 2026-11-05-knowledge-vector-async-refresh——把 2026-11-03-knowledge-search-async-refresh 已在 UI 搜索路径（search.py）归档验证过的「读路径去嵌入化（
+状态：implemented
+变更：2026-11-05-knowledge-vector-async-refresh
+原编号：D-000@v1
+锚点：.sillyspec/changes/2026-11-05-knowledge-vector-async-refresh/design.md
+文件：backend/Dockerfile, backend/app/modules/knowledge/schema.py, backend/app/modules/knowledge/tests/test_embedding_subprocess.py, backend/app/modules/knowledge/tests/test_vector_search.py, backend/app/modules/knowledge/vector_router.py, backend/app/modules/knowledge/vector_search.py
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+理由：把 2026-11-03-knowledge-search-async-refresh 已在 UI 搜索路径（search.py）归档验证过的「读路径去嵌入化（stale-while-revalidate）」模式迁移到 CLI 向量端点（vector_search.py）：search_sync 检索主体改为只读判定（缓存 fresh 直查 / stale 用旧索引出结果并调度后台重建 / missing 即时空返回并调度后台首建），语料解析+嵌入全部移入进程内后台线程（注册表在途判重 + 强引用），请求路径永不等待语料嵌入。根因（vector_search.py:435-439 请求内同步全量嵌入，冷启动叠加容器内模型首用下载 → 分钟级挂起，CLI 3s 预算必超时）由此消除——与 2026-10-19-knowledge-search-build-switch 的「服务器禁建库」治理语义打通：knowledge_search_server_build=False 时后台构建同样不调度。 配套两件：① 查询单条嵌入限时（EmbeddingSubprocessProxy.embed 增 keyword-only timeout_sec，默认 None=沿用 REQUEST_TIMEOUT_SEC=300s；search_sync 查询路传 15s）——即使 worker 子进程挂起（模型下载死连等），请求也在秒级降级返回而非 300s；② backend/Dockerfile 预烤 bge-small-zh-v1.5（builder 段 HF_ENDPOINT=https://hf-mirror.com 下载 → COPY 进 runtime + ENV FASTEMBED_CACHE_PATH），fail-soft 层——镜像源失败只告警不破构建。选该方案因为同病同药先例已在同仓两次落地（build-switch / async-refresh），模式、命名、reason 口径（index_not_built）全部对齐，零新机制发明。

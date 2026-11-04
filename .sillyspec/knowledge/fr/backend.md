@@ -7742,3 +7742,105 @@ superseded_by：FR-auth-003
 摘要：后续会话排查生产问题
 全文：.sillyspec/changes/archive/2026-10-27-netdata-prod-monitoring/requirements.md#FR-03
 最近确认：089bc22e66afdf4baaa3f8036510f98e4c82b116
+
+## FR-backend-043 冷启动（无缓存）首查即时返回空 results + index_sync=scheduled，语料嵌入转进程内后台线程（在途判重），请求不再阻塞
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：冷启动首查；在途判重
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-01
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_cold_query_returns_immediately_and_background_builds」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-05-knowledge-vector-async-refresh
+  status: active
+
+## FR-backend-044 缓存陈旧（指纹失配）时即时返回旧索引结果并调度后台重建（stale-while-revalidate）
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：语料变更后首查
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-02
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_stale_index_serves_old_results_and_reschedules」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-05-knowledge-vector-async-refresh
+  status: active
+
+## FR-backend-045 KNOWLEDGE_SEARCH_SERVER_BUILD=0 时后台构建不调度，冷启动返回 reason=index_not_built（对齐 search.py 既有治理口径）
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：禁建库开关关闭
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-03
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-03
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_server_build_disabled_skips_scheduling」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-05-knowledge-vector-async-refresh
+  status: active
+
+## FR-backend-046 查询单条嵌入限时（默认 15s）——worker 子进程挂起不再把请求拖到 300s
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：worker 挂起
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-04
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-04
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_query_embed_timeout_degrades_fail_soft」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-05-knowledge-vector-async-refresh
+  status: active
+
+## FR-backend-047 镜像预烤 bge-small-zh-v1.5 模型（fail-soft 层，hf-mirror 源），容器内不再首用下载
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：镜像构建
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-05
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+## FR-backend-048 既有测试面等价迁移（分批/指纹/LRU 隔离/排序/fail-soft）全绿 + 新增冷启动/陈旧/判重/开关关闭/查询限时用例
+变更：2026-11-05-knowledge-vector-async-refresh
+状态：active
+摘要：回归等价
+全文：.sillyspec/changes/archive/2026-11-05-knowledge-vector-async-refresh/requirements.md#FR-06
+最近确认：4adef41def2466a64f63b11a7e43694736d0b37c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-05-knowledge-vector-async-refresh:flow:测试绑定FR-06
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_index_fingerprint_cache_and_invalidation」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-05-knowledge-vector-async-refresh
+  status: active

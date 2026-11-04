@@ -1,0 +1,751 @@
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 850794671..82c90c073 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -50,6 +50,22 @@ RUN uv venv /opt/venv \
+  && uv pip install --python /opt/venv/bin/python --no-cache -e . \
+  && uv pip install --python /opt/venv/bin/python --no-cache alembic
+ 
++# 2026-11-05-knowledge-vector-async-refresh：预烤 bge-small-zh-v1.5——容器内首用下载在
++# 生产网络（HF 不可达/受限）下分钟级挂起，是 CLI 向量端点冷启根因之一。缓存布局以
++# TextEmbedding 初始化为准，预烤走同一初始化路径（勿改手抓文件）；hf-mirror 与本文件
++# npmmirror/tsinghua/aliyun 国内源策略一致；fail-soft：镜像源失败仅告警不破构建（回退
++# 首用下载现状——端点已去嵌入化，下载挂起不再拖请求）。层位在 venv 后、源码 COPY 前：
++# 源码变更不重烤模型。chmod a+rX：runtime 以非 root user app 运行，缓存只需读。
++ARG EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
++RUN if FASTEMBED_CACHE_PATH=/opt/fastembed-cache \
++      HF_ENDPOINT=https://hf-mirror.com \
++      /opt/venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='${EMBEDDING_MODEL}')"; then \
++      chmod -R a+rX /opt/fastembed-cache; \
++    else \
++      echo "WARN: embedding model pre-bake failed (mirror unreachable?) - runtime falls back to first-use download"; \
++      mkdir -p /opt/fastembed-cache; \
++    fi
++
+ COPY . .
+ 
+ 
+@@ -68,6 +84,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
+     PYTHONUNBUFFERED=1 \
+     HOME=/app \
+     COMMIT_SHA=${COMMIT_SHA:-} \
++    FASTEMBED_CACHE_PATH=/opt/fastembed-cache \
+     PATH="/opt/venv/bin:${PATH}"
+ 
+ # Non-root runtime user
+@@ -101,6 +118,12 @@ WORKDIR /app
+ # npm/npx/claude/sillyspec 二进制与 node_modules——agent 执行全在宿主 daemon，容器只做
+ # API/分发（技能文件如下方 COPY；daemon bundle 走静态分发）。瘦身约数百 MB。
+ COPY --from=builder /opt/venv /opt/venv
++# 2026-11-05-knowledge-vector-async-refresh：预烤模型缓存随镜像分发（预烤失败时为空目录，
++# 运行时回退首用下载）；FASTEMBED_CACHE_PATH 已在上文 ENV 指向同路径——embedding_worker
++# 的 TextEmbedding 默认缓存解析到本目录，容器内初始化零网络下载。a+rwX：runtime 以非
++# root user app 运行——预烤失败时首用下载要能写入本目录（评审 P3 清偿：回退路径可达）。
++COPY --from=builder /opt/fastembed-cache /opt/fastembed-cache
++RUN chmod -R a+rwX /opt/fastembed-cache
+ COPY --from=builder /build /app
+ 
+ # Daemon distribution files (pre-built on host, injected via the additional
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index 21163a24c..a5fc39cf6 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -634,12 +634,17 @@ class VectorSearchResultItem(BaseModel):
+ 
+ 
+ class VectorSearchOut(BaseModel):
+-    """检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"""
++    """检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
++
++    index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
++    已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
++    不受影响，字段供观测与测试断言。"""
+ 
+     ok: bool = True
+     results: list[VectorSearchResultItem]
+     model_ready: bool = True
+     reason: str | None = None
++    index_sync: str | None = None
+ 
+ 
+ # ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────
+diff --git a/backend/app/modules/knowledge/tests/test_embedding_subprocess.py b/backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+index 1367a3cf2..859c1d5a0 100644
+--- a/backend/app/modules/knowledge/tests/test_embedding_subprocess.py
++++ b/backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+@@ -7,6 +7,7 @@
+ - 行协议往返（假 worker 回显 [[len(t)] for t in texts]）
+ - 闲置自灭后重启（假 worker idle_exit_sec=1 → 1.2s 后进程自退 → 再 embed 重启）
+ - 连续崩溃 3 次进入退避（available=False / retry_at 未来）与退避到点恢复
++- embed(timeout_sec=) 紧预算：沉默 worker 挂起按传入限时放弃（非 300s 缺省）
+ - get_embedder fail-soft（构造异常缓存原因；崩溃退避期返回 None+reason）
+ - _index_cache_put/get LRU 上限淘汰与新鲜度刷新
+ - worker 纯函数（_reader EOF 哨兵 / _reset_oom_score 跨平台 fail-soft）
+@@ -61,6 +62,16 @@ import sys
+ sys.exit(3)
+ """
+ 
++# 沉默 worker：读请求但永不响应（模拟模型下载死连等/推理死锁——挂起态）。
++_SILENT_WORKER = """
++import sys, time
++while True:
++    line = sys.stdin.readline()
++    if not line:
++        break
++    time.sleep(60)
++"""
++
+ 
+ @pytest.fixture()
+ def fake_worker_path(tmp_path: Path) -> Path:
+@@ -76,6 +87,13 @@ def crash_worker_path(tmp_path: Path) -> Path:
+     return p
+ 
+ 
++@pytest.fixture()
++def silent_worker_path(tmp_path: Path) -> Path:
++    p = tmp_path / "silent_worker.py"
++    p.write_text(_SILENT_WORKER, encoding="utf-8")
++    return p
++
++
+ @pytest.fixture(autouse=True)
+ def _reset_embedder():
+     vs.reset_embedder_for_tests()
+@@ -144,6 +162,41 @@ def test_proxy_crash_count_resets_on_success(fake_worker_path: Path):
+         proxy.close()
+ 
+ 
++def test_proxy_embed_timeout_sec_tight_budget(silent_worker_path: Path):
++    """embed(timeout_sec=) 紧预算（2026-11-05-knowledge-vector-async-refresh FR-04）：
++    worker 挂起（读请求永不响应）时按传入限时抛 EmbeddingSubprocessError 并杀子进程，
++    不拖满 300s 缺省批预算。"""
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(silent_worker_path))
++    try:
++        t0 = time.monotonic()
++        with pytest.raises(EmbeddingSubprocessError):
++            proxy.embed(["q"], timeout_sec=0.5)
++        elapsed = time.monotonic() - t0
++        assert elapsed < 5.0, f"按传入限时放弃（实际 {elapsed:.2f}s——用了 300s 缺省？）"
++        # 缺省路契约不回归：不传 timeout_sec 仍是 REQUEST_TIMEOUT_SEC 批预算
++        assert EmbeddingSubprocessProxy.REQUEST_TIMEOUT_SEC == 300.0
++    finally:
++        proxy.close()
++
++
++def test_proxy_embed_lock_contention_respects_timeout(fake_worker_path: Path):
++    """锁排队计入预算（评审 P3 清偿）：锁被他方持有时 embed(timeout_sec=) 按预算
++    放弃（EmbeddingSubprocessError lock busy）——紧预算必须覆盖锁等待，否则查询路
++    可被持锁语料批（批预算 300s）变相拖满。"""
++    proxy = EmbeddingSubprocessProxy("fake-model", worker_cmd=_cmd(fake_worker_path))
++    try:
++        assert proxy._lock.acquire(timeout=1.0), "测试预取锁（模拟并发语料批持锁）"
++        t0 = time.monotonic()
++        with pytest.raises(EmbeddingSubprocessError, match="lock busy"):
++            proxy.embed(["q"], timeout_sec=0.3)
++        elapsed = time.monotonic() - t0
++        assert elapsed < 5.0, f"按传入限时放弃锁等待（实际 {elapsed:.2f}s）"
++        assert proxy.consecutive_crashes == 0, "锁放弃不是崩溃（不计崩溃退避）"
++    finally:
++        proxy._lock.release()
++        proxy.close()
++
++
+ # -- get_embedder fail-soft ------------------------------------------------------------
+ 
+ 
+diff --git a/backend/app/modules/knowledge/tests/test_vector_search.py b/backend/app/modules/knowledge/tests/test_vector_search.py
+index caeb76823..14cdea4a4 100644
+--- a/backend/app/modules/knowledge/tests/test_vector_search.py
++++ b/backend/app/modules/knowledge/tests/test_vector_search.py
+@@ -1,17 +1,24 @@
+-"""向量检索端点与服务（change 2026-10-15-platform-vector-search）。
++"""向量检索端点与服务（change 2026-10-15-platform-vector-search；读路径去嵌入化
++2026-11-05-knowledge-vector-async-refresh）。
+ 
+ 测试面（fastembed 不进测试依赖——embedder 全部 fake 注入，真模型初始化属部署面）：
+ 
+ - 解析：段格式/字段行/spec_path POSIX 化/epoch 与 legacy 双 id 形态/非条目段跳过；
+-- 索引：指纹缓存（文件不变零重建、增改后重建）、余弦排序、limit 钳位、契约字段；
+-- fail-soft：embedder 不可用 → model_ready=False + 空 results + reason（CLI 降级面）；
+-- 路由：无 token 401 / 非 shpsync 凭据 403（workspace_id=None scope）/ happy path
+-  契约形状（依赖覆盖 require_platform_sync + 真 workspace 行 + spec_root 重定向）/
+-  降级 200（get_embedder 注入不可用态）。
++- 索引与后台构建：冷启动即时空返回+调度（门控 embedder 证请求路径零嵌入）、后台
++  建库后可查、指纹未变零重建、stale-serve（旧索引出结果+后台重建）、在途判重、
++  workspace 键隔离、分批形状（2026-11-02 OOM 根治面）、排序/limit/契约字段；
++- fail-soft：embedder 不可用 → model_ready=False + 空 results + reason；查询嵌入
++  超时/异常 → fail-soft 降级不抛且 timeout_sec 紧预算传达到 embedder；
++- 禁建库开关：server_build=False 冷启动 reason=index_not_built 零调度、存量陈旧
++  索引照常服务仅不再重建；
++- 路由：无 token 401 / 非 shpsync 凭据 403 / happy path 两段契约（冷启动
++  index_sync=scheduled 空结果 → 后台建库后真实召回 + 字段透传）/ 降级 200。
+ """
+ 
+ from __future__ import annotations
+ 
++import threading
++import time
+ import uuid
+ from pathlib import Path
+ 
+@@ -20,6 +27,9 @@ import pytest
+ from app.main import app as fastapi_app
+ from app.modules.knowledge.vector_search import (
+     _EMBED_BATCH_SIZE,
++    _QUERY_EMBED_TIMEOUT_SEC,
++    _bg_builds,
++    await_background_builds_for_tests,
+     decisions_fingerprint,
+     parse_decision_entries,
+     reset_embedder_for_tests,
+@@ -36,26 +46,65 @@ _BUCKET_CHARS = ["缓", "存", "索", "引", "发", "布", "删", "除"]
+ 
+ 
+ class FakeEmbedder:
+-    """字符桶计数向量：text.count(ch) per 桶——「缓存」重的文本彼此相近。"""
++    """字符桶计数向量：text.count(ch) per 桶——「缓存」重的文本彼此相近。
++
++    embed 接受 keyword-only timeout_sec（查询路紧预算传達面，2026-11-05 契约）。
++    """
+ 
+     def __init__(self) -> None:
+         self.embed_calls = 0
+         self.embedded_texts = 0
+         self.batch_sizes: list[int] = []
++        self.query_timeouts: list[float | None] = []
+ 
+-    def embed(self, texts: list[str]) -> list[list[float]]:
++    def embed(self, texts: list[str], *, timeout_sec: float | None = None) -> list[list[float]]:
+         self.embed_calls += 1
+         self.embedded_texts += len(texts)
+         self.batch_sizes.append(len(texts))
++        if len(texts) == 1:
++            self.query_timeouts.append(timeout_sec)
+         return [[float(t.count(ch)) for ch in _BUCKET_CHARS] for t in texts]
+ 
+ 
++class GatedCorpusEmbedder(FakeEmbedder):
++    """语料批（>1 条）阻塞在门上的 embedder——证「请求即时返回、嵌入在后台」。
++
++    同步实现会在请求路径等门（门不开 → 测试超时/断言失败）；异步实现请求侧零语料
++    嵌入调用，门只放行后台构建线程。
++    """
++
++    def __init__(self) -> None:
++        super().__init__()
++        self.gate = threading.Event()
++        self.corpus_batches = 0
++
++    def embed(self, texts: list[str], *, timeout_sec: float | None = None) -> list[list[float]]:
++        if len(texts) > 1:
++            self.corpus_batches += 1
++            assert self.gate.wait(timeout=30.0), "测试门未放行（构建被卡死）"
++        return super().embed(texts, timeout_sec=timeout_sec)
++
++
++class ExplodingQueryEmbedder(FakeEmbedder):
++    """查询批（单条）按传入限时校验后抛异常——证 fail-soft 降级与 timeout_sec 传達。"""
++
++    def embed(self, texts: list[str], *, timeout_sec: float | None = None) -> list[list[float]]:
++        if len(texts) == 1:
++            assert timeout_sec == _QUERY_EMBED_TIMEOUT_SEC, (
++                f"查询路必须传紧限时 {_QUERY_EMBED_TIMEOUT_SEC}（实际 {timeout_sec}）"
++            )
++            raise TimeoutError("simulated worker hang")
++        return super().embed(texts, timeout_sec=timeout_sec)
++
++
+ @pytest.fixture(autouse=True)
+ def _isolated_vector_state():
+-    """每测试清空索引缓存与 embedder 单例（进程级全局态隔离）。"""
++    """每测试清空索引缓存、embedder 单例与后台构建注册表（进程级全局态隔离）。"""
+     reset_index_for_tests()
+     reset_embedder_for_tests()
++    await_background_builds_for_tests()
+     yield
++    await_background_builds_for_tests()
+     reset_index_for_tests()
+     reset_embedder_for_tests()
+ 
+@@ -126,6 +175,73 @@ def test_parse_decision_entries_absent_dir(tmp_path: Path) -> None:
+     assert decisions_fingerprint(root) is None, "指纹缺席 None"
+ 
+ 
++# ── 冷启动/后台构建（2026-11-05-knowledge-vector-async-refresh）───────────────
++
++
++def test_cold_query_returns_immediately_and_background_builds(tmp_path: Path) -> None:
++    """FR-01：冷启动首查即时返回（门控 embedder 证请求路径零语料嵌入），
++    后台建库完成后第二查返回真实召回。"""
++    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
++    emb = GatedCorpusEmbedder()
++    t0 = time.monotonic()
++    first = search_sync(root, "ws-cold", "缓存淘汰", 10, emb, "test-model")
++    elapsed = time.monotonic() - t0
++    assert elapsed < 2.0, f"冷启动首查即时返回（实际 {elapsed:.2f}s——语料嵌入进了请求路径）"
++    assert first["results"] == [] and first["model_ready"] is True
++    assert first["index_sync"] == "scheduled", "冷启动契约标记"
++    assert emb.embedded_texts == 0 and emb.corpus_batches == 0, "请求路径零嵌入调用"
++    assert len(_bg_builds) == 1, "后台构建线程在途（被门阻塞）"
++
++    emb.gate.set()  # 放行后台构建
++    await_background_builds_for_tests()
++    assert emb.corpus_batches == 1 and emb.embedded_texts == 3, "后台首建全量嵌入（3 条）"
++
++    second = search_sync(root, "ws-cold", "缓存淘汰", 10, emb, "test-model")
++    assert len(second["results"]) == 3, "建库完成后可查"
++    assert "index_sync" not in second, "fresh 直查无调度标记"
++    assert emb.query_timeouts == [_QUERY_EMBED_TIMEOUT_SEC], "查询嵌入带紧限时"
++
++
++def test_inflight_build_dedup(tmp_path: Path) -> None:
++    """FR-01 场景：同键在途构建判重——存活即跳过，不重复建（注册表强引用同一线程）。"""
++    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
++    emb = GatedCorpusEmbedder()
++    search_sync(root, "ws-dedup", "缓存", 10, emb, "test-model")  # 调度 → 阻塞在门
++    in_flight = list(_bg_builds.values())
++    assert len(in_flight) == 1 and in_flight[0].is_alive()
++
++    search_sync(root, "ws-dedup", "缓存", 10, emb, "test-model")  # 再调度 → 判重跳过
++    assert list(_bg_builds.values()) == in_flight, "在途即跳过（注册表同一线程对象）"
++
++    emb.gate.set()
++    await_background_builds_for_tests()
++    assert emb.corpus_batches == 1 and emb.embedded_texts == 3, "同键只建一份索引"
++
++
++def test_stale_index_serves_old_results_and_reschedules(tmp_path: Path) -> None:
++    """FR-02：指纹失配 → 旧索引即时出结果 + index_sync=scheduled，重建在后台。"""
++    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
++    emb = FakeEmbedder()
++    search_sync(root, "ws-stale", "缓存", 10, emb, "test-model")
++    await_background_builds_for_tests()
++
++    time.sleep(0.01)  # 跨平台 mtime 精度兜底
++    d = root / "knowledge" / "decisions" / "demo.md"
++    d.write_text(
++        d.read_text(encoding="utf-8") + "\n## D-004@v1 删除走软删\n变更：x\n理由：墓碑。\n",
++        encoding="utf-8",
++    )
++    stale = search_sync(root, "ws-stale", "缓存", 10, emb, "test-model")
++    assert stale["model_ready"] is True and stale["index_sync"] == "scheduled"
++    anchors = [r["anchor"] for r in stale["results"]]
++    assert anchors, "stale-serve 旧索引照常出结果"
++    assert "D-004@v1" not in anchors, "旧索引不含新条目（重建尚未完成）"
++
++    await_background_builds_for_tests()
++    fresh = search_sync(root, "ws-stale", "缓存", 10, emb, "test-model")
++    assert "D-004@v1" in [r["anchor"] for r in fresh["results"]], "后台重建后新条目可查"
++
++
+ # ── 索引与检索 ────────────────────────────────────────────────────────────────
+ 
+ 
+@@ -133,13 +249,14 @@ def test_index_fingerprint_cache_and_invalidation(tmp_path: Path) -> None:
+     root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
+     emb = FakeEmbedder()
+     first = search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
+-    assert len(first["results"]) == 3
+-    # 首查 = 语料重建（3 条）+ 查询（1 条）= 4 文本
+-    assert emb.embedded_texts == 4, f"首查语料+查询全量 embed（实际 {emb.embedded_texts}）"
+-    search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
+-    assert emb.embedded_texts == 5, "指纹未变 → 索引缓存零重建（只多查询 1 条）"
+-    # 追加内容改变 mtime/size → 重建（4 条语料 + 1 查询 = 10）
+-    import time
++    assert first["results"] == [] and first["index_sync"] == "scheduled", "冷启动即时空返回"
++    assert emb.embedded_texts == 0, "请求路径零嵌入"
++    await_background_builds_for_tests()
++    assert emb.embedded_texts == 3, "后台首建全量嵌入（3 条语料）"
++
++    second = search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
++    assert len(second["results"]) == 3
++    assert emb.embedded_texts == 4, "指纹未变 → 零重建（只嵌查询 1 条）"
+ 
+     time.sleep(0.01)
+     d = root / "knowledge" / "decisions" / "demo.md"
+@@ -147,29 +264,41 @@ def test_index_fingerprint_cache_and_invalidation(tmp_path: Path) -> None:
+         d.read_text(encoding="utf-8") + "\n## D-004@v1 删除走软删\n变更：x\n理由：墓碑。\n",
+         encoding="utf-8",
+     )
+-    second = search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
+-    assert emb.embedded_texts == 10, "文件变更 → 指纹失效重建（4 语料+1 查询）"
+-    assert len(second["results"]) == 4
+-    # 不同 workspace key 各自建索引（互不串台）：改后语料 4 条，+4 +1 查询 = 15
+-    search_sync(root, "ws-b", "缓存淘汰", 10, emb, "test-model")
+-    assert emb.embedded_texts == 15, "workspace 键隔离各自建索引"
++    stale = search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
++    assert emb.embedded_texts == 5, "stale-serve 只嵌查询（重建不在请求路径）"
++    assert stale["index_sync"] == "scheduled"
++    await_background_builds_for_tests()
++    assert emb.embedded_texts == 9, "后台重建新语料全量（4 条）"
++
++    third = search_sync(root, "ws-a", "缓存淘汰", 10, emb, "test-model")
++    assert len(third["results"]) == 4 and emb.embedded_texts == 10
++
++    # 不同 workspace key 各自建索引（互不串台）：冷启动空返回 + 后台独立建 4 条
++    other = search_sync(root, "ws-b", "缓存淘汰", 10, emb, "test-model")
++    assert other["results"] == [] and other["index_sync"] == "scheduled"
++    await_background_builds_for_tests()
++    assert emb.embedded_texts == 14, "workspace 键隔离各自建索引"
+ 
+ 
+ def test_index_rebuild_embeds_in_batches(tmp_path: Path) -> None:
+-    """FR-01（2026-11-02 生产 OOM 根治）：索引重建必须分批喂 embed——单次全量批
+-    曾把 embedding 子进程 RSS 推到 2.3~2.45GB 撞 2500m cgroup 配额（dmesg 6 次强杀）。"""
++    """FR-06（2026-11-02 生产 OOM 根治面等价迁移）：后台构建必须分批喂 embed——
++    单次全量批曾把 embedding 子进程 RSS 推到 2.3~2.45GB 撞 2500m cgroup 配额。"""
+     root = _seed_spec_root(tmp_path, _gen_bulk_entries(150))
+     emb = FakeEmbedder()
+     out = search_sync(root, "ws-batch", "缓存", 10, emb, "test-model")
+-    corpus_batches, query_batch = emb.batch_sizes[:-1], emb.batch_sizes[-1]
+-    assert query_batch == 1, "查询独立 1 条成批"
++    assert out["results"] == [] and emb.embedded_texts == 0, "请求路径零嵌入"
++    await_background_builds_for_tests()
++
++    corpus_batches = emb.batch_sizes
+     assert all(b <= _EMBED_BATCH_SIZE for b in corpus_batches), "每批 ≤ 批上限"
+     assert sum(corpus_batches) == 150, "分批不丢不重（150 条语料全覆盖）"
+     assert len(corpus_batches) == (150 + _EMBED_BATCH_SIZE - 1) // _EMBED_BATCH_SIZE, (
+         "满批条数 = ceil(150/批上限)，末批为余数"
+     )
++    out2 = search_sync(root, "ws-batch", "缓存", 10, emb, "test-model")
++    assert emb.batch_sizes[-1] == 1, "查询独立 1 条成批"
+     assert emb.embedded_texts == 151, "分批不丢不重（150 语料 + 1 查询）"
+-    assert out["results"][0]["anchor"] == "D-bulk-137@v1", (
++    assert out2["results"][0]["anchor"] == "D-bulk-137@v1", (
+         "分批按序聚合——跨批条目（第 137 条在末批）排序不回归"
+     )
+ 
+@@ -178,12 +307,17 @@ def test_small_corpus_stays_single_batch(tmp_path: Path) -> None:
+     root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
+     emb = FakeEmbedder()
+     search_sync(root, "ws-small", "缓存", 10, emb, "test-model")
++    await_background_builds_for_tests()
++    search_sync(root, "ws-small", "缓存", 10, emb, "test-model")
+     assert emb.batch_sizes == [3, 1], "≤批上限条语料单批嵌入（分批不改变小语料行为面）"
+ 
+ 
+ def test_search_ranking_limit_and_contract(tmp_path: Path) -> None:
+     root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
+     emb = FakeEmbedder()
++    search_sync(root, "ws-rank", "预热", 10, emb, "test-model")  # 触发后台建库
++    await_background_builds_for_tests()
++
+     out = search_sync(root, "ws-rank", "缓存淘汰策略", 2, emb, "test-model")
+     assert out["model_ready"] is True and out["reason"] is None
+     assert len(out["results"]) == 2, "limit 截断"
+@@ -196,6 +330,9 @@ def test_search_ranking_limit_and_contract(tmp_path: Path) -> None:
+     assert empty_q["results"] == [] and empty_q["model_ready"] is True, "空查询零结果不报错"
+ 
+ 
++# ── fail-soft 与查询嵌入限时 ─────────────────────────────────────────────────
++
++
+ def test_embedder_unavailable_fail_soft(tmp_path: Path) -> None:
+     root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
+     out = search_sync(
+@@ -206,6 +343,52 @@ def test_embedder_unavailable_fail_soft(tmp_path: Path) -> None:
+     assert "fastembed" in out["reason"], "reason 带因（可观测键）"
+ 
+ 
++def test_query_embed_timeout_degrades_fail_soft(tmp_path: Path) -> None:
++    """FR-04：查询嵌入超时/异常 → fail-soft 降级（model_ready=False + reason 带因），
++    且 timeout_sec 紧预算传达到 embedder（非 300s 缺省）。"""
++    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
++    emb = ExplodingQueryEmbedder()
++    search_sync(root, "ws-timeout", "预热", 10, emb, "test-model")
++    await_background_builds_for_tests()
++
++    out = search_sync(root, "ws-timeout", "缓存", 10, emb, "test-model")
++    assert out["model_ready"] is False, "查询嵌入失败 → 降级标记"
++    assert out["results"] == [], "降级空结果"
++    assert "TimeoutError" in out["reason"], "reason 带因（异常名可观测）"
++
++
++# ── 禁建库开关（2026-10-19 治理口径随迁）────────────────────────────────────
++
++
++def test_server_build_disabled_skips_scheduling(tmp_path: Path) -> None:
++    """FR-03：server_build=False 冷启动 reason=index_not_built 零调度零嵌入；
++    存量索引（含陈旧）照常服务，仅不再重建。"""
++    root = _seed_spec_root(tmp_path, _TWO_ENTRIES)
++    emb = FakeEmbedder()
++    out = search_sync(root, "ws-off", "缓存", 10, emb, "test-model", server_build=False)
++    assert out["results"] == [] and out["model_ready"] is True
++    assert out["reason"] == "index_not_built", "reason 对齐 search.py 禁建库口径"
++    assert emb.embedded_texts == 0, "禁建库路径零嵌入（语料与查询均零）"
++    assert len(_bg_builds) == 0, "零调度（注册表空）"
++
++    # 存量索引照常服务：先放开开关建库，再关开关 + 语料变更 → stale 服务不重建
++    search_sync(root, "ws-off2", "缓存", 10, emb, "test-model")
++    await_background_builds_for_tests()
++    assert emb.embedded_texts == 3
++    time.sleep(0.01)
++    d = root / "knowledge" / "decisions" / "demo.md"
++    d.write_text(
++        d.read_text(encoding="utf-8") + "\n## D-004@v1 删除走软删\n变更：x\n理由：墓碑。\n",
++        encoding="utf-8",
++    )
++    served = search_sync(root, "ws-off2", "缓存", 10, emb, "test-model", server_build=False)
++    assert served["results"], "禁建库 + 存量索引照常服务"
++    assert "D-004@v1" not in [r["anchor"] for r in served["results"]], "服务的是旧索引"
++    assert "index_sync" not in served, "不再调度重建"
++    assert emb.embedded_texts == 4, "无重嵌（3 建库 + 1 查询）"
++    assert len(_bg_builds) == 0
++
++
+ # ── 路由 ─────────────────────────────────────────────────────────────────────
+ 
+ 
+@@ -277,6 +460,7 @@ async def test_vector_search_rejects_non_shpsync_scope(
+ async def test_vector_search_happy_path_contract(
+     client, vector_workspace: dict, fake_embedder_env
+ ) -> None:
++    """两段契约：冷启动 200 空结果 + index_sync=scheduled → 后台建库 → 真实召回。"""
+     from app.modules.platform_sync.auth import PlatformSyncAuthScope, require_platform_sync
+ 
+     async def _sync_scope():
+@@ -293,8 +477,20 @@ async def test_vector_search_happy_path_contract(
+         assert resp.status_code == 200, resp.text
+         body = resp.json()
+         assert body["ok"] is True and body["model_ready"] is True
+-        assert body["results"], "语料在场必非空"
+-        top = body["results"][0]
++        assert body["results"] == [], "冷启动即时空结果（请求不嵌语料）"
++        assert body["index_sync"] == "scheduled", "index_sync 契约透传"
++
++        await_background_builds_for_tests()  # 后台建库收口
++
++        resp2 = await client.post(
++            "/api/spec/knowledge/vector-search",
++            json={"query": "缓存淘汰策略", "limit": 10},
++        )
++        assert resp2.status_code == 200, resp2.text
++        body2 = resp2.json()
++        assert body2["model_ready"] is True and body2.get("index_sync") is None
++        assert body2["results"], "语料在场必非空"
++        top = body2["results"][0]
+         assert set(top) == {"spec_path", "anchor", "change", "score"}, "CLI 契约四键"
+         assert top["spec_path"].startswith("knowledge/decisions/"), (
+             "CLI buildResultFromPlatform 过滤前缀"
+diff --git a/backend/app/modules/knowledge/vector_router.py b/backend/app/modules/knowledge/vector_router.py
+index 125403d43..42018cd7e 100644
+--- a/backend/app/modules/knowledge/vector_router.py
++++ b/backend/app/modules/knowledge/vector_router.py
+@@ -67,12 +67,14 @@ async def _search_payload(
+         embedder,
+         settings.knowledge_embedding_model,
+         embedder_error=embedder_error,
++        server_build=settings.knowledge_search_server_build,
+     )
+     return VectorSearchOut(
+         ok=True,
+         results=out["results"],
+         model_ready=out["model_ready"],
+         reason=out["reason"],
++        index_sync=out.get("index_sync"),
+     )
+ 
+ 
+diff --git a/backend/app/modules/knowledge/vector_search.py b/backend/app/modules/knowledge/vector_search.py
+index 6e1cd7b97..bf6a020d6 100644
+--- a/backend/app/modules/knowledge/vector_search.py
++++ b/backend/app/modules/knowledge/vector_search.py
+@@ -16,9 +16,13 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
+   CLI ``buildResultFromPlatform`` 只认 ``decisions/`` 前缀），embedding 文本 =
+   ``f"{anchor} {title}\n{reason}"``；rejected/死路条目照常入索引（策略面在 CLI
+   本地解析——「平台只做语义召回」原则，本地文件是真相源）。
+-- **索引** = 进程内按 decisions 文件集指纹 ``(name, mtime_ns, size)`` 懒构建缓存
+-  （设计偏差：提案的 daemon sync 挂点灌索引改为查询时懒构建——语料量级 700-2400
+-  条秒级，免 daemon 改动，文件增删改自动失效自愈）。重建嵌入**必须**经
++- **索引** = 进程内按 decisions 文件集指纹 ``(name, mtime_ns, size)`` 缓存（语料量级
++  700-2400 条，文件增删改指纹失配自愈）。读路径去嵌入化（2026-11-05-knowledge-vector-
++  async-refresh，迁移自 search.py 同名先例）：失配/缺索引时调度进程内后台线程重建
++  （注册表在途判重，失败不重试自愈），请求即时返回存量索引或空结果——**禁止**在请求
++  路径内同步重建（生产实证冷启动分钟级挂起：全量嵌入 + 容器内模型首用下载叠加）。
++  ``settings.knowledge_search_server_build=False``（KNOWLEDGE_SEARCH_SERVER_BUILD=0）
++  时后台构建一律不调度（「服务器禁建库」治理口径与 search.py 同源）。重建嵌入**必须**经
+   ``_embed_corpus`` 按 32 条/批分批喂子进程（2026-11-02 生产 OOM 根治——单批全量
+   ~2.4k 条曾把 worker RSS 推到 2.3~2.45GB，撞 2500m cgroup 配额被强杀 6 次）。
+ - **相似度** = 归一化点积（余弦），纯 Python（2.4k×512 毫秒级，不引入 numpy 耦合；
+@@ -36,6 +40,8 @@ import time
+ from dataclasses import dataclass
+ from pathlib import Path
+ 
++import structlog
++
+ # ── 决策条目解析（对齐 CLI src/knowledge-match.js 的段格式子集）─────────────────
+ 
+ _DECISION_HEADING_RE = re.compile(r"^##\s+(D-(?:[A-Za-z0-9_\-\u4e00-\u9fff]+-)?\d+@v\d+)\s+(.*)$")
+@@ -231,18 +237,27 @@ class EmbeddingSubprocessProxy:
+             time.monotonic() >= self.retry_at
+         )
+ 
+-    def embed(self, texts: list[str]) -> list[list[float]]:
++    def embed(self, texts: list[str], *, timeout_sec: float | None = None) -> list[list[float]]:
+         """阻塞式嵌入一批文本；失败抛 EmbeddingSubprocessError（fail-soft 由调用方降级）。
+ 
+         子进程自灭（闲置/寿命帽）后的首次请求做**单次透明重启重试**——对调用方
+-        等价于"重启即恢复"；重试仍失败或已进崩溃退避则抛。
++        等价于"重启即恢复"；重试仍失败或已进崩溃退避则抛。``timeout_sec`` 为本批
++        等待上限（缺省 None=REQUEST_TIMEOUT_SEC 300s）——查询路单条嵌入传紧预算
++        （_QUERY_EMBED_TIMEOUT_SEC），worker 挂起（模型下载死连等）不再拖满 300s。
+         """
+         if not self.available:
+             raise EmbeddingSubprocessError(
+                 f"embedding subprocess in crash backoff until {self.retry_at:.0f}"
+             )
+-        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
+-        with self._lock:
++        budget = timeout_sec if timeout_sec and timeout_sec > 0 else self.REQUEST_TIMEOUT_SEC
++        deadline = time.monotonic() + budget
++        # 锁等待计入总预算（评审 P3 清偿）：语料批/他查询持锁可达其批预算（300s），
++        # 查询路紧预算必须覆盖锁排队——deadline 固定，锁等待与响应等待共享同一预算。
++        if not self._lock.acquire(timeout=budget):
++            raise EmbeddingSubprocessError(
++                f"embed lock busy, gave up after {budget:.1f}s (concurrent batch holds proxy)"
++            )
++        try:
+             attempts = 0
+             while True:
+                 attempts += 1
+@@ -271,6 +286,8 @@ class EmbeddingSubprocessProxy:
+                 except Exception as exc:  # 管道断裂/超时/JSON 损坏一律按崩溃处理
+                     self._on_crash()
+                     raise EmbeddingSubprocessError(f"{type(exc).__name__}: {exc}") from exc
++        finally:
++            self._lock.release()
+ 
+     def _on_crash(self) -> None:
+         self._stop()
+@@ -404,6 +421,68 @@ def _embed_corpus(embedder: object, texts: list[str]) -> list[list[float]]:
+     return vectors
+ 
+ 
++# ── 后台构建调度（2026-11-05-knowledge-vector-async-refresh）────────────────────
++#
++# 读路径与语料嵌入彻底解耦（stale-while-revalidate，迁移自 search.py 2026-11-03
++# 同名先例）：检索只做只读判定（指纹 fresh/stale/missing），失配/缺索引时调度进程内
++# 后台线程重建（注册表 = 在途判重 + Thread 强引用），请求即时返回存量索引或空结果。
++# 生产实证（2026-11-05）：请求内同步全量嵌入 + 容器内模型首用下载 → 冷启动分钟级
++# 挂起（CLI 3s 预算必超时）。失败只记日志不重试、下次查询指纹仍失配再调度（自愈，
++# 对齐 search.py D-003「防周期空转」口径）。
++
++logger = structlog.get_logger()
++
++_bg_builds: dict[tuple[str, str], threading.Thread] = {}
++
++# 查询路单条嵌入限时（秒）：worker 冷启（spawn+模型加载）1~3s 常态；挂起态（模型
++# 下载死连等）不该把请求拖满 300s 批预算——CLI 消费方自身预算仅 3s，秒级降级即正确。
++_QUERY_EMBED_TIMEOUT_SEC = 15.0
++
++
++def _bg_build(spec_root: Path, key: tuple[str, str], embedder: object) -> None:
++    """后台构建主体：指纹取建首（构建期语料再变 → 下次查询失配自愈再调度）。"""
++    try:
++        fp = decisions_fingerprint(spec_root)
++        if fp is None:
++            return
++        entries = parse_decision_entries(spec_root)
++        vectors = _embed_corpus(embedder, [e.text for e in entries])
++        _index_cache_put(key, {"fingerprint": fp, "entries": entries, "vectors": vectors})
++    except Exception as exc:
++        logger.warning(
++            "knowledge_vector.bg_build_failed",
++            workspace=key[0],
++            model=key[1],
++            error=f"{type(exc).__name__}: {exc}",
++        )
++    finally:
++        # 判重窗竞态下可能同键双线程：只清自己的注册（他线程仍受判重保护）
++        if _bg_builds.get(key) is threading.current_thread():
++            _bg_builds.pop(key, None)
++
++
++def _schedule_background_build(spec_root: Path, key: tuple[str, str], embedder: object) -> None:
++    """调度后台构建（在途即跳过；调用方不等待——读路径永不阻塞）。"""
++    existing = _bg_builds.get(key)
++    if existing is not None and existing.is_alive():
++        return
++    t = threading.Thread(
++        target=_bg_build,
++        args=(spec_root, key, embedder),
++        daemon=True,
++        name=f"vector-index-build:{key[0]}",
++    )
++    _bg_builds[key] = t
++    t.start()
++
++
++def await_background_builds_for_tests() -> None:
++    """测试隔离：等待全部在途后台构建结束并清空注册表（生产勿调，reset_*_for_tests 族）。"""
++    for t in list(_bg_builds.values()):
++        t.join(timeout=30.0)
++    _bg_builds.clear()
++
++
+ def search_sync(
+     spec_root: Path,
+     workspace_key: str,
+@@ -413,10 +492,16 @@ def search_sync(
+     model_name: str,
+     *,
+     embedder_error: str | None = None,
++    server_build: bool = True,
+ ) -> dict:
+     """同步检索主体（路由侧经 run_in_threadpool 调用；embedder 参数供测试注入 fake）。
+ 
+-    返回 ``{results, model_ready, reason}``——embedder None（不可用）时 results 恒空。
++    返回 ``{results, model_ready, reason, index_sync?}``——读路径去嵌入化：missing
++    即时空返回并调度后台首建（index_sync="scheduled"）；stale 用旧索引即时出结果并
++    调度后台重建；fresh 直查。embedder None（不可用）时 results 恒空。查询向量嵌入
++    带紧限时（_QUERY_EMBED_TIMEOUT_SEC），超时/失败 fail-soft 降级不抛。
++    ``server_build=False``（「服务器禁建库」，router 从 settings 注入，与 search.py
++    治理同源）时后台构建一律不调度：missing 返回 reason=index_not_built。
+     """
+     if embedder is None:
+         return {
+@@ -432,13 +517,36 @@ def search_sync(
+         return {"results": [], "model_ready": True, "reason": None}
+     key = (workspace_key, model_name)
+     cached = _index_cache_get(key)
++    index_sync = None
+     if cached is None or cached["fingerprint"] != fp:
+-        entries = parse_decision_entries(spec_root)
+-        vectors = _embed_corpus(embedder, [e.text for e in entries])
+-        cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
+-        _index_cache_put(key, cached)
+-    results = _cosine_top_k(embedder.embed([q])[0], cached["entries"], cached["vectors"], limit)
+-    return {"results": results, "model_ready": True, "reason": None}
++        if not server_build:
++            if cached is None:
++                # 禁建库 + 无索引：词面/外部预建归消费方（CLI 本地降级），reason 对齐
++                # search.py index_not_built 口径
++                return {"results": [], "model_ready": True, "reason": "index_not_built"}
++            # 禁建库 + 存量陈旧缓存：照常服务旧索引（仅不再重建）
++        else:
++            _schedule_background_build(spec_root, key, embedder)
++            index_sync = "scheduled"
++            if cached is None:
++                return {
++                    "results": [],
++                    "model_ready": True,
++                    "reason": None,
++                    "index_sync": index_sync,
++                }
++    try:
++        q_vec = embedder.embed([q], timeout_sec=_QUERY_EMBED_TIMEOUT_SEC)[0]
++    except Exception as exc:
++        out = {"results": [], "model_ready": False, "reason": f"{type(exc).__name__}: {exc}"}
++        if index_sync:
++            out["index_sync"] = index_sync
++        return out
++    results = _cosine_top_k(q_vec, cached["entries"], cached["vectors"], limit)
++    out = {"results": results, "model_ready": True, "reason": None}
++    if index_sync:
++        out["index_sync"] = index_sync
++    return out
+ 
+ 
+ def reset_index_for_tests() -> None:

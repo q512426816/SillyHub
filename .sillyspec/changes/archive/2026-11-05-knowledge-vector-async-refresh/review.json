@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-05-knowledge-vector-async-refresh",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4adef41def2466a64f63b11a7e43694736d0b37c",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "Dockerfile 预烤失败回退分支的「回退首用下载现状」在非 root 运行用户下不可达（root 属主缓存目录无写权）",
+      "evidence": "原判：预烤失败走 else 分支 mkdir 的 /opt/fastembed-cache 为 root:root 755（无 chmod/chown），runtime USER app（Dockerfile:175）下 fastembed 下载需写该目录 → PermissionError → worker 初始化崩溃 → 端点永久 fail-soft 降级；变更前回退写 tempfile.gettempdir()/fastembed_cache（可写）。清偿（4adef41de）：runtime 段缓存 COPY 后新增 RUN chmod -R a+rwX /opt/fastembed-cache（backend/Dockerfile:126）——空目录（预烤失败回退）与预烤成功树均世界可写，非 root user app 首用下载可写入，回退路径可达，fail-soft 承诺兑现。副作用核查：a+rwX 使模型文件世界可写，单用户容器（仅 app 运行）威胁面下可接受。",
+      "location": "backend/Dockerfile:60-67,125-126,175"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "查询嵌入 15s 紧限时不含 embedder._lock 等待——stale-serve 查询与后台重建并发时最坏仍可挂 ~300s",
+      "evidence": "原判：embed() 的 deadline 在 with self._lock 之外计算，锁获取无预算；_embed_corpus 批嵌入不传 timeout_sec（300s 缺省）持锁贯穿整批往返，后台语料批挂起态持锁最长 300s，期间 stale/fresh 查询 embed 阻塞在锁上。清偿（4adef41de）：锁获取改 self._lock.acquire(timeout=budget)（vector_search.py:256）——deadline 固定，锁排队与响应等待共享同一预算，embed 总时长 ≈ budget+0.1s 地板；锁放弃抛 EmbeddingSubprocessError \"lock busy\"（:257-259）且在 try 之外不触发 _on_crash（不计崩溃退避），fail-soft 降级语义保持（search_sync 捕获 → model_ready=False + reason 带因）；finally release 正确配对（:289-290，仅持锁路径释放）。新增 test_proxy_embed_lock_contention_respects_timeout（test_embedding_subprocess.py:182-198）：预取锁 + timeout_sec=0.3 断言按预算抛 \"lock busy\"（elapsed<5s）且 consecutive_crashes==0——真实行为断言非空洞。语料路（budget=300s）锁等待同被有界化，批间释放锁无饥饿，双构建并发下 lock busy 由 _bg_build 记日志不污染退避。",
+      "location": "backend/app/modules/knowledge/vector_search.py:255-262,289-290"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "test_embedding_subprocess.py 在 design 文件变更清单之外（声明外 1 文件）——实为本变更交付，已归属",
+      "evidence": "该文件 diff 新增 _SILENT_WORKER 夹具与 test_proxy_embed_timeout_sec_tight_budget（docstring 标注本变更 id 与 FR-04），即 task-03 的 proxy 限时用例；属交付面遗漏申报而非来源不明，归属清晰，不阻断。",
+      "location": "backend/app/modules/knowledge/tests/test_embedding_subprocess.py:165-179"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "声明边界裁决：KNOWLEDGE_SEARCH_SERVER_BUILD=0 时本端点无索引恒空结果（reason=index_not_built）——可接受",
+      "evidence": "治理开关语义与 search.py:931 同源（既有运维决策而非缺陷）：代码 server_build=False + missing 返回 index_not_built、stale 存量索引照常服务且不再重建（vector_search.py:514-519），test_server_build_disabled_skips_scheduling 断言零调度零嵌入+旧索引服务，行为与声明完全一致。",
+      "location": "backend/app/modules/knowledge/vector_search.py:514-519"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "声明边界裁决：CLI 侧 3s 预算（VECTOR_TIMEOUT_MS）属 sillyspec 仓独立议题、本变更不动其契约——可接受",
+      "evidence": "平台侧已履行秒级义务（请求路径零语料嵌入+查询 15s 紧限时+fail-soft 降级面），剩余预算差是消费仓硬编码常量，跨仓不夹带；边界划界合理。",
+      "location": ".sillyspec/changes/2026-11-05-knowledge-vector-async-refresh/design.md:47"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted",
+      "title": "防护声明核实：注册表判重/失败不重试自愈/fail-soft 不抛/批 32 上限——四项均真实存在且生效",
+      "evidence": "判重= _schedule_background_build 经 _bg_builds[key].is_alive() 跳过（vector_search.py:458-460，双线程竞窗下 finally 只清自身注册 451-453）；失败不重试= _bg_build 仅 logger.warning 无重试循环（443-449），重触发权交下次失配查询；fail-soft= 查询嵌入异常捕获返回 model_ready=False 不抛（530-536），冷启动/禁建库路径即返 200；批 32= _embed_corpus 按 _EMBED_BATCH_SIZE=32 分批不变（405-413），test_index_rebuild_embeds_in_batches 以 150 条断言 ≤32/批、ceil 批数、全量不丢。",
+      "location": "backend/app/modules/knowledge/vector_search.py:443-468,530-536"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-04T17:05:58Z"
+}

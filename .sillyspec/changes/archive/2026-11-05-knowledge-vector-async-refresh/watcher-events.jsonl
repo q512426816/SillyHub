@@ -1,0 +1,22 @@
+{"ts":1793810411614,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1793810411614,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1793810411614,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1793810411614,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1793810463021,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1793810512447,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793810532288,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793810545638,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793810602029,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/knowledge/vector_search.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793810703810,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/knowledge/schema.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793810740025,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793810891232,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1793811022999,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/knowledge/tests/test_embedding_subprocess.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793811221631,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1793811221631,"kind":"task-done","stage":"tasks","detail":"checked 0→6","provisional":true}
+{"ts":1793811229048,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793811308979,"kind":"commit","stage":null,"detail":"4aa5ff094","provisional":true}
+{"ts":1793811316233,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-11-05-knowledge-vector-async-refresh/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793811346218,"kind":"gate-run","stage":"verify","detail":"门实测 passed（17.4s） · 20261104165545","provisional":true}
+{"ts":1793811822894,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/Dockerfile——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793811849550,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/knowledge/tests/test_embedding_subprocess.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1793811885785,"kind":"commit","stage":null,"detail":"4adef41de","provisional":true}
