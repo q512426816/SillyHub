@@ -197,7 +197,7 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 ## 增量（ql-20260920-006：steering 修订——忙轮默认排队 + 引导消息轮内时间位置）
 
 - backend：主输入框忙轮发送回退默认排队（router/session_crud.py 删 busy_strategy=inject 自动门控，queue_when_busy=True 恒排队；steered 出参保留恒 false）。「转为引导」唯一入口=队列条 ⚡（dispatch_now 引导式，caps 门控判定在该路径内，queue.py :675-748 不变）。
-- frontend：引导消息改「轮内 user_msg 段」模型（TurnSegment 新 kind，session-log-assembler.ts）——实时：appendSteeredSegment/markSteeredSegmentDelivered/markSteeredSegmentsEnded 三纯函数驱动（session-panel-page.tsx 导出、dialog 复用），steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）；回放：logsToTurns 非首主体组转 user_msg 段按时间戳插入轮内段序列（runtime-session-helpers.tsx insertUserMsgSegments），轮 prompt 仅取首组——刷新后不再前移到轮次开头。
+- frontend：引导消息改「轮内 user_msg 段」模型（TurnSegment 新 kind，session-log-assembler.ts）——实时：appendSteeredSegment/markSteeredSegmentDelivered/markSteeredSegmentsEnded 三纯函数驱动（session-panel-page.tsx 导出、dialog 复用），steering/delivered/ended 三态段渲染在活跃轮内（turn-segment-views.tsx UserMsgSegmentView，data-steered-msg 锚点）；回放：logsToTurns 非首主体组转 user_msg 段按时间戳插入轮内段序列（runtime-session-helpers.tsx insertUserMsgSegments），轮 prompt 仅取首组——刷新后不再前移到轮次开头。2026-11-04-steered-msg-attachment-chips：UserMsgSegmentView 不再丢弃标记行解析出的 attachments，三态气泡内同主用户气泡口径渲染 AttachmentChips（delivered 实色气泡用 onPrimary，steering/ended 用 brand），纯附件引导（正文剥离后为空）不渲染空正文节点；引导带附件时聊天可见可预览。
 - ⚡ title：「立即引导进当前轮（不打断）」→「转为引导，注入当前轮（不打断）」。
 
 ## 增量（ql-20260920-007：claude 引擎 autocompact 三键 provider 级配置）
