@@ -69,3 +69,4 @@
 - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
 - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
 - 2026-11-04-daemon-spec-sync-chunking | daemon spec 同步推送分批化对齐 CLI 修复
+- 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-…

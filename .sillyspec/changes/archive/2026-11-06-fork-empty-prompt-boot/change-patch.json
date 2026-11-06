@@ -1,0 +1,174 @@
+{
+  "change": "2026-11-06-fork-empty-prompt-boot",
+  "baseline": "1b9b2ea32a363df760a183b79d5d37eef2634802",
+  "head": "3b5ad1ecbb99fd90730adda0348d448a3dc31af2",
+  "files": [
+    "backend/app/modules/daemon/session/service/create.py",
+    "backend/app/modules/daemon/session/service/fork.py",
+    "backend/app/modules/daemon/tests/test_session_fork.py",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/session-fork.test.ts"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 244,
+    "deletions": 4
+  },
+  "savedAt": "2026-11-06T15:35:20.883Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 18,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "1b9b2ea32a363df760a183b79d5d37eef2634802",
+    "totals": {
+      "files": 12,
+      "additions": 244,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/session/service/create.py",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/fork.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_fork.py",
+        "additions": 107,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 34,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/session-fork.test.ts",
+        "additions": 86,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts — _startInteractiveSession 空 prompt 守卫 fork 豁免 + 早退回报",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "sillyhub-daemon/tests/session-fork.test.ts — 守卫豁免/防回归两用例 + mock client 补 notifyRunResult",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/create.py — create_session 新增 inherited_cwd 参数与兜底",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/fork.py — fork 调 create 链透传 inherited_cwd=source.cwd",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_fork.py — TestForkCwdInheritance 三形态用例",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "fork_session（backend fork.py）调 create 链时透传 inherited_cwd=source.cwd。",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "AgentSession.cwd 列、lease metadata、claim payload 均无格式变化。",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "5196719c144ba735a5b0970740b5cea8d8075583a1c95025b6ac66bc3fd02a25",
+  "patchStatus": "ok"
+}

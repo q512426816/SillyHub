@@ -144,3 +144,4 @@
 - 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
 - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
 - 2026-11-05-knowledge-vector-async-refresh | CLI 向量检索端点读路径去嵌入化
+- 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-…

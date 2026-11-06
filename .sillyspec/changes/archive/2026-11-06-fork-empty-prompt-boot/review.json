@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-fork-empty-prompt-boot",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3b5ad1ecbb99fd90730adda0348d448a3dc31af2",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "非 fork 空 prompt 早退分支不注册 lease 判重表，WS 重放会重复早退+重复回报（幂等吸收无伤害，design 乱序回答措辞不精确）",
+      "evidence": "design 盲维「乱序」称重复 task_available 由 _interactiveSessionsByLease 判重（AC-09）先行短路，但判重 set 在成功链 create 之前（daemon.ts:10391，且 10386 注释明言「防 create 失败后 WS 重放反复重试」），早退分支（:10170 守卫 return）不 set——重放会再次进入守卫并再次 notifyRunResult；后果被 backend close 幂等 no-op 吸收（close_run_steps.py:286 already terminal → no-op）无行为伤害，仅为 design 措辞与实现的细微偏差+重复 error 日志噪音",
+      "location": "sillyhub-daemon/src/daemon.ts:10170"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "backend 第三用例（工作区源会话）同值断言无法区分 cwd 由派生链还是 inherited_cwd 落值，「派生优先」契约未被区分性验证",
+      "evidence": "test_workspace_source_cwd_consistent 中 source.cwd = ws.root_path（同值），B.cwd == ws.root_path 既可能来自 workspace 派生链也可能来自 inherited_cwd 兜底（若实现反转为继承覆盖派生，用例仍绿）；FR-03 需求场景本身即同值形态故按需求测试无错，但优先级方向可构造 source.cwd != ws.root_path 且 workspace 在场的漂移形态加以区分",
+      "location": "backend/app/modules/daemon/tests/test_session_fork.py:920"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-06T23:52:00+08:00"
+}

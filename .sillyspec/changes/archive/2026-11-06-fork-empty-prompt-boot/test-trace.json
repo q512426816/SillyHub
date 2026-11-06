@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-fork-empty-prompt-boot",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/session-fork.test.ts「fork lease（fork_session=true）prompt 为空 → 正常建会话（firstPrompt=\"\"，不再 interactive_missing_fields 早退）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-fork-empty-prompt-boot"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/session-fork.test.ts「非 fork lease 空 prompt → 仍早退不建会话，且回报 run failed（防 run 永久 pending）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-fork-empty-prompt-boot"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_fork.py::TestForkCwdInheritance「test_source_cwd_without_workspace_inherited"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-fork-empty-prompt-boot"
+    }
+  ]
+}

@@ -1,0 +1,330 @@
+diff --git a/backend/app/modules/daemon/session/service/create.py b/backend/app/modules/daemon/session/service/create.py
+index ee3bb00eb..2cfc372eb 100644
+--- a/backend/app/modules/daemon/session/service/create.py
++++ b/backend/app/modules/daemon/session/service/create.py
+@@ -126,6 +126,12 @@ async def create_session(
+     engine_fork_anchor: str | None = None,
+     fork_mode: str | None = None,
+     resume_session_id: str | None = None,
++    # 2026-11-06-fork-empty-prompt-boot：fork 链显式 cwd 继承——源会话 cwd 有值
++    # 而 workspace 派生链覆盖不到（platform 会话等 cwd 有值无 workspace 形态）
++    # 时兜底落 B，防恢复链丢 cwd（生产事故 0aa54089：fork 未带 cwd，断线恢复
++    # 后 reopen 409 NO_CWD 死路）。仅在 inputs.cwd 为 None 时生效（workspace
++    # 派生值优先，不与派生链打架）；缺省 None 零分支（存量调用零回归）。
++    inherited_cwd: str | None = None,
+ ) -> SessionDispatchResult:
+     """Create an interactive session + first-turn run + interactive lease.
+ 
+@@ -191,6 +197,12 @@ async def create_session(
+     llm_provider_row = inputs.llm_provider_row
+     workspace_id = inputs.workspace_id
+     cwd = inputs.cwd
++    # 2026-11-06-fork-empty-prompt-boot：fork 显式 cwd 继承兜底——workspace 派生
++    # 链（inject_gates 仅 workspace_id 在场时落 cwd）覆盖不到的形态（源会话 cwd
++    # 有值无 workspace，如 platform 会话），B 落源值防恢复链丢 cwd；派生值在场
++    # 则派生优先；源本就 None 不伪造（非工作区默认目录归 reopen-no-cwd 根治）。
++    if cwd is None and inherited_cwd:
++        cwd = inherited_cwd
+     mission_scope_ids = inputs.mission_scope_ids
+     mission_anchor_id = inputs.mission_anchor_id
+     ppm_item_ok = inputs.ppm_item_ok
+diff --git a/backend/app/modules/daemon/session/service/fork.py b/backend/app/modules/daemon/session/service/fork.py
+index 6519c6dab..47a6e1f7e 100644
+--- a/backend/app/modules/daemon/session/service/fork.py
++++ b/backend/app/modules/daemon/session/service/fork.py
+@@ -405,6 +405,11 @@ async def fork_session(
+         # native：复用既有 resume 链 + 源机钉定；seed：均 None 走常规选机。
+         resume_session_id=resume_session_id,
+         runtime_id=pinned_runtime_id,
++        # 2026-11-06-fork-empty-prompt-boot：cwd 继承——源 cwd 有值而 workspace 派生
++        # 链覆盖不到（cwd 有值无 workspace 形态）时 B 落源值（恢复链依赖 cwd 定位
++        # transcript；生产事故 0aa54089 父子双双缺 cwd，reopen 全 409）；源 None
++        # 透传 None 不伪造。
++        inherited_cwd=source.cwd,
+     )
+ 
+     # B 标题（可选）：create 链 commit 后补写一次（纯展示列，不属原子性关键面）。
+diff --git a/backend/app/modules/daemon/tests/test_session_fork.py b/backend/app/modules/daemon/tests/test_session_fork.py
+index 605b2ef7c..3e134b95c 100644
+--- a/backend/app/modules/daemon/tests/test_session_fork.py
++++ b/backend/app/modules/daemon/tests/test_session_fork.py
+@@ -862,6 +862,113 @@ class TestClaimPayloadWhitelist:
+             assert key not in payload
+ 
+ 
++# ════════════════════════════════════════════════════════════════════════════
++# cwd 继承（2026-11-06-fork-empty-prompt-boot——生产事故 0aa54089：fork 未带
++# cwd，断线恢复后父子会话双双缺 cwd、reopen 409 NO_CWD 死路）
++# ════════════════════════════════════════════════════════════════════════════
++
++
++class TestForkCwdInheritance:
++    @pytest.mark.asyncio
++    async def test_source_cwd_without_workspace_inherited(
++        self,
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """源会话 cwd 有值、workspace_id 无（platform 会话等形态）→ B.cwd 落同值
++        （fork 显式继承兜底——resume/reopen 链按 cwd 定位 transcript，丢失即恢复
++        死路；workspace 派生链覆盖不到此形态，须 fork 链自带）。"""
++        from app.modules.daemon.service import DaemonService
++        from app.modules.daemon.session.service.fork import fork_session
++
++        owner = await _create_user(db_session)
++        source = await _seed_source_session(db_session, owner_id=owner)
++        source.agent_session_id = "sdk-src-cwd-inherit"
++        source.cwd = "/tmp/platform-managed-root"
++        await db_session.commit()
++        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-entry-cwd")
++
++        svc = DaemonService(db_session)
++        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
++        forked = await db_session.get(AgentSession, result.forked_session.id)
++        assert forked is not None
++        assert forked.cwd == "/tmp/platform-managed-root"
++
++    @pytest.mark.asyncio
++    async def test_source_cwd_none_stays_none(
++        self,
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """非工作区源会话（cwd 本就 None）→ B.cwd 保持 None，不伪造——默认目录
++        分配归 2026-11-06-session-reopen-no-cwd 根治方向，本变更只保「不丢已有
++        值」不越界造值。"""
++        from app.modules.daemon.service import DaemonService
++        from app.modules.daemon.session.service.fork import fork_session
++
++        owner = await _create_user(db_session)
++        source = await _seed_source_session(db_session, owner_id=owner)
++        source.agent_session_id = "sdk-src-cwd-none"
++        assert source.cwd is None
++        await db_session.commit()
++        at_run = await _append_completed_run(
++            db_session, source, engine_anchor="chain-entry-cwd-none"
++        )
++
++        svc = DaemonService(db_session)
++        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
++        forked = await db_session.get(AgentSession, result.forked_session.id)
++        assert forked is not None
++        assert forked.cwd is None
++
++    @pytest.mark.asyncio
++    async def test_workspace_source_cwd_consistent(
++        self,
++        db_session: AsyncSession,
++        mocked_hub,
++        mocked_redis,
++    ) -> None:
++        """工作区源会话 → B.cwd 经 workspace_id 既有派生链落 ws.root_path（与
++        source.cwd 同值；fork 显式继承不与派生链打架——派生值优先）。"""
++        from app.modules.auth.model import User as _User
++        from app.modules.daemon.service import DaemonService
++        from app.modules.daemon.session.service.fork import fork_session
++        from app.modules.workspace.model import Workspace
++
++        owner = await _create_user(db_session)
++        # workspace 归属校验走 RBAC 角色行，铺行成本高——平台管理员旁路
++        # （inject_gates D-001@v1 口径，同 TestSnapshotInheritance 的 admin 语义：
++        # 旁路权限判定但仍要求 Workspace 行真实存在，下方已建）。
++        owner_row = await db_session.get(_User, owner)
++        assert owner_row is not None
++        owner_row.is_platform_admin = True
++        ws = Workspace(
++            id=uuid.uuid4(),
++            name="fork-cwd-ws",
++            slug="fork-cwd-ws",
++            root_path="/tmp/fork-cwd-ws-root",
++            owner_user_id=owner,
++        )
++        db_session.add(ws)
++        await db_session.commit()
++
++        source = await _seed_source_session(db_session, owner_id=owner)
++        source.agent_session_id = "sdk-src-cwd-ws"
++        source.workspace_id = ws.id
++        source.cwd = ws.root_path
++        await db_session.commit()
++        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-entry-cwd-ws")
++
++        svc = DaemonService(db_session)
++        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
++        forked = await db_session.get(AgentSession, result.forked_session.id)
++        assert forked is not None
++        assert forked.workspace_id == ws.id
++        assert forked.cwd == ws.root_path
++
++
+ # ════════════════════════════════════════════════════════════════════════════
+ # build_seed_prompt 纯函数（种子帽 / 截尾声明 / 通道筛选）
+ # ════════════════════════════════════════════════════════════════════════════
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 0eb4dce13..5cbf46b9f 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -9986,9 +9986,10 @@ export class Daemon {
+     // 上报统一 helper——把既有 endStep 计时边界「顺便」发到 backend
+     // （notifyTurnPhase → POST turn-phase → SSE turn_phase 事件）。fire-and-forget
+     // + catch 吞噬（D-009：上报失败仅 debug，不阻塞会话创建主流程；fetch 内部
+-    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 `if (!sessionId || !firstRunId
+-    // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
+-    // （design Phase 2）。
++    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 interactive_missing_fields
++    // 非空守卫（sessionId/firstRunId 必非空；prompt 仅非 fork lease 要求非空，
++    // 2026-11-06-fork-empty-prompt-boot 豁免）之后（D-013②：run_id 恒带）；
++    // SWR 命中跳过的步骤不发（design Phase 2）。
+     const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
+       // 2026-10-26-turn-phase-prod-fix task-02（FR-03）：五步上报观测——TRACE 时
+       // 成功 info + 失败首警 warn（原 debug 在 info 级日志下不可见 = 生产黑盒）。
+@@ -10158,13 +10159,42 @@ export class Daemon {
+     // executable path；SessionManager.create 内部 fallback 到 pathToAgentExecutable）。
+     const pathToClaudeCodeExecutable = this._agentPaths.get(provider) ?? '';
+ 
+-    if (!sessionId || !firstRunId || !prompt) {
++    // 2026-11-06-fork-empty-prompt-boot（生产事故 0aa54089）：空 prompt 守卫对
++    // fork lease（forkSession=true，placement.py fork_session=true 谓词键）豁免
++    // ——backend fork 链 native 档首轮 prompt 归零是设计行为（create.py
++    // dispatch_prompt 归零 + 空载荷 SESSION_INJECT 跳过下发），SessionManager
++    // .create 亦支持空 firstPrompt（不挂 10s 兜底、首轮由用户首问 inject 驱动，
++    // session-fork.test.ts 24h 审查 H-2 用例）。旧守卫不豁免 → 认领后裸 return
++    // 不建会话不回报，引擎会话从未建立（前端 SESSION_NOT_FOUND 连打转圈），run
++    // 只能等 300s 僵尸轮清扫判 interactive_turn_not_started。
++    if (!sessionId || !firstRunId || (!prompt && execPayload.forkSession !== true)) {
+       this._logger.error('interactive_missing_fields', {
+         lease_id: leaseId,
+         has_session_id: !!sessionId,
+         has_run_id: !!firstRunId,
+         has_prompt: !!prompt,
++        fork_lease: execPayload.forkSession === true,
+       });
++      // 早退前回报 run failed（P2b 同款防 run 永久 pending——此前裸 return 让
++      // backend 只能靠 300s 僵尸轮清扫收尸）。无 run/claim 凭证时无回报目标，
++      // 仍只 log。
++      if (execPayload.claimToken && sessionId && firstRunId) {
++        try {
++          await this._client.notifyRunResult(leaseId, execPayload.claimToken, firstRunId, {
++            status: 'error_during_execution',
++            is_error: true,
++            result_summary: `interactive lease missing required fields (session/run/prompt${
++              execPayload.forkSession === true ? ' [fork lease]' : ''
++            })`,
++          });
++        } catch (reportErr) {
++          this._logger.warn('interactive_missing_fields_report_failed', {
++            lease_id: leaseId,
++            run_id: firstRunId,
++            error: String(reportErr),
++          });
++        }
++      }
+       return;
+     }
+ 
+diff --git a/sillyhub-daemon/tests/session-fork.test.ts b/sillyhub-daemon/tests/session-fork.test.ts
+index 07a853d47..24a992073 100644
+--- a/sillyhub-daemon/tests/session-fork.test.ts
++++ b/sillyhub-daemon/tests/session-fork.test.ts
+@@ -217,6 +217,9 @@ function createMockClient() {
+       agent_run_id: 'run-default',
+       claude_md: '',
+     })),
++    // 2026-11-06-fork-empty-prompt-boot：_startInteractiveSession 守卫早退回报
++    // （P2b 同款 notifyRunResult 链）——mock client 必须提供该方法。
++    notifyRunResult: vi.fn(async () => ({})),
+     close: vi.fn(),
+   };
+ }
+@@ -408,6 +411,89 @@ describe('session-fork task-06：execPayload fork 四键解析（D-012/D-013）'
+   });
+ });
+ 
++// ── A2. 空 prompt 守卫 fork 豁免（2026-11-06-fork-empty-prompt-boot）─────────
++//
++// 生产事故形态（会话 0aa54089）：backend native fork 首轮 prompt 归零是设计行为
++// （create.py dispatch_prompt 归零、SESSION_INJECT 空载荷跳过），但 _startInteractive
++// Session 的空 prompt 守卫（interactive_missing_fields）不豁免 fork lease——认领后
++// 直接 return 不建会话不回报，引擎会话从未建立（前端 SESSION_NOT_FOUND 连打 8 分钟
++// 转圈），run 只能等 300s 僵尸轮清扫判 interactive_turn_not_started。本组守护守卫
++// 的 fork 豁免 + 非 fork 早退回报两条契约。
++
++describe('fork-empty-prompt-boot：interactive 空 prompt 守卫 fork 豁免', () => {
++  afterEach(async () => {
++    for (const d of trackedDaemons) {
++      if (d.isRunning) await d.stop().catch(() => undefined);
++    }
++    trackedDaemons = [];
++  });
++
++  it('fork lease（fork_session=true）prompt 为空 → 正常建会话（firstPrompt=""，不再 interactive_missing_fields 早退）', async () => {
++    const createArg = await driveInteractiveClaim({
++      kind: 'interactive',
++      prompt: '',
++      provider: 'claude',
++      agent_session_id: 'sess-fork-empty-prompt',
++      agent_run_id: 'run-fork-empty-prompt',
++      root_path: tmpdir(),
++      resume_session_id: 'src-sdk-sess-empty',
++      fork_session: true,
++      fork_mode: 'resume_at',
++      resume_at_uuid: 'u-empty-prompt',
++    });
++    // 守卫放行 → create 收到空 firstPrompt（SessionManager 空 firstPrompt 契约：
++    // 不挂 10s 兜底，首轮由用户首问 inject 驱动，见 B 组 24h 审查 H-2 用例）。
++    expect(createArg['firstPrompt']).toBe('');
++    expect(createArg['forkSession']).toBe(true);
++    expect(createArg['resumeAtUuid']).toBe('u-empty-prompt');
++  });
++
++  it('非 fork lease 空 prompt → 仍早退不建会话，且回报 run failed（防 run 永久 pending）', async () => {
++    const sessionManager = createMockSessionManager();
++    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
++    trackedDaemons.push(daemon);
++    await daemon.start();
++    client.claimLease.mockResolvedValueOnce({
++      claim_token: 'token-plain-empty',
++      payload: {
++        kind: 'interactive',
++        prompt: '',
++        provider: 'claude',
++        agent_session_id: 'sess-plain-empty',
++        agent_run_id: 'run-plain-empty',
++        root_path: tmpdir(),
++      },
++    });
++    wsClientMock._injectMessage({
++      type: MSG.TASK_AVAILABLE,
++      payload: {
++        leaseId: 'lease-plain-empty',
++        kind: 'interactive',
++        prompt: '',
++        agentSessionId: 'sess-plain-empty',
++        agentRunId: 'run-plain-empty',
++        rootPath: tmpdir(),
++      },
++    });
++    // 守卫早退路径无 create 调用可等——给一个确定窗口后断言两侧终态。
++    await sleep(300);
++    const createSpy = sessionManager.create as ReturnType<typeof vi.fn>;
++    expect(createSpy).not.toHaveBeenCalled();
++    // 早退必须回报 run failed（2026-11-06-fork-empty-prompt-boot：此前裸 return
++    // 让 run 挂到 300s 僵尸轮清扫才被判死）。
++    expect(client.notifyRunResult).toHaveBeenCalledWith(
++      'lease-plain-empty',
++      'token-plain-empty',
++      'run-plain-empty',
++      expect.objectContaining({
++        status: 'error_during_execution',
++        is_error: true,
++      }),
++    );
++    await daemon.stop().catch(() => undefined);
++  });
++});
++
+ // ── B. SessionManager.create → driverOpts（R-07 独立转发分支）────────────────
+ 
+ interface CapturedStart {

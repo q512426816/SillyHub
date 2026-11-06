@@ -31,6 +31,14 @@ created_at: 2026-11-06T15:11:33.328Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
+### 文件变更清单（提交面自声明）
+
+- `sillyhub-daemon/src/daemon.ts` — `_startInteractiveSession` 空 prompt 守卫 fork 豁免 + 早退回报
+- `sillyhub-daemon/tests/session-fork.test.ts` — 守卫豁免/防回归两用例 + mock client 补 notifyRunResult
+- `backend/app/modules/daemon/session/service/create.py` — `create_session` 新增 `inherited_cwd` 参数与兜底
+- `backend/app/modules/daemon/session/service/fork.py` — fork 调 create 链透传 `inherited_cwd=source.cwd`
+- `backend/app/modules/daemon/tests/test_session_fork.py` — `TestForkCwdInheritance` 三形态用例
+
 - `create_session`（backend session service）新增可选参数 `inherited_cwd: str | None = None`：
   仅内部调用方（fork.py）使用，HTTP API 无变化；缺省 None 时存量调用行为逐字节不变。
 - `fork_session`（backend fork.py）调 create 链时透传 `inherited_cwd=source.cwd`。

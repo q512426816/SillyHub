@@ -9746,3 +9746,86 @@
   confirmed_at: null
   source_change: 2026-11-04-daemon-spec-sync-chunking
   status: active
+
+## FR-daemon-377 daemon 空 prompt 守卫对 fork lease 豁免
+变更：2026-11-06-fork-empty-prompt-boot
+状态：active
+摘要：fork lease 空 prompt 正常建会话
+场景正文：
+- 场景：fork lease 空 prompt 正常建会话 — Given claim payload 携带 `fork_session: true` + `fork_mode: resume_at` + `resume_at_uuid
+全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-01
+最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/session-fork.test.ts「fork lease（fork_session=true）prompt 为空 → 正常建会话（firstPrompt=""，不再 interactive_missing_fields 早退）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-fork-empty-prompt-boot
+  status: active
+
+## FR-daemon-378 非 fork lease 空 prompt 仍早退并回报失败
+变更：2026-11-06-fork-empty-prompt-boot
+状态：active
+摘要：非 fork 空 prompt 早退 + run failed 回报
+场景正文：
+- 场景：非 fork 空 prompt 早退 + run failed 回报 — Given claim payload 仅 `prompt: ""`（无 fork 键）；When daemon 认领；Then SessionManager.create
+全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-02
+最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/session-fork.test.ts「非 fork lease 空 prompt → 仍早退不建会话，且回报 run failed（防 run 永久 pending）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-fork-empty-prompt-boot
+  status: active
+
+## FR-daemon-379 fork 建 B 继承源会话 cwd（不伪造）
+变更：2026-11-06-fork-empty-prompt-boot
+状态：active
+摘要：源 cwd 有值无 workspace → B 继承；源 cwd 为 None → B 保持 None；工作区源会话 → 派生链优先同值
+场景正文：
+- 场景：源 cwd 有值无 workspace → B 继承 — Given 源会话 cwd="/tmp/platform-managed-root" 且 workspace_id 为空；When fork；Then B.cwd 同值。
+- 场景：源 cwd 为 None → B 保持 None — Given 非工作区源会话（cwd=None）；When fork；Then B.cwd 为 None（默认目录分配归 2026-11-06-session-reopen-
+- 场景：工作区源会话 → 派生链优先同值 — Given 源会话挂工作区（cwd=ws.root_path）；When fork；Then B.cwd 经 workspace_id 派生链落 ws.root_path（
+全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-03
+最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-fork-empty-prompt-boot:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_session_fork.py::TestForkCwdInheritance「test_source_cwd_without_workspace_inherited
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-fork-empty-prompt-boot
+  status: active
+
+## FR-daemon-380 相关测试全绿（不跑全量）
+变更：2026-11-06-fork-empty-prompt-boot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 两端实现与测试就位；When 分别运行上述两个测试文件；Then 全部用例通过（backend 27 / daemon 17）。
+全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-04
+最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+
+## FR-daemon-381 静态检查零告警
+变更：2026-11-06-fork-empty-prompt-boot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动完成；When 运行 ruff check 与 pnpm typecheck；Then 零告警零报错。
+全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-05
+最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
