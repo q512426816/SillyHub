@@ -278,6 +278,17 @@ export interface SessionPanelProps {
    */
   onBack?: () => void;
 
+  /**
+   * 可选：面板请求导航到另一会话（2026-11-06-fork-enter-navigate / 用户需求
+   * 「分叉成功直接跳转分叉会话页，URL 变化」）。当前唯一消费点 = ForkConfirm
+   * Modal onForked（创建分叉成功 → 进入 B）：page 模式由门户接线切换选中态
+   * （?session= 由门户双向同步写入）；dialog 模式宿主未接时组件内 fallback
+   * router.push 全局门户（门户深链自动解析 B 的 workspace_id 过滤）。未传的
+   * page 宿主（WorkerSessionOverlay 浮层内嵌等）回退既有浮层行为零回归。
+   */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 onBack 惯例）
+  onNavigateToSession?: (sessionId: string, workspaceId: string | null) => void;
+
   // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
   //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
   /** 可选：待消费的工作区引用插入槽位（{desc, nonce}，nonce 自增保证同引用
@@ -318,6 +329,9 @@ export function SessionPanel(props: SessionPanelProps) {
         onOpenSubagent={props.onOpenSubagent}
         onSubagentPanelClose={props.onSubagentPanelClose}
         onBack={props.onBack}
+        // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航回调（page 模式
+        // 门户接线；未传回退浮层零回归）。
+        onNavigateToSession={props.onNavigateToSession}
         // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
         // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
         pendingWsRefInsert={props.pendingWsRefInsert}

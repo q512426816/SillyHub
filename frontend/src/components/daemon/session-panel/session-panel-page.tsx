@@ -733,6 +733,7 @@ export function SessionPanelPage({
   pageContextOverride,
   variant,
   onBack,
+  onNavigateToSession,
   openSubagentId,
   onOpenSubagent,
   onSubagentPanelClose,
@@ -6708,6 +6709,17 @@ export function SessionPanelPage({
             setForkTarget(null);
             // B 落库 → 左侧列表即时可见（分叉附属分组）。
             onSessionListRefresh?.();
+            // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的
+            // 会话页，URL 变化」）：门户宿主接 onNavigateToSession 切选中态
+            //（?session= 由门户双向同步写入，key 重挂载切 B）；未接的 page
+            // 宿主（WorkerSessionOverlay 浮层内嵌等）回退既有浮层进入 B。
+            if (onNavigateToSession) {
+              onNavigateToSession(
+                resp.forked_session_id,
+                session.workspace_id ?? null,
+              );
+              return;
+            }
             setLineageOverlay({
               sessionId: resp.forked_session_id,
               title: "分叉会话",

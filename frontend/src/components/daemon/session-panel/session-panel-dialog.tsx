@@ -130,6 +130,8 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     // dialog 宿主未传时 null 零回归）。
     pendingWsRefInsert,
     onPendingWsRefInsertHandled,
+    // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航回调（宿主接线优先）。
+    onNavigateToSession,
   } = props;
 
   const [provider, setProvider] = useState(defaultProvider);
@@ -2475,11 +2477,26 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           }}
           onForked={(resp) => {
             setForkTarget(null);
-            setLineageOverlay({
-              sessionId: resp.forked_session_id,
-              title: "分叉会话",
-              statusHint: null,
-            });
+            // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的
+            // 会话页，URL 变化」）：dialog 宿主接 onNavigateToSession 优先；
+            // 未接（弹窗宿主多数未接）fallback 组件内跳全局门户——打破一次
+            // 「面板不感知 next/navigation」惯例换 4+ 弹窗宿主零接线，门户
+            // 深链自动解析 B 的 workspace_id 过滤（sessions-portal 深链 effect）。
+            if (onNavigateToSession) {
+              onNavigateToSession(
+                resp.forked_session_id,
+                sessionDetail?.workspace_id ?? null,
+              );
+              return;
+            }
+            // fallback 整页跳全局门户（handleSwitchProvider 同款 window.location
+            // .assign 先例：useRouter 需为十余个渲染本组件的测试文件逐一
+            // vi.mock next/navigation，整页跳转零 mock 零回归）。
+            if (typeof window !== "undefined") {
+              window.location.assign(
+                `/sessions?session=${resp.forked_session_id}`,
+              );
+            }
           }}
         />
       )}

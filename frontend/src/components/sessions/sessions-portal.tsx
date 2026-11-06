@@ -358,6 +358,23 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     [searchParams, pathname, router],
   );
 
+  // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的会话页，
+  // URL 变化」）：SessionPanel onNavigateToSession 门户接线——切选中态走
+  // 列表选中同款清理（清预会话/群选中 + workspace 快照 + ?session= 同步），
+  // key 重挂载契约自然切换到 B 面板；B 的 workspace_id 继承自源会话（面板
+  // 上抛），无需深链验证请求。
+  const handleNavigateToSession = useCallback(
+    (id: string, workspaceId: string | null) => {
+      setPreContext(null);
+      setSelectedSessionId(id);
+      setSelectedWorkspaceId(workspaceId);
+      setSelectedGroupId(null);
+      setSelectedGroup(null);
+      syncSessionParam(id);
+    },
+    [syncSessionParam],
+  );
+
   // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用；
   // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
   // quick-a0458ac9（task-10 三入口补漏）：PreSessionPicker 改喂 machineCandidates
@@ -1067,6 +1084,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             machines={pickerMachines}
             llmProviders={providers}
             onSessionListRefresh={refreshSessionLists}
+            // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航接线（切选中
+            // 态 + ?session= 同步；详见 handleNavigateToSession 注释）。
+            onNavigateToSession={handleNavigateToSession}
             // task-04（FR-01 / FR-05 / D-003@v1 / design §5.B）：子代理右栏三
             // props 装配——槽位状态归 portal（互斥清零见 handleOpenSubagent /
             // onSelectFile / 会话切换 effect），面板本体与段活数据在

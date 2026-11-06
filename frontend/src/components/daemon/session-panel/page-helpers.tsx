@@ -142,6 +142,13 @@ export interface SessionPanelPageProps {
    * 行为（组件自身不感知 next/navigation，保持纯 props 驱动）。
    */
   onBack?: () => void;
+  /**
+   * 可选：分叉成功进入 B 的导航回调（2026-11-06-fork-enter-navigate，用户需求
+   * 「分叉成功直接跳转分叉会话页，URL 变化」）。门户接线切换选中态（?session=
+   * 由门户双向同步）；未传（WorkerSessionOverlay 浮层内嵌等宿主）回退既有
+   * 浮层进入 B 行为零回归。〔prop〕路由行为归宿主（同 onBack 惯例）。
+   */
+  onNavigateToSession?: (sessionId: string, workspaceId: string | null) => void;
 }
 
 /**
