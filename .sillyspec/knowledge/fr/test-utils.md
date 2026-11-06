@@ -2508,3 +2508,73 @@ created_at: 2026-10-16T01:30:35.950Z
 摘要：回归闸门
 全文：.sillyspec/changes/archive/2026-11-04-steered-msg-attachment-chips/requirements.md#FR-04
 最近确认：3e91e3a44893f1cb98505f181e817b3857656980
+
+## FR-test-utils-137 门户页（page 模式）分叉成功后切选中进入 B（URL 同步）
+变更：2026-11-06-fork-enter-navigate
+状态：active
+摘要：门户内分叉成功切选中；未接线的 page 宿主回退浮层（零回归）
+场景正文：
+- 场景：门户内分叉成功切选中 — 
+- 场景：未接线的 page 宿主回退浮层（零回归） — Given WorkerSessionOverlay 浮层内嵌的 SessionPanel（mode=page，未接回调）中再分叉；When 分叉成功；Then 回退既有浮
+全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-01
+最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-fork-enter-navigate:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx「A. page 模式接 onNavigateToSession（门户接线）→ 调回调切选中，不弹浮层」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-fork-enter-navigate
+  status: active
+
+## FR-test-utils-138 dialog 模式分叉成功后跳全局门户深链（实现语义统一，不做工作区路由分流）
+变更：2026-11-06-fork-enter-navigate
+状态：active
+摘要：dialog 未接回调 fallback 整页跳转
+场景正文：
+- 场景：dialog 未接回调 fallback 整页跳转 — Given 任意 dialog 宿主（工作区弹窗/群聊等）中的会话分叉成功；When 未接 onNavigateToSession；Then window.location
+全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-02
+最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-fork-enter-navigate:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx「C. dialog 模式未接回调 → fallback 整页跳全局门户（?session=B，无浮层）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-fork-enter-navigate
+  status: active
+
+## FR-test-utils-139 谱系溯源（LineageBlock 与面包屑点源会话）行为不变
+变更：2026-11-06-fork-enter-navigate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 分叉会话 B 面板顶部溯源块/面包屑；When 点击源会话节点；Then 仍以浮层打开源会话（现状行为）。
+全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-03
+最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729
+
+## FR-test-utils-140 分身会话浮层（TeamTaskBlock 分身行）行为不变
+变更：2026-11-06-fork-enter-navigate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 团队任务块分身行；When 点击查看分身子会话；Then 仍以浮层打开（现状行为）。
+全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-04
+最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729
+
+## FR-test-utils-141 相关测试全绿与类型零错
+变更：2026-11-06-fork-enter-navigate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 实现与测试就位；When 运行上述测试与 tsc --noEmit；Then 36 用例全过、触及文件零 TS 错。
+全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-05
+最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729

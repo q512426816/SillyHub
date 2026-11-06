@@ -1,0 +1,49 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户反馈（2026-11-06，生产会话 0aa54089 事故会话的交互诉求）：会话分叉成功后现在以 WorkerSessionOverlay 全屏浮层打开分叉会话 B（分身会话同款形态），用户要求改为直接跳转到 B
+  的会话页面（地址栏 URL 变为带 ?session=B 参数的会话页），不要浮层。现状：page 模式（门户）与 dialog 模式（工作区/群聊等弹窗宿主）onForked 均 setLineageOverlay 浮层进入
+  B；门户已有 ?session= 深链与选中态双向同步机制（sessions-portal.tsx 337-358 行附近）可承载跳转。谱系溯源浮层（LineageBlock 点源会话）维持现状不动。
+
+
+  成功标准：
+
+  - 门户页（page 模式）分叉确认成功后：右侧面板切换为 B 会话渲染（key 重挂载），地址栏 ?session= 变为 B 的 id，无浮层出现
+
+  - dialog 模式分叉确认成功后：路由跳转到全局会话门户页（带 ?session=B 查询参数）；B 继承工作区且宿主可感知时优先跳工作区会话路由
+
+  - 谱系溯源（LineageBlock 与面包屑点源会话）行为不变（仍浮层）
+
+  - 分身会话浮层（TeamTaskBlock 分身行）行为不变（仍浮层）
+
+  - 新增或修改的前端测试全绿（只跑相关测试），tsc 零错
+autopilot: false
+prestage_ack: false
+baseline_commit: 3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+updatedAt: '2026-11-06T16:09:11.485Z'
+cross_baselines:
+  sillyspec: df12c5ff876d8f4470afaefb81b28fe5cf178ac7
+baseline_sha256: 7fd0cc7c486d7eea801d1d2400ee6f66fb70283792cc5d5b6c2b7e83c62833c8
+spec_approved: true
+spec_approved_at: '2026-11-06T15:57:24.197Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（20.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261106155829\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 23 个
+

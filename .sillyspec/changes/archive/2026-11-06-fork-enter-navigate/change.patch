@@ -1,0 +1,540 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index c043470c7..3ecff724d 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -132,3 +132,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
+ - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
+ - 2026-11-04-daemon-spec-sync-chunking | daemon spec 同步推送分批化对齐 CLI 修复
++- 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-…
+diff --git a/.sillyspec/docs/backend/modules/daemon.changelog.md b/.sillyspec/docs/backend/modules/daemon.changelog.md
+index 535550f3d..7e587cd56 100644
+--- a/.sillyspec/docs/backend/modules/daemon.changelog.md
++++ b/.sillyspec/docs/backend/modules/daemon.changelog.md
+@@ -99,3 +99,4 @@ created_at: 2026-08-29 22:56:30
+ | 2026-11-02 | 2026-11-02-scan-docs-unbound-view | 扫描文档页无绑定也可浏览服务端存量数据 |
+ | 2026-11-02 | 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建 |
+ | 2026-11-02 | 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径 |
++| 2026-11-06 | 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-… |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 43919eb1d..61c161576 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -144,3 +144,4 @@
+ - 2026-11-03-distill-prompt-fix | 蒸馏提示词加固：转义回流悬空回落
+ - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
+ - 2026-11-05-knowledge-vector-async-refresh | CLI 向量检索端点读路径去嵌入化
++- 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-…
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+index f777168c2..92e66340c 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.changelog.md
+@@ -69,3 +69,4 @@
+ - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
+ - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
+ - 2026-11-04-daemon-spec-sync-chunking | daemon spec 同步推送分批化对齐 CLI 修复
++- 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-…
+diff --git a/frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx b/frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx
+new file mode 100644
+index 000000000..da83663b7
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx
+@@ -0,0 +1,335 @@
++// 2026-11-06-fork-enter-navigate：分叉成功「进入 B」的导航行为测试。
++//
++// 用户需求（生产会话 0aa54089 事故会话的交互诉求）：分叉成功后直接跳转 B 的
++// 会话页（URL 变化），不要 WorkerSessionOverlay 浮层。本文件固化三分支：
++//   A. page 模式接 onNavigateToSession（门户接线形态）→ 调回调、零浮层；
++//   B. page 模式未接（WorkerSessionOverlay 浮层内嵌等宿主）→ 回退既有浮层
++//      进入 B（零回归锚点）；
++//   C. dialog 模式未接 onNavigateToSession → fallback 整页跳全局门户
++//      （window.location.assign，handleSwitchProvider 同款先例——避免十余个
++//      dialog 测试文件被迫 vi.mock next/navigation）。
++//
++// 夹具骨架抄 session-history-scroll.test.tsx（page 模式网络层全 mock 的最简
++// 形态）；分叉入口走真实 TurnForkEntry（provider=claude → native 档 + runs
++// 快照 engine_anchor 非空 → 可点）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import { SessionPanel } from "../session-panel";
++
++// MarkdownText 走 next/dynamic，jsdom 同步 render 为 null——mock 纯文本
++// （session-panel-ctx-tokens.test.tsx 同款）。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  reopenSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  triggerSessionTeamMission: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++  deleteSessionQueueEntry: vi.fn(),
++  retrySessionQueueEntry: vi.fn(),
++  forkSession: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    reopenSession: sessionApi.reopenSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
++    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
++    forkSession: sessionApi.forkSession,
++  };
++});
++
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++
++vi.mock("@/lib/ppm/project", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
++    "@/lib/ppm/project",
++  );
++  return { ...actual, listProjects: workspaceApi.listProjects };
++});
++
++vi.mock("@/lib/workspace", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
++    "@/lib/workspace",
++  );
++  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
++});
++
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/* ----- fixture ----- */
++
++function makeDetail() {
++  return {
++    id: "sess-A",
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: "ag-A",
++    config: null,
++    turn_count: 1,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: null,
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: "分叉源会话",
++    config_snapshot: null,
++  };
++}
++
++const FORKED_RESP = {
++  forked_session_id: "sess-forked-B",
++  lease_id: null,
++  run_id: null,
++  tier: "native",
++  lineage: { source_session_id: "sess-A", source_title: "分叉源会话", at_run_seq: 1 },
++} as const;
++
++function makeLogs() {
++  return [
++    {
++      id: "log-1",
++      run_id: "r-1",
++      timestamp: "2026-11-06T10:00:00Z",
++      channel: "user_input",
++      content_redacted: "第一问",
++    },
++    {
++      id: "log-2",
++      run_id: "r-1",
++      timestamp: "2026-11-06T10:00:05Z",
++      channel: "stdout",
++      content_redacted: "第一答",
++    },
++  ];
++}
++
++function Host({
++  onNavigateToSession,
++}: {
++  onNavigateToSession?: (sessionId: string, workspaceId: string | null) => void;
++  children?: ReactNode;
++}) {
++  return (
++    <QueryClientProvider
++      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
++    >
++      <SessionPanel
++        mode="page"
++        sessionId="sess-A"
++        machines={[]}
++        llmProviders={[]}
++        onNavigateToSession={onNavigateToSession}
++      />
++    </QueryClientProvider>
++  );
++}
++
++/** 走完「点⑂ → 确认弹层 → 点创建」链，直到 forkSession resolve。 */
++async function confirmFork(): Promise<void> {
++  const entry = await screen.findByTestId("turn-fork-entry");
++  expect((entry as HTMLButtonElement).disabled).toBe(false);
++  await act(async () => {
++    fireEvent.click(entry);
++  });
++  const confirmBtn = await screen.findByRole("button", { name: "创建分叉并进入" });
++  await act(async () => {
++    fireEvent.click(confirmBtn);
++  });
++  await waitFor(() => expect(sessionApi.forkSession).toHaveBeenCalledTimes(1));
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  sessionApi.getAgentSession.mockResolvedValue(makeDetail());
++  sessionApi.getAgentSessionLogs.mockResolvedValue(makeLogs());
++  sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++    session_id: "sess-A",
++    total_turns: 1,
++    items: [],
++  });
++  // runs 快照带 engine_anchor（forkEngineAnchors 数据源）→ native 档⑂可点。
++  // 字段补全对齐 SessionRunRead（enrichOne 读 meta.error_detail 等键，缺键崩）。
++  sessionApi.listSessionRuns.mockResolvedValue([
++    {
++      id: "r-1",
++      created_at: "2026-11-06T10:00:00Z",
++      status: "completed",
++      engine_anchor: "u-anchor-1",
++      error_code: null,
++      failure_summary: null,
++      error_detail: null,
++      started_at: "2026-11-06T10:00:00Z",
++      finished_at: "2026-11-06T10:00:10Z",
++      exit_code: 0,
++      agent_profile_snapshot: null,
++      llm_provider_id: null,
++      input_tokens: null,
++      output_tokens: null,
++      ctx_tokens: null,
++      user_id: null,
++      sender_name: null,
++    },
++  ]);
++  sessionApi.streamSession.mockImplementation(() => ({
++    close: vi.fn(),
++    getLastEventId: () => null,
++  }));
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  sessionApi.forkSession.mockResolvedValue(FORKED_RESP);
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++  workspaceApi.listProjects.mockResolvedValue([]);
++  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++});
++
++describe("fork-enter-navigate：分叉成功进入 B 的导航三分支", () => {
++  it("A. page 模式接 onNavigateToSession（门户接线）→ 调回调切选中，不弹浮层", async () => {
++    const onNavigateToSession = vi.fn();
++    render(<Host onNavigateToSession={onNavigateToSession} />);
++
++    await confirmFork();
++
++    // 回调收到 B 的 id + 源会话 workspace_id（门户据此切选中/写 ?session=）。
++    await waitFor(() =>
++      expect(onNavigateToSession).toHaveBeenCalledWith("sess-forked-B", null),
++    );
++    // 不弹浮层（WorkerSessionOverlay 的 data-overlay-title 不出现）。
++    expect(document.querySelector("[data-overlay-title]")).toBeNull();
++  });
++
++  it("B. page 模式未接回调（浮层内嵌宿主）→ 回退既有浮层进入 B（零回归）", async () => {
++    render(<Host />);
++
++    await confirmFork();
++
++    const overlay = await waitFor(() => {
++      const el = document.querySelector('[data-overlay-title="分叉会话"]');
++      expect(el).toBeTruthy();
++      return el;
++    });
++    expect(overlay).toBeTruthy();
++  });
++
++  it("C. dialog 模式未接回调 → fallback 整页跳全局门户（?session=B，无浮层）", async () => {
++    // jsdom window.location.assign 未实现（调用抛 Not implemented）——defineProperty
++    // 替换为 spy，用例后恢复原对象。
++    const assignSpy = vi.fn();
++    const origLocation = window.location;
++    Object.defineProperty(window, "location", {
++      configurable: true,
++      value: { ...origLocation, assign: assignSpy },
++    });
++    try {
++      render(
++        <SessionPanel
++          mode="dialog"
++          sessionId="sess-A"
++          providers={["claude"]}
++          defaultProvider="claude"
++          model={null}
++          onModelChange={vi.fn()}
++          hasOnlineProvider
++          initialTurns={[
++            {
++              runId: "r-1",
++              turn: 1,
++              prompt: "第一问",
++              output: "第一答",
++              status: "completed",
++              seenLogIds: new Set<string>(),
++              inputTokens: null,
++              outputTokens: null,
++            },
++          ]}
++          onSessionCreated={vi.fn()}
++          onSessionReset={vi.fn()}
++        />,
++      );
++
++      await confirmFork();
++
++      // fallback：整页跳全局门户，深链 ?session=B（门户深链自动解析 B 的
++      // workspace_id 过滤）；不弹浮层。
++      await waitFor(() =>
++        expect(assignSpy).toHaveBeenCalledWith("/sessions?session=sess-forked-B"),
++      );
++      expect(document.querySelector("[data-overlay-title]")).toBeNull();
++    } finally {
++      Object.defineProperty(window, "location", {
++        configurable: true,
++        value: origLocation,
++      });
++    }
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/index.tsx b/frontend/src/components/daemon/session-panel/index.tsx
+index 416fd5775..0f272143e 100644
+--- a/frontend/src/components/daemon/session-panel/index.tsx
++++ b/frontend/src/components/daemon/session-panel/index.tsx
+@@ -278,6 +278,17 @@ export interface SessionPanelProps {
+    */
+   onBack?: () => void;
+ 
++  /**
++   * 可选：面板请求导航到另一会话（2026-11-06-fork-enter-navigate / 用户需求
++   * 「分叉成功直接跳转分叉会话页，URL 变化」）。当前唯一消费点 = ForkConfirm
++   * Modal onForked（创建分叉成功 → 进入 B）：page 模式由门户接线切换选中态
++   * （?session= 由门户双向同步写入）；dialog 模式宿主未接时组件内 fallback
++   * router.push 全局门户（门户深链自动解析 B 的 workspace_id 过滤）。未传的
++   * page 宿主（WorkerSessionOverlay 浮层内嵌等）回退既有浮层行为零回归。
++   */
++  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同 onBack 惯例）
++  onNavigateToSession?: (sessionId: string, workspaceId: string | null) => void;
++
+   // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
+   //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
+   /** 可选：待消费的工作区引用插入槽位（{desc, nonce}，nonce 自增保证同引用
+@@ -318,6 +329,9 @@ export function SessionPanel(props: SessionPanelProps) {
+         onOpenSubagent={props.onOpenSubagent}
+         onSubagentPanelClose={props.onSubagentPanelClose}
+         onBack={props.onBack}
++        // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航回调（page 模式
++        // 门户接线；未传回退浮层零回归）。
++        onNavigateToSession={props.onNavigateToSession}
+         // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
+         // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
+         pendingWsRefInsert={props.pendingWsRefInsert}
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 974abf8e9..70f126c04 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -142,6 +142,13 @@ export interface SessionPanelPageProps {
+    * 行为（组件自身不感知 next/navigation，保持纯 props 驱动）。
+    */
+   onBack?: () => void;
++  /**
++   * 可选：分叉成功进入 B 的导航回调（2026-11-06-fork-enter-navigate，用户需求
++   * 「分叉成功直接跳转分叉会话页，URL 变化」）。门户接线切换选中态（?session=
++   * 由门户双向同步）；未传（WorkerSessionOverlay 浮层内嵌等宿主）回退既有
++   * 浮层进入 B 行为零回归。〔prop〕路由行为归宿主（同 onBack 惯例）。
++   */
++  onNavigateToSession?: (sessionId: string, workspaceId: string | null) => void;
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index ebb9e5cd8..813793e76 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -130,6 +130,8 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     // dialog 宿主未传时 null 零回归）。
+     pendingWsRefInsert,
+     onPendingWsRefInsertHandled,
++    // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航回调（宿主接线优先）。
++    onNavigateToSession,
+   } = props;
+ 
+   const [provider, setProvider] = useState(defaultProvider);
+@@ -2475,11 +2477,26 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+           }}
+           onForked={(resp) => {
+             setForkTarget(null);
+-            setLineageOverlay({
+-              sessionId: resp.forked_session_id,
+-              title: "分叉会话",
+-              statusHint: null,
+-            });
++            // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的
++            // 会话页，URL 变化」）：dialog 宿主接 onNavigateToSession 优先；
++            // 未接（弹窗宿主多数未接）fallback 组件内跳全局门户——打破一次
++            // 「面板不感知 next/navigation」惯例换 4+ 弹窗宿主零接线，门户
++            // 深链自动解析 B 的 workspace_id 过滤（sessions-portal 深链 effect）。
++            if (onNavigateToSession) {
++              onNavigateToSession(
++                resp.forked_session_id,
++                sessionDetail?.workspace_id ?? null,
++              );
++              return;
++            }
++            // fallback 整页跳全局门户（handleSwitchProvider 同款 window.location
++            // .assign 先例：useRouter 需为十余个渲染本组件的测试文件逐一
++            // vi.mock next/navigation，整页跳转零 mock 零回归）。
++            if (typeof window !== "undefined") {
++              window.location.assign(
++                `/sessions?session=${resp.forked_session_id}`,
++              );
++            }
+           }}
+         />
+       )}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 4b5e42145..4c1a3a931 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -733,6 +733,7 @@ export function SessionPanelPage({
+   pageContextOverride,
+   variant,
+   onBack,
++  onNavigateToSession,
+   openSubagentId,
+   onOpenSubagent,
+   onSubagentPanelClose,
+@@ -6708,6 +6709,17 @@ export function SessionPanelPage({
+             setForkTarget(null);
+             // B 落库 → 左侧列表即时可见（分叉附属分组）。
+             onSessionListRefresh?.();
++            // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的
++            // 会话页，URL 变化」）：门户宿主接 onNavigateToSession 切选中态
++            //（?session= 由门户双向同步写入，key 重挂载切 B）；未接的 page
++            // 宿主（WorkerSessionOverlay 浮层内嵌等）回退既有浮层进入 B。
++            if (onNavigateToSession) {
++              onNavigateToSession(
++                resp.forked_session_id,
++                session.workspace_id ?? null,
++              );
++              return;
++            }
+             setLineageOverlay({
+               sessionId: resp.forked_session_id,
+               title: "分叉会话",
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index 47b9caf32..59b65747e 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -358,6 +358,23 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+     [searchParams, pathname, router],
+   );
+ 
++  // 2026-11-06-fork-enter-navigate（用户需求「分叉成功直接跳转 B 的会话页，
++  // URL 变化」）：SessionPanel onNavigateToSession 门户接线——切选中态走
++  // 列表选中同款清理（清预会话/群选中 + workspace 快照 + ?session= 同步），
++  // key 重挂载契约自然切换到 B 面板；B 的 workspace_id 继承自源会话（面板
++  // 上抛），无需深链验证请求。
++  const handleNavigateToSession = useCallback(
++    (id: string, workspaceId: string | null) => {
++      setPreContext(null);
++      setSelectedSessionId(id);
++      setSelectedWorkspaceId(workspaceId);
++      setSelectedGroupId(null);
++      setSelectedGroup(null);
++      syncSessionParam(id);
++    },
++    [syncSessionParam],
++  );
++
+   // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用；
+   // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
+   // quick-a0458ac9（task-10 三入口补漏）：PreSessionPicker 改喂 machineCandidates
+@@ -1067,6 +1084,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+             machines={pickerMachines}
+             llmProviders={providers}
+             onSessionListRefresh={refreshSessionLists}
++            // 2026-11-06-fork-enter-navigate：分叉成功进入 B 的导航接线（切选中
++            // 态 + ?session= 同步；详见 handleNavigateToSession 注释）。
++            onNavigateToSession={handleNavigateToSession}
+             // task-04（FR-01 / FR-05 / D-003@v1 / design §5.B）：子代理右栏三
+             // props 装配——槽位状态归 portal（互斥清零见 handleOpenSubagent /
+             // onSelectFile / 会话切换 effect），面板本体与段活数据在

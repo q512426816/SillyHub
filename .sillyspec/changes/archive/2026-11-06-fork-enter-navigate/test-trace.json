@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-fork-enter-navigate",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-06-fork-enter-navigate:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx「A. page 模式接 onNavigateToSession（门户接线）→ 调回调切选中，不弹浮层」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-fork-enter-navigate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-06-fork-enter-navigate:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx「C. dialog 模式未接回调 → fallback 整页跳全局门户（?session=B，无浮层）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-fork-enter-navigate"
+    }
+  ]
+}

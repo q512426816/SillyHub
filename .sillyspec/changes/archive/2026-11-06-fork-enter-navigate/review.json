@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-fork-enter-navigate",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "d34d1e829b77c8d778043e94e96eaa745a0d9729",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "index.tsx 新 prop JSDoc 写「fallback router.push」与实现 window.location.assign 不一致",
+      "evidence": "导出接口文档声称 dialog fallback 走 router.push，而 session-panel-dialog.tsx 实为 window.location.assign（design.md §做法概述明确弃用 useRouter 避免十余个 dialog 测试文件被迫 vi.mock next/navigation）——注释与实现相悖（CLAUDE.md 规则 18），误导后续维护者以为 SPA 语义",
+      "location": "frontend/src/components/daemon/session-panel/index.tsx:285-286"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "page-helpers.tsx 新 prop 签名未加 eslint-disable，引入 2 个新 no-unused-vars 告警（测试文件同款 2 个）",
+      "evidence": "index.tsx 同款签名加了 no-unused-vars disable（index.tsx:289），page-helpers.tsx 的 SessionPanelPageProps.onNavigateToSession 形参未加——eslint 实测父提交 1 告警 → 本提交 3 告警（151:26/151:45 新增）；新测试文件 fork-enter-navigate.test.tsx:178 Host 组件同款 2 告警；均为 warning 级（next lint 不 fail），但属本次新增且与同文件惯例不一致",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:148-151"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "测试 A 仅断言 workspaceId=null 传播，非 null 源场景未覆盖",
+      "evidence": "makeDetail() 固定 workspace_id: null，断言 toHaveBeenCalledWith(\"sess-forked-B\", null)——真实门户场景 A 多有 workspace_id，session.workspace_id ?? null 的非 null 传递无断言锚点；映射代码平凡、类型保证在，风险低，属覆盖面建议",
+      "location": "frontend/src/components/daemon/__tests__/fork-enter-navigate.test.tsx:279-284"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-06T16:06:24Z"
+}
