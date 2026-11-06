@@ -1,0 +1,111 @@
+{
+  "change": "2026-11-06-api-body-read-timeout",
+  "baseline": "d34d1e829b77c8d778043e94e96eaa745a0d9729",
+  "head": "5dc292626257ac2e75ef1dde91c08aa572515b88",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "frontend/src/lib/__tests__/api.test.ts",
+    "frontend/src/lib/api.ts"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 108,
+    "deletions": 2
+  },
+  "savedAt": "2026-11-06T16:13:21.385Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 16,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "d34d1e829b77c8d778043e94e96eaa745a0d9729",
+    "totals": {
+      "files": 6,
+      "additions": 108,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/api.test.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api.ts",
+        "additions": 38,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api.ts — apiFetch",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/api.test.ts — 新增两用例（读体超时 → timeout；读体阶段外部 abort → network_error）+ 挂起流 mock",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2ad042db827e4514b7c79d651a5bb7e80e0f4c7b5ad3990fb314f9d88e0b068d",
+  "patchStatus": "ok"
+}

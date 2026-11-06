@@ -61,3 +61,4 @@ created_at: 2026-10-16 16:40:00
 - 2026-10-30-provider-user-share | 供应商按用户共享且被共享方只读选用
 - 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径
 - 2026-11-03-knowledge-search-async-refresh | 2026-11-03-knowledge-search-async-refresh
+- 2026-11-06-api-body-read-timeout | 前端链路梳理（2026-11-06 会话分叉事故排查的副产物）发现 apiFetch 结构洞：fro…

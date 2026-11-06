@@ -262,3 +262,12 @@
 文件：frontend/src/components/daemon/__tests__/turn-segment-views-user-msg-attachments.test.tsx, frontend/src/components/daemon/turn-segment-views.tsx
 最近确认：3e91e3a44893f1cb98505f181e817b3857656980
 理由：缺陷点在渲染层：`UserMsgSegmentView`（`frontend/src/components/daemon/turn-segment-views.tsx`）只取 `parseAttachmentMarkers(segment.text).text`，把同一次解析得到的 `attachments` 丢弃，导致引导消息 （mid-turn steer）气泡上不出现附件卡片。上游数据链路已完整：后端 inject 在 user_input 留痕头部写 `[附件:<uuid>|<kind>|<name>]`（`backend/app/modules/daemon/session/service/inject.py` 附件标记段）， 前端引导发送在展示文本里拼同样的标记行并上送 `attachment_ids` （`session-panel-dialog.tsx` 的 submitFollowup / sendToServerQueue），历史回放装配保留 marker 版本 （`runtime-session-helpers.tsx` 的 `withMarker` 优先）。 做法：在 `UserMsgSegmentView` 内保留完整解析产物，按 phase 选择 chips 色调后渲染既有 `AttachmentChips`（图片缩略图 / 文件 chip / 点击预览全部复用，不新造组件）；正文容器只在 `text` 非空时渲染，纯附件引导消息呈现「chips + 状态行」。`AttachmentChips` 的 `tone` 只有 `onPrimary`（实色主气泡）与 `brand`（浅底）两档：delivered 用 onPrimary，steering / ended 用 brand。 三态共用同一份标记解析结果，不复制解析逻辑。
+
+## D-test-utils-030@v1 2026-11-06-api-body-read-timeout——frontend/src/lib/api.ts 的 apiFetch：把超时计时器清理与外部 signal 监听移除从「fetch resolve（响应头到达）
+状态：implemented
+变更：2026-11-06-api-body-read-timeout
+原编号：D-000@v1
+锚点：.sillyspec/changes/2026-11-06-api-body-read-timeout/design.md
+文件：frontend/src/lib/__tests__/api.test.ts, frontend/src/lib/api.ts
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88
+理由：frontend/src/lib/api.ts 的 apiFetch：把超时计时器清理与外部 signal 监听移除从「fetch resolve（响应头到达）即执行」挪到「响应体读取完成后执行」，并为 `await resp.text()` 补异常归因（timedOut → code=timeout 走熔断计数；否则 network_error）。fetch 的 init.signal（timeoutController）按 fetch 规范对 body 流同样生效（abort 中断读取），因此无需为读体新建控制器——仅调整既有清理时点 + 读体异常按既有错误语义归因。调试期实证发现并同步修复一个连带缺陷：原 finally 在 fetch 后即移除外部 signal 监听，外部 abort 在读体阶段不再传导（streamSession resync 等调用方契约要求可中断）——监听器移除一并挪到读体完成后。

@@ -2578,3 +2578,84 @@ created_at: 2026-10-16T01:30:35.950Z
 - 场景：主路径 — Given 实现与测试就位；When 运行上述测试与 tsc --noEmit；Then 36 用例全过、触及文件零 TS 错。
 全文：.sillyspec/changes/archive/2026-11-06-fork-enter-navigate/requirements.md#FR-05
 最近确认：d34d1e829b77c8d778043e94e96eaa745a0d9729
+
+## FR-test-utils-142 apiFetch 的超时保护覆盖到响应体读取完成：头已到但体在超时窗内未读完时按既有超时语义失败（ApiError code=timeout，走 reportApiFailure 熔断计数），不再无限 pending
+变更：2026-11-06-api-body-read-timeout
+状态：active
+摘要：代理半开（头到体断流）→ 超时失败
+场景正文：
+- 场景：代理半开（头到体断流）→ 超时失败 — Given 请求带 30s 超时窗且 fetch 已 resolve（响应头到达）但响应体永不完成；When 窗满；Then 抛 ApiError{status:0, co
+全文：.sillyspec/changes/archive/2026-11-06-api-body-read-timeout/requirements.md#FR-01
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-api-body-read-timeout:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/api.test.ts「头已到但体在超时窗内未读完 → code='timeout'（不再永久 pending）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-api-body-read-timeout
+  status: active
+
+## FR-test-utils-143 既有超时/网络错误/熔断短路行为不变（超时计时器对 fetch 阶段的语义与现状一致）
+变更：2026-11-06-api-body-read-timeout
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 既有 timeout describe 全部用例；When 运行；Then 全绿（fetch 挂起超时 / 通用文案 / 外部 abort→network_er
+全文：.sillyspec/changes/archive/2026-11-06-api-body-read-timeout/requirements.md#FR-02
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-api-body-read-timeout:flow:测试绑定FR-02
+  tests: frontend/src/lib/__tests__/api-circuit.test.ts | frontend/src/lib/__tests__/api.test.ts「apiFetch timeout（ql-20260831-006-6d67）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-api-body-read-timeout
+  status: active
+
+## FR-test-utils-144 外部 signal（调用方 abort）在读体阶段仍可中断请求
+变更：2026-11-06-api-body-read-timeout
+状态：active
+摘要：读体阶段外部 abort → network_error
+场景正文：
+- 场景：读体阶段外部 abort → network_error — Given fetch 已 resolve 且体读取挂起、调用方传入 signal；When 调用方 abort；Then 抛 ApiError{status:0, cod
+全文：.sillyspec/changes/archive/2026-11-06-api-body-read-timeout/requirements.md#FR-03
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-api-body-read-timeout:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/api.test.ts「读体阶段调用方外部 abort → network_error（timedOut 未置位）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-api-body-read-timeout
+  status: active
+
+## FR-test-utils-145 相关单测覆盖：读体超时触发 timeout 错误、正常读取不受影响、既有用例零回归
+变更：2026-11-06-api-body-read-timeout
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 新两用例 + 既有 api.test.ts / api-circuit.test.ts 全量；When 运行；Then 18+9 用例全绿。
+全文：.sillyspec/changes/archive/2026-11-06-api-body-read-timeout/requirements.md#FR-04
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88
+
+## FR-test-utils-146 触及文件 tsc 零错
+变更：2026-11-06-api-body-read-timeout
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动完成；When 全量 tsc --noEmit；Then 错误清单仅含并行会话的 prototype 文件（本变更文件零错）。
+全文：.sillyspec/changes/archive/2026-11-06-api-body-read-timeout/requirements.md#FR-05
+最近确认：5dc292626257ac2e75ef1dde91c08aa572515b88

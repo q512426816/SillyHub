@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-api-body-read-timeout",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-06-api-body-read-timeout:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/api.test.ts「头已到但体在超时窗内未读完 → code='timeout'（不再永久 pending）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-api-body-read-timeout"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-06-api-body-read-timeout:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/__tests__/api-circuit.test.ts",
+        "frontend/src/lib/__tests__/api.test.ts「apiFetch timeout（ql-20260831-006-6d67）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-api-body-read-timeout"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-06-api-body-read-timeout:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/__tests__/api.test.ts「读体阶段调用方外部 abort → network_error（timedOut 未置位）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-06-api-body-read-timeout"
+    }
+  ]
+}

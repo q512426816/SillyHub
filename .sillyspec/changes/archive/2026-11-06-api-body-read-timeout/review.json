@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-api-body-read-timeout",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——前两变更已各派独立子代理评审，本变更为单函数清理时点调整 + 2 用例，规模触发代行降级）",
+  "verdict": "PASS",
+  "reviewedAgainst": "5dc292626257ac2e75ef1dde91c08aa572515b88",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "resolved-as-accepted",
+      "title": "超时窗语义从 fetch 完成窗扩为全程窗（含读体）",
+      "evidence": "清理时点后移使 30s 缺省窗覆盖体读取——极慢体合法请求会被切掉；写请求无 timeoutMs 豁免不变、长窗调用方可显式传 timeoutMs，design 风险节已声明取舍",
+      "location": "frontend/src/lib/api.ts:216"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved",
+      "title": "调试期发现并修复：外部 signal 监听在 fetch 后被提前移除（读体阶段 abort 传导切断）",
+      "evidence": "探针用例实证 signal-abort 事件不到达（原 finally 移除过早）；监听器移除同点后移修复，FR-03 用例固化",
+      "location": "frontend/src/lib/api.ts:198-215"
+    }
+  ],
+  "dimensionNotes": { "乱序": "ok", "并发": "ok", "切换": "ok", "作用域": "ok" },
+  "reviewedAt": "2026-11-06T16:15:30.000Z"
+}
