@@ -157,6 +157,74 @@ describe("apiFetch timeout（ql-20260831-006-6d67）", () => {
     }
   });
 
+  // ── 2026-11-06-api-body-read-timeout：响应体读取纳入超时保护 ──────────────
+  // 原实现计时器在响应头到达即清除，resp.text() 无界——代理半开时页面永久
+  // 转圈不报错（分叉事故排查定位的前端唯一无界挂起点）。
+
+  /**
+   * 头已到、体永不完成：fetch resolve 一个挂起流 Response（模拟代理半开）。
+   * 手工构造的 Response 与 init.signal 无原生关联（真 fetch 按 spec 关联——
+   * abort 中断 body 读取），此处手动桥接：signal abort → stream error，
+   * 复现真 fetch 的 abort→body error 语义（被测的正是这条链）。
+   */
+  const headersOkBodyHangs = vi.fn((_url: string, init?: RequestInit) => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+      null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        streamController = c;
+        /* 永不 enqueue 也永不 close——体读取永久挂起 */
+      },
+    });
+    init?.signal?.addEventListener("abort", () =>
+      streamController?.error(new DOMException("Aborted", "AbortError")),
+    );
+    return Promise.resolve(
+      new Response(stream, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  });
+
+  it("头已到但体在超时窗内未读完 → code='timeout'（不再永久 pending）", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementationOnce(headersOkBodyHangs);
+      const pending = apiFetch("/api/example", { timeoutMs: 30_000 });
+      const caught = pending.catch((e: unknown) => e as ApiError);
+      // 头已到（fetch resolve）后计时器仍在跑——推进到窗满，body 读取被
+      // timeoutController.abort 中断 → 按超时语义失败。
+      await vi.advanceTimersByTimeAsync(29_999);
+      const early = await Promise.race([
+        caught.then(() => "settled"),
+        Promise.resolve("pending"),
+      ]);
+      expect(early).toBe("pending");
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await caught;
+      expect(err).toMatchObject({ status: 0, code: "timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("读体阶段调用方外部 abort → network_error（timedOut 未置位）", async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementationOnce(headersOkBodyHangs);
+    const pending = apiFetch("/api/example", {
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+    // 走一轮宏任务确保 apiFetch 已越过 await fetch（头到、text() 已挂起）。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      status: 0,
+      code: "network_error",
+    });
+  });
+
   it("写请求（POST）不传 timeoutMs 时无默认超时（慢写不误杀；显式传值不受影响）", async () => {
     fetchMock.mockImplementationOnce(hangUntilAborted);
     const pending = apiFetch("/api/example", { method: "POST", json: { a: 1 } });

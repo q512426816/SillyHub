@@ -184,6 +184,44 @@ export async function apiFetch<T = unknown>(
     resp = await fetch(url.toString(), init);
   } catch (err) {
     if (err instanceof ApiError) throw err; // circuit_open 短路：未发网络不上报
+    // 2026-11-06-api-body-read-timeout：fetch 阶段失败也须清计时器与外部监听
+    //（原 finally 挪至下方读体段后，本路径不再被它覆盖）。
+    if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    if (timedOut) {
+      const timeoutErr = new ApiError(0, {
+        code: "timeout",
+        message: timeoutMessage ?? "请求超时，请重试",
+        request_id: finalHeaders["x-request-id"] ?? null,
+        details: null,
+      });
+      reportApiFailure(timeoutErr);
+      throw timeoutErr;
+    }
+    const networkErr = new ApiError(0, {
+      code: "network_error",
+      message: err instanceof Error ? err.message : "Network error",
+      request_id: finalHeaders["x-request-id"] ?? null,
+      details: null,
+    });
+    reportApiFailure(networkErr);
+    throw networkErr;
+  }
+
+  // 2026-11-06-api-body-read-timeout：响应体读取纳入超时保护。原实现计时器在
+  // fetch resolve（响应头到达）即被 finally 清除，随后 resp.text() 无超时无
+  // abort——连接在头之后断流（代理半开 / 后端卡在序列化后）时请求永不 settle，
+  // 上层页面永久转圈不报错（2026-11-06 分叉事故排查中定位的前端唯一无界挂起
+  // 点）。fetch 的 init.signal（timeoutController）对 body 流同样生效（fetch
+  // 规范：abort 中断 body 读取），故只需把清计时器与外部监听移除挪到读体完成
+  // 之后 + 读体异常按 timedOut 归因——超时/外部 abort 语义与 fetch 阶段一致
+  //（外部 signal 在读体阶段仍传导中断，streamSession resync 等调用方契约不变）。
+  let text: string;
+  try {
+    text = await resp.text();
+  } catch (err) {
+    if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
     if (timedOut) {
       const timeoutErr = new ApiError(0, {
         code: "timeout",
@@ -206,8 +244,6 @@ export async function apiFetch<T = unknown>(
     if (timeoutTimer !== null) clearTimeout(timeoutTimer);
     if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
-
-  const text = await resp.text();
   const payload: unknown = text ? safeJsonParse(text) : null;
 
   if (!resp.ok) {
