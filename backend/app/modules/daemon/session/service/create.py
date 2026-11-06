@@ -126,6 +126,12 @@ async def create_session(
     engine_fork_anchor: str | None = None,
     fork_mode: str | None = None,
     resume_session_id: str | None = None,
+    # 2026-11-06-fork-empty-prompt-boot：fork 链显式 cwd 继承——源会话 cwd 有值
+    # 而 workspace 派生链覆盖不到（platform 会话等 cwd 有值无 workspace 形态）
+    # 时兜底落 B，防恢复链丢 cwd（生产事故 0aa54089：fork 未带 cwd，断线恢复
+    # 后 reopen 409 NO_CWD 死路）。仅在 inputs.cwd 为 None 时生效（workspace
+    # 派生值优先，不与派生链打架）；缺省 None 零分支（存量调用零回归）。
+    inherited_cwd: str | None = None,
 ) -> SessionDispatchResult:
     """Create an interactive session + first-turn run + interactive lease.
 
@@ -191,6 +197,12 @@ async def create_session(
     llm_provider_row = inputs.llm_provider_row
     workspace_id = inputs.workspace_id
     cwd = inputs.cwd
+    # 2026-11-06-fork-empty-prompt-boot：fork 显式 cwd 继承兜底——workspace 派生
+    # 链（inject_gates 仅 workspace_id 在场时落 cwd）覆盖不到的形态（源会话 cwd
+    # 有值无 workspace，如 platform 会话），B 落源值防恢复链丢 cwd；派生值在场
+    # 则派生优先；源本就 None 不伪造（非工作区默认目录归 reopen-no-cwd 根治）。
+    if cwd is None and inherited_cwd:
+        cwd = inherited_cwd
     mission_scope_ids = inputs.mission_scope_ids
     mission_anchor_id = inputs.mission_anchor_id
     ppm_item_ok = inputs.ppm_item_ok

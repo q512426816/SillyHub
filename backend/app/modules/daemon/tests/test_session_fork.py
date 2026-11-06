@@ -863,6 +863,113 @@ class TestClaimPayloadWhitelist:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# cwd 继承（2026-11-06-fork-empty-prompt-boot——生产事故 0aa54089：fork 未带
+# cwd，断线恢复后父子会话双双缺 cwd、reopen 409 NO_CWD 死路）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestForkCwdInheritance:
+    @pytest.mark.asyncio
+    async def test_source_cwd_without_workspace_inherited(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """源会话 cwd 有值、workspace_id 无（platform 会话等形态）→ B.cwd 落同值
+        （fork 显式继承兜底——resume/reopen 链按 cwd 定位 transcript，丢失即恢复
+        死路；workspace 派生链覆盖不到此形态，须 fork 链自带）。"""
+        from app.modules.daemon.service import DaemonService
+        from app.modules.daemon.session.service.fork import fork_session
+
+        owner = await _create_user(db_session)
+        source = await _seed_source_session(db_session, owner_id=owner)
+        source.agent_session_id = "sdk-src-cwd-inherit"
+        source.cwd = "/tmp/platform-managed-root"
+        await db_session.commit()
+        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-entry-cwd")
+
+        svc = DaemonService(db_session)
+        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
+        forked = await db_session.get(AgentSession, result.forked_session.id)
+        assert forked is not None
+        assert forked.cwd == "/tmp/platform-managed-root"
+
+    @pytest.mark.asyncio
+    async def test_source_cwd_none_stays_none(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """非工作区源会话（cwd 本就 None）→ B.cwd 保持 None，不伪造——默认目录
+        分配归 2026-11-06-session-reopen-no-cwd 根治方向，本变更只保「不丢已有
+        值」不越界造值。"""
+        from app.modules.daemon.service import DaemonService
+        from app.modules.daemon.session.service.fork import fork_session
+
+        owner = await _create_user(db_session)
+        source = await _seed_source_session(db_session, owner_id=owner)
+        source.agent_session_id = "sdk-src-cwd-none"
+        assert source.cwd is None
+        await db_session.commit()
+        at_run = await _append_completed_run(
+            db_session, source, engine_anchor="chain-entry-cwd-none"
+        )
+
+        svc = DaemonService(db_session)
+        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
+        forked = await db_session.get(AgentSession, result.forked_session.id)
+        assert forked is not None
+        assert forked.cwd is None
+
+    @pytest.mark.asyncio
+    async def test_workspace_source_cwd_consistent(
+        self,
+        db_session: AsyncSession,
+        mocked_hub,
+        mocked_redis,
+    ) -> None:
+        """工作区源会话 → B.cwd 经 workspace_id 既有派生链落 ws.root_path（与
+        source.cwd 同值；fork 显式继承不与派生链打架——派生值优先）。"""
+        from app.modules.auth.model import User as _User
+        from app.modules.daemon.service import DaemonService
+        from app.modules.daemon.session.service.fork import fork_session
+        from app.modules.workspace.model import Workspace
+
+        owner = await _create_user(db_session)
+        # workspace 归属校验走 RBAC 角色行，铺行成本高——平台管理员旁路
+        # （inject_gates D-001@v1 口径，同 TestSnapshotInheritance 的 admin 语义：
+        # 旁路权限判定但仍要求 Workspace 行真实存在，下方已建）。
+        owner_row = await db_session.get(_User, owner)
+        assert owner_row is not None
+        owner_row.is_platform_admin = True
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="fork-cwd-ws",
+            slug="fork-cwd-ws",
+            root_path="/tmp/fork-cwd-ws-root",
+            owner_user_id=owner,
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        source = await _seed_source_session(db_session, owner_id=owner)
+        source.agent_session_id = "sdk-src-cwd-ws"
+        source.workspace_id = ws.id
+        source.cwd = ws.root_path
+        await db_session.commit()
+        at_run = await _append_completed_run(db_session, source, engine_anchor="chain-entry-cwd-ws")
+
+        svc = DaemonService(db_session)
+        result = await fork_session(svc, owner, session_id=source.id, at_run_id=at_run.id)
+        forked = await db_session.get(AgentSession, result.forked_session.id)
+        assert forked is not None
+        assert forked.workspace_id == ws.id
+        assert forked.cwd == ws.root_path
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # build_seed_prompt 纯函数（种子帽 / 截尾声明 / 通道筛选）
 # ════════════════════════════════════════════════════════════════════════════
 

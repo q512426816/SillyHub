@@ -217,6 +217,9 @@ function createMockClient() {
       agent_run_id: 'run-default',
       claude_md: '',
     })),
+    // 2026-11-06-fork-empty-prompt-boot：_startInteractiveSession 守卫早退回报
+    // （P2b 同款 notifyRunResult 链）——mock client 必须提供该方法。
+    notifyRunResult: vi.fn(async () => ({})),
     close: vi.fn(),
   };
 }
@@ -405,6 +408,89 @@ describe('session-fork task-06：execPayload fork 四键解析（D-012/D-013）'
     expect(createArg['forkSession']).toBeUndefined();
     expect(createArg['forkAnchorEntryId']).toBeUndefined();
     expect(createArg['forkMode']).toBeUndefined();
+  });
+});
+
+// ── A2. 空 prompt 守卫 fork 豁免（2026-11-06-fork-empty-prompt-boot）─────────
+//
+// 生产事故形态（会话 0aa54089）：backend native fork 首轮 prompt 归零是设计行为
+// （create.py dispatch_prompt 归零、SESSION_INJECT 空载荷跳过），但 _startInteractive
+// Session 的空 prompt 守卫（interactive_missing_fields）不豁免 fork lease——认领后
+// 直接 return 不建会话不回报，引擎会话从未建立（前端 SESSION_NOT_FOUND 连打 8 分钟
+// 转圈），run 只能等 300s 僵尸轮清扫判 interactive_turn_not_started。本组守护守卫
+// 的 fork 豁免 + 非 fork 早退回报两条契约。
+
+describe('fork-empty-prompt-boot：interactive 空 prompt 守卫 fork 豁免', () => {
+  afterEach(async () => {
+    for (const d of trackedDaemons) {
+      if (d.isRunning) await d.stop().catch(() => undefined);
+    }
+    trackedDaemons = [];
+  });
+
+  it('fork lease（fork_session=true）prompt 为空 → 正常建会话（firstPrompt=""，不再 interactive_missing_fields 早退）', async () => {
+    const createArg = await driveInteractiveClaim({
+      kind: 'interactive',
+      prompt: '',
+      provider: 'claude',
+      agent_session_id: 'sess-fork-empty-prompt',
+      agent_run_id: 'run-fork-empty-prompt',
+      root_path: tmpdir(),
+      resume_session_id: 'src-sdk-sess-empty',
+      fork_session: true,
+      fork_mode: 'resume_at',
+      resume_at_uuid: 'u-empty-prompt',
+    });
+    // 守卫放行 → create 收到空 firstPrompt（SessionManager 空 firstPrompt 契约：
+    // 不挂 10s 兜底，首轮由用户首问 inject 驱动，见 B 组 24h 审查 H-2 用例）。
+    expect(createArg['firstPrompt']).toBe('');
+    expect(createArg['forkSession']).toBe(true);
+    expect(createArg['resumeAtUuid']).toBe('u-empty-prompt');
+  });
+
+  it('非 fork lease 空 prompt → 仍早退不建会话，且回报 run failed（防 run 永久 pending）', async () => {
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({ sessionManager });
+    trackedDaemons.push(daemon);
+    await daemon.start();
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-plain-empty',
+      payload: {
+        kind: 'interactive',
+        prompt: '',
+        provider: 'claude',
+        agent_session_id: 'sess-plain-empty',
+        agent_run_id: 'run-plain-empty',
+        root_path: tmpdir(),
+      },
+    });
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-plain-empty',
+        kind: 'interactive',
+        prompt: '',
+        agentSessionId: 'sess-plain-empty',
+        agentRunId: 'run-plain-empty',
+        rootPath: tmpdir(),
+      },
+    });
+    // 守卫早退路径无 create 调用可等——给一个确定窗口后断言两侧终态。
+    await sleep(300);
+    const createSpy = sessionManager.create as ReturnType<typeof vi.fn>;
+    expect(createSpy).not.toHaveBeenCalled();
+    // 早退必须回报 run failed（2026-11-06-fork-empty-prompt-boot：此前裸 return
+    // 让 run 挂到 300s 僵尸轮清扫才被判死）。
+    expect(client.notifyRunResult).toHaveBeenCalledWith(
+      'lease-plain-empty',
+      'token-plain-empty',
+      'run-plain-empty',
+      expect.objectContaining({
+        status: 'error_during_execution',
+        is_error: true,
+      }),
+    );
+    await daemon.stop().catch(() => undefined);
   });
 });
 

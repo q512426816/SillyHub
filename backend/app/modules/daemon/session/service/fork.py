@@ -405,6 +405,11 @@ async def fork_session(
         # native：复用既有 resume 链 + 源机钉定；seed：均 None 走常规选机。
         resume_session_id=resume_session_id,
         runtime_id=pinned_runtime_id,
+        # 2026-11-06-fork-empty-prompt-boot：cwd 继承——源 cwd 有值而 workspace 派生
+        # 链覆盖不到（cwd 有值无 workspace 形态）时 B 落源值（恢复链依赖 cwd 定位
+        # transcript；生产事故 0aa54089 父子双双缺 cwd，reopen 全 409）；源 None
+        # 透传 None 不伪造。
+        inherited_cwd=source.cwd,
     )
 
     # B 标题（可选）：create 链 commit 后补写一次（纯展示列，不属原子性关键面）。

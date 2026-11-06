@@ -9986,9 +9986,10 @@ export class Daemon {
     // 上报统一 helper——把既有 endStep 计时边界「顺便」发到 backend
     // （notifyTurnPhase → POST turn-phase → SSE turn_phase 事件）。fire-and-forget
     // + catch 吞噬（D-009：上报失败仅 debug，不阻塞会话创建主流程；fetch 内部
-    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 `if (!sessionId || !firstRunId
-    // || !prompt)` 非空守卫之后（D-013②：run_id 恒带）；SWR 命中跳过的步骤不发
-    // （design Phase 2）。
+    // 非拓扑异常也不外溢）。所有调用点都在本函数下方 interactive_missing_fields
+    // 非空守卫（sessionId/firstRunId 必非空；prompt 仅非 fork lease 要求非空，
+    // 2026-11-06-fork-empty-prompt-boot 豁免）之后（D-013②：run_id 恒带）；
+    // SWR 命中跳过的步骤不发（design Phase 2）。
     const reportTurnPhase = (phase: TurnPhaseValue, detail?: string): void => {
       // 2026-10-26-turn-phase-prod-fix task-02（FR-03）：五步上报观测——TRACE 时
       // 成功 info + 失败首警 warn（原 debug 在 info 级日志下不可见 = 生产黑盒）。
@@ -10158,13 +10159,42 @@ export class Daemon {
     // executable path；SessionManager.create 内部 fallback 到 pathToAgentExecutable）。
     const pathToClaudeCodeExecutable = this._agentPaths.get(provider) ?? '';
 
-    if (!sessionId || !firstRunId || !prompt) {
+    // 2026-11-06-fork-empty-prompt-boot（生产事故 0aa54089）：空 prompt 守卫对
+    // fork lease（forkSession=true，placement.py fork_session=true 谓词键）豁免
+    // ——backend fork 链 native 档首轮 prompt 归零是设计行为（create.py
+    // dispatch_prompt 归零 + 空载荷 SESSION_INJECT 跳过下发），SessionManager
+    // .create 亦支持空 firstPrompt（不挂 10s 兜底、首轮由用户首问 inject 驱动，
+    // session-fork.test.ts 24h 审查 H-2 用例）。旧守卫不豁免 → 认领后裸 return
+    // 不建会话不回报，引擎会话从未建立（前端 SESSION_NOT_FOUND 连打转圈），run
+    // 只能等 300s 僵尸轮清扫判 interactive_turn_not_started。
+    if (!sessionId || !firstRunId || (!prompt && execPayload.forkSession !== true)) {
       this._logger.error('interactive_missing_fields', {
         lease_id: leaseId,
         has_session_id: !!sessionId,
         has_run_id: !!firstRunId,
         has_prompt: !!prompt,
+        fork_lease: execPayload.forkSession === true,
       });
+      // 早退前回报 run failed（P2b 同款防 run 永久 pending——此前裸 return 让
+      // backend 只能靠 300s 僵尸轮清扫收尸）。无 run/claim 凭证时无回报目标，
+      // 仍只 log。
+      if (execPayload.claimToken && sessionId && firstRunId) {
+        try {
+          await this._client.notifyRunResult(leaseId, execPayload.claimToken, firstRunId, {
+            status: 'error_during_execution',
+            is_error: true,
+            result_summary: `interactive lease missing required fields (session/run/prompt${
+              execPayload.forkSession === true ? ' [fork lease]' : ''
+            })`,
+          });
+        } catch (reportErr) {
+          this._logger.warn('interactive_missing_fields_report_failed', {
+            lease_id: leaseId,
+            run_id: firstRunId,
+            error: String(reportErr),
+          });
+        }
+      }
       return;
     }
 
