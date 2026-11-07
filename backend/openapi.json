@@ -17200,6 +17200,61 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/git-diff": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Session Git Diff",
+        "description": "会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。\n\ngit 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/\n已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``\nRPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``\n模块 docstring（组件复用 git_status.py）。",
+        "operationId": "get_session_git_diff_api_daemon_sessions__session_id__git_diff_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）",
+              "title": "Path"
+            },
+            "description": "工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionGitDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/fork": {
       "post": {
         "tags": [
@@ -72218,6 +72273,106 @@
         "title": "SessionForkResponse",
         "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
       },
+      "SessionGitDiffResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git",
+              "no_root"
+            ],
+            "title": "Git Mode"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root"
+          },
+          "root_source": {
+            "type": "string",
+            "enum": [
+              "worktree",
+              "cwd",
+              "workspace_root",
+              "none"
+            ],
+            "title": "Root Source",
+            "default": "none"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "default": false
+          },
+          "synced_at": {
+            "type": "string",
+            "title": "Synced At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "synced_at"
+        ],
+        "title": "SessionGitDiffResponse",
+        "description": "单文件 diff 响应（schema 在本文件定义——design 数据模型节）。"
+      },
       "SessionGitStatusResponse": {
         "properties": {
           "git_mode": {
@@ -80248,6 +80403,17 @@
               }
             ],
             "title": "Reason"
+          },
+          "index_sync": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Sync"
           }
         },
         "type": "object",
@@ -80255,7 +80421,7 @@
           "results"
         ],
         "title": "VectorSearchOut",
-        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"
+        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。\n\nindex_sync=\"scheduled\"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧\n已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results\n不受影响，字段供观测与测试断言。"
       },
       "VectorSearchResultItem": {
         "properties": {

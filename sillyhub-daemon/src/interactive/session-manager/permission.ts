@@ -12,6 +12,9 @@
 
 import type { PermissionResolver } from '../permission-resolver.js';
 import type { CanUseToolDecision, SessionState } from '../types.js';
+import { collectGitApprovalPayload } from '../git-approval-collector.js';
+import { detectGitWriteIntent, type GitCommandIntent } from '../git-command-guard.js';
+import { executeGitApproval, type GitApprovalResult } from '../git-executor.js';
 import { STALE_RUN_WRITE_GRACE_MS } from './types.js';
 import type {
   CanUseToolFn,
@@ -326,6 +329,186 @@ async function requestUserDialogImpl(
 }
 
 /**
+ * git 审批命中判定（2026-11-06-session-git-approval task-03/task-04 共享单一真相）：
+ * Bash 工具 + 逃生阀未关（SILLYHUB_GIT_APPROVAL 仅精确 'off' 关闭，未设恒 on）+
+ * command 字符串经 guard 识别命中。未命中返回 null（调用方走原路径）。
+ * buildCanUseToolCallback 内联分支与 withGitApprovalBefore 包装器共用，禁止两份漂移。
+ */
+export function matchGitApprovalCall(
+  toolName: string,
+  toolInput: unknown,
+): GitCommandIntent | null {
+  if (
+    toolName === 'Bash' &&
+    process.env.SILLYHUB_GIT_APPROVAL !== 'off' &&
+    toolInput &&
+    typeof (toolInput as Record<string, unknown>)['command'] === 'string'
+  ) {
+    return detectGitWriteIntent(
+      (toolInput as Record<string, unknown>)['command'] as string,
+    );
+  }
+  return null;
+}
+
+/**
+ * git 审批前置包装器（task-04 / D-016）：把 matchGitApprovalCall + handleGitApproval
+ * 前置到任意内层 canUseTool（driver-factory 仅写校验分支用——enableApproval=false 会话
+ * 的 git 审批可达性）。命中 → handleGitApproval（同 task-03 挂载点同一 handler，
+ * 单一真相）；未命中 / state 缺失 → 透传 inner（守卫与写校验语义归内层）。
+ */
+export function withGitApprovalBefore(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  inner: CanUseToolFn,
+): CanUseToolFn {
+  return async (toolName, toolInput, options) => {
+    const intent = matchGitApprovalCall(toolName, toolInput);
+    if (intent) {
+      const state = mgr._store.get(sessionId);
+      // state/currentRunId 缺失：git 审批通道不可达（守卫面交内层，普通工具语义不变）。
+      if (state && state.currentRunId) {
+        const updatedInput: Record<string, unknown> =
+          toolInput && typeof toolInput === 'object'
+            ? (toolInput as Record<string, unknown>)
+            : { value: toolInput };
+        return handleGitApproval(
+          mgr,
+          sessionId,
+          state.currentRunId,
+          state,
+          intent,
+          updatedInput,
+          options,
+        );
+      }
+    }
+    return inner(toolName, toolInput, options);
+  };
+}
+
+/**
+ * git 写操作审批 handler（2026-11-06-session-git-approval task-03 / FR-01 / D-004/D-017）。
+ *
+ * 识别命中后的挂起-响应闭环：采集器组 payload（失败降级最小 payload 继续，**禁止
+ * 因采集失败放行裸 git 命令**——fail-closed）→ resolver.register 携
+ * dialogKind='git_approval'（backend 见 dialog_kind 走 dialog 路径：持久化 + 不 arm
+ * 5min 超时 + SSE 携带 payload 渲染确认卡，D-008 复用零协议改动）→ await 长驻挂起。
+ *
+ * 响应映射（task-06 / D-002/D-007）：
+ *   - allow 且 dialog_result.action=approve → executeGitApproval 代执行（按用户改写
+ *     msg/勾选集精确重整暂存区提交（commit）或按 runner 原样代执行（push/sillyspec，
+ *     D-018/D-013））；执行文本经 deny.message 回喂（canUseTool 唯一回传自定义内容
+ *     通道，AskUserQuestion 先例），原 Bash 命令被 deny 阻止不经 agent 重跑；
+ *   - deny / reject / 畸形 dialog_result（fail-safe 不抛）→ `用户拒绝了本次提交/推送：
+ *     <原因>` 回喂（D-007），暂存区原样，Claude 可调整后重新发起；
+ *   - wrapper 异常 / abort：deny 默认文案不上抛（先例 AskUserQuestion catch）。
+ */
+async function handleGitApproval(
+  mgr: SessionManagerCore,
+  sessionId: string,
+  runId: string,
+  state: SessionState,
+  intent: GitCommandIntent,
+  updatedInput: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
+): ReturnType<CanUseToolFn> {
+  const resolver = mgr._resolversBySession.get(sessionId);
+  const wsClient = mgr._permissionWsClient;
+  if (!resolver || !wsClient) {
+    return {
+      behavior: 'deny',
+      message: `Git approval channel unavailable (session=${sessionId}, run=${runId}); the command was not executed.`,
+    };
+  }
+  // 采集（fail-closed 降级面）：工作区根取 intent.workDir ?? 会话固定 cwd。
+  const cwd = intent.workDir ?? state.cwd;
+  let payload: Awaited<ReturnType<typeof collectGitApprovalPayload>>;
+  try {
+    payload = await collectGitApprovalPayload(intent, {
+      cwd,
+      sessionId,
+      signal: options?.signal,
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err ?? 'unknown error');
+    // 最小 payload 继续弹卡（分支/清单缺省空态）——不放行裸 git 命令（FR-01 fail-closed）。
+    payload = {
+      operation: intent.operation,
+      command: intent.command,
+      worktree: cwd,
+      branch: '',
+      message: intent.message,
+      files: [],
+      defaultSelected: [],
+      collectError: `工作区状态采集失败：${reason}（文件清单不可用，请谨慎确认）`,
+    };
+  }
+  try {
+    const { promise } = resolver.register({
+      sessionId,
+      runId,
+      toolName: 'Bash',
+      toolInput: updatedInput,
+      signal: options?.signal,
+      send: (msg) => wsClient.send(msg),
+      // 后台锚点态标记（permission-resolver 该态 dialog 也启 5min 兜底 deny——
+      // FR-06 / D-019 fail-safe：后台任务 git 提交自动拒绝回喂）。
+      ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
+      dialogKind: 'git_approval',
+      dialogPayload: payload as unknown as Record<string, unknown>,
+    });
+    const decision = await promise;
+    // task-06（D-002 代执行接管）：dialog_result 解析（dialogResultOf 收敛入口）。
+    // 畸形/缺 action 字段一律按拒绝处理（fail-safe 不抛——executor 零调用，暂存区原样）。
+    const rawResult = dialogResultOf(decision);
+    const parsed = rawResult && typeof rawResult === 'object' ? (rawResult as Record<string, unknown>) : null;
+    const denyMsg = decision.behavior === 'deny' ? decision.message : undefined;
+    const userReason =
+      parsed && typeof parsed['reason'] === 'string' && parsed['reason'].length > 0
+        ? parsed['reason']
+        : denyMsg && denyMsg.length > 0
+          ? denyMsg
+          : '';
+    const opLabel = intent.operation === 'commit' ? '提交' : '推送';
+
+    if (decision.behavior === 'allow' && parsed && parsed['action'] === 'approve') {
+      // 批准 → executor 代执行（D-002：原命令不经 agent 重跑）。deny.message 是
+      // canUseTool 唯一回传自定义内容给 Claude 的通道（AskUserQuestion 先例）——
+      // 执行文本经此回喂（Claude 把 deny.message 当 tool_result 消费，✅/❌ 文本
+      // 可区分成败），Bash 原命令被 deny 阻止不再执行。
+      const gitResult: GitApprovalResult = {
+        action: 'approve',
+        message: typeof parsed['message'] === 'string' ? parsed['message'] : intent.message,
+        ...(Array.isArray(parsed['selectedFiles'])
+          ? { selectedFiles: parsed['selectedFiles'].filter((p): p is string => typeof p === 'string') }
+          : {}),
+      };
+      const exec = await executeGitApproval(intent, gitResult, {
+        cwd,
+        sessionId,
+      });
+      return { behavior: 'deny', message: exec.text };
+    }
+
+    // deny / reject / 畸形 dialog_result / 超时 / abort → 拒绝文案（零 git 调用）。
+    return {
+      behavior: 'deny',
+      message: userReason
+        ? `用户拒绝了本次${opLabel}：${userReason}`
+        : `用户拒绝了本次${opLabel}，命令未执行；可调整提交信息或文件范围后重新发起。`,
+    };
+  } catch (err) {
+    const reason =
+      err instanceof Error ? err.message : String(err ?? 'unknown error');
+    return {
+      behavior: 'deny',
+      message: `Git 审批通道异常（${reason}），命令未执行；请稍后重试或手动执行。`,
+    };
+  }
+}
+
+/**
  * task-08（D-007@v1 / spike-02 §3.7 D2）+ task-09（deny 收敛）：
  * 构造 canUseTool 远程人审回调。
  *
@@ -449,6 +632,24 @@ export function buildCanUseToolCallback(
           message: `Failed to get user response (${reason}). Proceed with the recommended option.`,
         };
       }
+    }
+    // git 写操作拦截（2026-11-06-session-git-approval task-03 / D-017 先序硬约束）：
+    // Bash 命令经 git-command-guard 识别命中 git commit / git push / sillyspec push
+    //（推送形态）→ 采集器组 payload → resolver.register 发 dialog_kind='git_approval'
+    // 长驻挂起（无 5min 兜底；后台锚点态例外走 5min deny fail-safe，D-019）。
+    // 位置必须在 askUserOnly 自动放行之前（D-017）——门户「只问不审」会话的 git
+    // 写操作不漏拦；逃生阀判定收敛于 matchGitApprovalCall（与 task-04 包装器同一真相）。
+    const gitIntent = matchGitApprovalCall(toolName, updatedInput);
+    if (gitIntent) {
+      return await handleGitApproval(
+        mgr,
+        sessionId,
+        runId,
+        state,
+        gitIntent,
+        updatedInput,
+        options,
+      );
     }
     // scan 真阻塞（AskUserQuestion-only 策略，改造点 D）：askUserOnly=true 的 session
     //（scan）AskUserQuestion 已在上方拦截，其他工具 allow-through 让 scan 自动推进；

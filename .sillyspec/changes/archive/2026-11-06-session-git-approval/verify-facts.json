@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-11-06-session-git-approval",
+  "generatedAt": "2026-11-07T02:19:29.878Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "tasks": 15,
+        "hasTest": 12
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "backendEndpoints": 3152,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "deletions": 1,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-git-approval",
+      "metrics": {
+        "checkedFiles": 16,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "daemon 本变更 7 测试文件 118 用例全绿",
+      "command": "pnpm -C sillyhub-daemon exec vitest run tests/interactive/git-command-guard.test.ts tests/interactive/git-approval-collector.test.ts tests/interactive/git-executor.test.ts tests/interactive/session-manager-permission.test.ts tests/interactive/driver-factory-approval-wiring.test.ts tests/interactive/session-manager-askuser-dialog.test.ts tests/interactive/session-manager-write-guard.test.ts",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/exec-daemon-test.log"
+    },
+    {
+      "claim": "frontend 组件测试 19 用例全绿（新卡 12 + dock 存量 7）",
+      "command": "pnpm -C frontend exec vitest run src/components/daemon/__tests__/git-approval-card.test.tsx src/components/daemon/__tests__/pending-dialog-dock.test.tsx",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/exec-fe-test.log"
+    },
+    {
+      "claim": "backend git_status 存量 16 用例零回归",
+      "command": "uv run --project backend pytest tests/modules/daemon/test_session_git_status.py -q",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/exec-be-test.log"
+    }
+  ],
+  "handover": {
+    "count": 6,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "场景①全链路（无 manual_approval 会话：拦截→确认卡改 msg/减选→代执行→sha+文件集回喂→清卡；含挂起>60s turn 保活 + 刷新恢复）",
+        "condition": "部署本变更后按 integration-notes.md「待部署验证面」脚本执行",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "场景②门户 ask_user_only 会话 git 拦截 + AskUser 并存",
+        "condition": "同上",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "场景③后台锚点态 5min 自动 deny + 前端无僵尸卡（unknown_request 静默降级）",
+        "condition": "同上",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "push 流冒烟（git/sillyspec 两形态真实推送+压扁语义核对+R-05 凭据继承）",
+        "condition": "同上",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "diff 端点 curl 冒烟（含中文路径）",
+        "condition": "部署后 curl GET /api/daemon/sessions/{id}/git-diff?path=",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "逃生阀对照（SILLYHUB_GIT_APPROVAL=off 行为与现状一致）",
+        "condition": "部署后置 off 重跑 git commit/push 对照",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/interactive/git-approval-collector.test.ts",
+      "sillyhub-daemon/tests/interactive/git-command-guard.test.ts",
+      "sillyhub-daemon/tests/interactive/git-executor.test.ts",
+      "frontend/scripts/prototype-build.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

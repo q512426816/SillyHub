@@ -233,6 +233,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # 只读 GET；{session_id}/git-status 双段路径与单段 {session_id} 不同形状，
     # 无匹配冲突）。
     "get_session_git_status",
+    # 2026-11-06-session-git-approval task-09：会话工作区单文件 diff（git-status
+    # 姊妹只读 GET，审批确认卡取数端）。
+    "get_session_git_diff",
     "create_session",
     # 2026-09-22-session-fork-continuation task-05：会话任意点分叉端点（紧跟
     # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方

@@ -1,0 +1,15 @@
+{"ts":1794018304993,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1794018304993,"kind":"verify","stage":"verify","detail":"质量扫描记录出现","provisional":true}
+{"ts":1794018304993,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（7.5s） · 20261107022503","provisional":true}
+{"ts":1794018435410,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1794018435410,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（7.1s） · 20261107022713","provisional":true}
+{"ts":1794018521873,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：fill_module_impact.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1794018596747,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（6.1s） · 20261107022956","provisional":true}
+{"ts":1794018600426,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1794018668312,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1794018760580,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1794018760580,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（5.9s） · 20261107023237","provisional":true}
+{"ts":1794019961266,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"brainstorm/plan 期已 20 分钟无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1794029437718,"kind":"commit","stage":null,"detail":"3f8e726b1","provisional":true}
+{"ts":1794029592255,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sync_module_docs.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1794029643235,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}

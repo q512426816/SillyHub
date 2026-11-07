@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+import { GitApprovalCard } from "@/components/daemon/git-approval-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import {
   MinimizedDialogCapsule,
@@ -137,17 +138,31 @@ export function PendingDialogDock({
           {pendingRequests.map((req) => (
             <ErrorBoundary
               key={req.request_id}
-              label="ask-user-dialog-card"
+              label={req.dialog_kind === "git_approval" ? "git-approval-card" : "ask-user-dialog-card"}
               fallback={() => (
-                <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
+                <div className="text-[11px] text-red-600/70">
+                  {req.dialog_kind === "git_approval" ? "Git 确认卡渲染失败" : "提问卡片渲染失败"}
+                </div>
               )}
             >
-              <AskUserDialogCard
-                request={req}
-                minimized={minimizedIds.has(req.request_id)}
-                onMinimize={handleMinimize}
-                onResolved={onResolved}
-              />
+              {req.dialog_kind === "git_approval" ? (
+                // 2026-11-06-session-git-approval task-12 / D-009：git 审批确认卡
+                //（dialog_kind='git_approval' 分流；props 面与 AskUser 卡同构，
+                // 双模式挂载由本 dock 统一承载——panel 对带 kind 请求无差别放行）。
+                <GitApprovalCard
+                  request={req}
+                  minimized={minimizedIds.has(req.request_id)}
+                  onMinimize={handleMinimize}
+                  onResolved={onResolved}
+                />
+              ) : (
+                <AskUserDialogCard
+                  request={req}
+                  minimized={minimizedIds.has(req.request_id)}
+                  onMinimize={handleMinimize}
+                  onResolved={onResolved}
+                />
+              )}
             </ErrorBoundary>
           ))}
         </div>

@@ -57,6 +57,11 @@ const VIEWS = [
     title: "会话配置条待生效标记",
     desc: "四控件逐控件待生效标记（现状静默对照/部分暂存/全暂存/askuser 待答场景）（2026-10-30-askuser-config-pending）",
   },
+  {
+    file: "git-approval-view",
+    title: "会话 Git 提交/推送确认卡",
+    desc: "AskUser 同款对话卡外壳 + git 确认面板（commit 勾选文件树/推送保护分支警示/拒绝原因三态）（2026-11-06-session-git-approval）",
+  },
 ];
 
 function run(cmd, args) {

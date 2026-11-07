@@ -1,0 +1,2 @@
+# components-daemon 变更索引
+- change 2026-11-06-session-git-approval | NEW git-approval-card.tsx（git 确认对话卡，props 面对齐 AskUser 卡 D-009）：commit 态三分组目录树勾选（buildFileTree 复用+目录级勾选 indeterminate+增删统计）+msg 编辑+diff 弹窗（会话级端点+DiffBody）；push 态目标/保护分支警示（D-006 不硬拦）/ahead 按条明细可展开文件明细（D-014/D-015）/sillyspec 压扁提示；拒绝子态快捷原因 chips（D-007）；payload 防御性解析。pending-dialog-dock.tsx 按 dialog_kind='git_approval' 分流渲染。组件测试 12 + dock 存量 7 零回归。

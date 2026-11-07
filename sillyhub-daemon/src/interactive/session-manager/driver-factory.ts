@@ -33,6 +33,7 @@ import {
 } from '../../mcp-config.js';
 // ql-20260920-004：主模型 one_m 补 [1m] 后缀（与 injector 规则 3/5 同源约定）。
 import { withOneMSuffix } from '../../credential-injector.js';
+import { withGitApprovalBefore } from './permission.js';
 import type {
   CanUseToolFn,
   DriverOptionsSpec,
@@ -372,11 +373,27 @@ export function buildDriverOptions(
     // 不依赖 resolver/wsClient（纯本地校验）：写工具白名单外 deny、白名单内 allow；
     // 读工具 / 其他 allow（读自由）。SDK 不会因 canUseTool 注入而走人审（人审只在
     // approvalReady 分支内经 resolver.register 触发）。
+    //
+    // D-016（2026-11-06-session-git-approval task-04）：git 审批最小接线——本分支
+    // 是 D-001「默认全局生效」的可达性缺口（原无 resolver/WS 通道，git 分支挂
+    // buildCanUseToolCallback 在此不可达）。factory/wsClient 均在时构造 resolver 存
+    // _resolversBySession（与 approvalReady 分支同时机：会话启动即建，R-12 时序——
+    // 通道初始化不晚于首个 git 命令），并把 withGitApprovalBefore 前置到写校验内层
+    //（git 命令 → dialog 审批挂起；其余命令行为与现状逐字节一致）。任一缺失保持
+    // 现状不接线（fail-soft 不恶化）。
+    let gitApprovalReady = false;
+    if (mgr._permissionResolverFactory && mgr._permissionWsClient) {
+      const gitResolver = mgr._permissionResolverFactory();
+      mgr._resolversBySession.set(state.sessionId, gitResolver);
+      gitApprovalReady = true;
+    }
     const inner = mgr._buildWriteOnlyCanUseToolCallback(state.sessionId);
     driverOpts.canUseTool = mgr._wrapWithWriteGuard(
       state.sessionId,
       state.provider,
-      inner,
+      gitApprovalReady
+        ? withGitApprovalBefore(mgr, state.sessionId, inner)
+        : inner,
     );
   }
   // 2026-08-06-public-mcp-server verify 修复（read_only 物制 layer 3 / G3 / D-005@v2）：

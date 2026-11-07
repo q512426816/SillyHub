@@ -9829,3 +9829,672 @@
 - 场景：主路径 — Given 改动完成；When 运行 ruff check 与 pnpm typecheck；Then 零告警零报错。
 全文：.sillyspec/changes/archive/2026-11-06-fork-empty-prompt-boot/requirements.md#FR-05
 最近确认：3b5ad1ecbb99fd90730adda0348d448a3dc31af2
+
+## FR-daemon-382 git 提交/推送拦截（全局生效）
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — When 命令经复合命令拆段识别命中；Then agent 挂起（dialog 长驻等待不超时），`dialog_kind='git_approval'` 审批请求到达前端；`sillyspec push -
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-01
+最近确认：3f8e726b1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-git-approval:task-01:acc-0-645b3ae0
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-01:acc-1-be515015
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-01:acc-2-558a2228
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-01:acc-3-9897c127
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-01:acc-4-f62d6482
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-01:acc-5-c7b9802f
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-command-guard.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-03:acc-0-5ed2016a
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-03:acc-1-200fd3ba
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-03:acc-2-8c68ed51
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-03:acc-3-479edece
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-03:acc-4-9a41ecf9
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-04:acc-0-2efc128f
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-04:acc-1-ce05d6b8
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-04:acc-2-342a20e2
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-04:acc-3-feab82c5
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-04:acc-4-3cfc0383
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-0-de3e9431
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-1-a280ab3f
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-2-f0452107
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-3-810b4860
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-4-da400688
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-07:acc-5-a8ac6656
+  tests: sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-12:acc-1-a18b6b20
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-12:acc-2-424849ce
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-12:acc-4-c6447943
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-14:acc-0-02da537c
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-14:acc-1-a59cf9b9
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-14:acc-2-87323ac5
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-14:acc-3-c40b14e4
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-14:acc-4-eb16060b
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-15:acc-0-954355c9
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-15:acc-1-9f495d43
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-15:acc-2-14b0618a
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-15:acc-3-c6447943
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx | frontend/src/components/daemon/__tests__/pending-dialog-dock.test.tsx | frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | frontend/src/components/group-chat/__tests__/group-askuser-aggregate.test.tsx | frontend/src/components/permissions/__tests__/session-permission-minimize.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+
+## FR-daemon-383 提交确认卡（目录树勾选 + msg 编辑）
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given FR-01 的 commit 拦截触发；When 确认卡渲染（AskUserQuestion 同款对话卡，双模式挂载，可最小化）；Then 显示分支/原始命令/预填 msg（可编辑）/文件目录树（已暂存/未暂存/未跟踪三分组、四色状态、增删行数、行级+目录级勾选、预填=agent 意图范围）；单文件
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-02
+最近确认：3f8e726b1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-git-approval:task-02:acc-0-a0b9ba38
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-1-d9f802dd
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-2-659a31c3
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-3-400bf02f
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-4-1a9bcddc
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-5-bd6e8248
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-02:acc-6-1f6f04f7
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | sillyhub-daemon/tests/interactive/git-approval-collector.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-09:acc-0-8ae535b0
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-09:acc-1-2c9fdf55
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-09:acc-2-9a9fb89b
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-10:acc-0-a3955797
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-10:acc-1-d43c2c08
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-10:acc-2-ea4c58a3
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-0-43a06904
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-1-e4bbac15
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-2-650d4e28
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-3-cc2c599e
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-4-bc45f015
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-5-31428f5f
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-11:acc-6-ae3de53a
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+
+## FR-daemon-384 推送确认卡（按条提交明细）
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given FR-01 的 push/sillyspec push 拦截触发；When 确认卡渲染；Then 显示目标 remote/分支（main/master 红色警示不硬拦）+ 待推送提交按条明细（sha/首行/作者/日期，≤20 条）且单条可展开该提交的文件明细
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-03
+最近确认：3f8e726b1
+
+## FR-daemon-385 确认后代执行与回喂
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户在确认卡上修改 msg/文件勾选（commit）或确认目标（push）后点击提交/推送；When daemon 收到批准响应；Then commit 流精确重整暂存区（仅动勾选相关文件，他人暂存不动）→ 按用户 msg 提交；push 流按 runner 代执行（git push / 原样 si
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-04
+最近确认：3f8e726b1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-git-approval:task-05:acc-0-d584a893
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-05:acc-1-e8915264
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-05:acc-2-e9b3a5c8
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-05:acc-3-beae1a17
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts | sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-06:acc-0-e5d35460
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-06:acc-1-c0e087d1
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-06:acc-2-21dfb279
+  tests: sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-08:acc-0-989f5eda
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-08:acc-1-916e518c
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-08:acc-2-146a84c4
+  tests: sillyhub-daemon/tests/interactive/git-executor.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+
+## FR-daemon-386 拒绝回喂
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户点击拒绝（可填快捷原因或自由填写）；When 拒绝响应到达 daemon；Then 拒绝原因回喂 agent（Bash 工具结果），暂存区不动，agent 可调整后重新发起（D-007）
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-05
+最近确认：3f8e726b1
+
+## FR-daemon-387 边界行为
+变更：2026-11-06-session-git-approval
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 后台锚点态会话（backgroundTask）触发 git 拦截；When 5 分钟无人确认；Then 自动 deny 回喂（fail-safe，后台任务不提交）；resolved 事件到达后前端待决卡即时清理无僵尸卡（D-019/R-11）；`SILLYHUB_
+全文：.sillyspec/changes/archive/2026-11-06-session-git-approval/requirements.md#FR-06
+最近确认：3f8e726b1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-git-approval:task-13:acc-0-85bec020
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-13:acc-1-d5cc6c36
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active
+- row: 2026-11-06-session-git-approval:task-13:acc-3-9e08afb2
+  tests: frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
+  source_change: 2026-11-06-session-git-approval
+  status: active

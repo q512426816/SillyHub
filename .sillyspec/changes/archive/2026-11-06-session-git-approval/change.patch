@@ -1,0 +1,5169 @@
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index c3e43c73e..84fe8e3b7 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -233,6 +233,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     # 只读 GET；{session_id}/git-status 双段路径与单段 {session_id} 不同形状，
+     # 无匹配冲突）。
+     "get_session_git_status",
++    # 2026-11-06-session-git-approval task-09：会话工作区单文件 diff（git-status
++    # 姊妹只读 GET，审批确认卡取数端）。
++    "get_session_git_diff",
+     "create_session",
+     # 2026-09-22-session-fork-continuation task-05：会话任意点分叉端点（紧跟
+     # create，同为 session_crud 的会话创建类端点；{session_id}/fork 与下方
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 366dca980..2a2f36f22 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -66,6 +66,12 @@ from app.modules.daemon.service import DaemonService
+ from app.modules.daemon.session.network_context import NetworkContextBlock
+ from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
+ from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
++from app.modules.daemon.session.service.git_diff import (
++    SessionGitDiffResponse,
++)
++from app.modules.daemon.session.service.git_diff import (
++    get_session_git_diff as _get_session_git_diff_svc,
++)
+ from app.modules.daemon.session.service.git_status import (
+     get_session_git_status as _get_session_git_status_svc,
+ )
+@@ -659,6 +665,29 @@ async def get_session_git_status(
+     return await _get_session_git_status_svc(svc, session_id, user.id)
+ 
+ 
++@router.get(
++    "/sessions/{session_id}/git-diff",
++    response_model=SessionGitDiffResponse,
++)
++async def get_session_git_diff(
++    session_id: uuid.UUID,
++    session: SessionDep,
++    user: TaskRunAgentUser,
++    path: str = Query(
++        ..., description="工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）"
++    ),
++) -> SessionGitDiffResponse:
++    """会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。
++
++    git 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/
++    已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``
++    RPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``
++    模块 docstring（组件复用 git_status.py）。
++    """
++    svc = DaemonService(session)
++    return await _get_session_git_diff_svc(svc, session_id, path, user.id)
++
++
+ @router.post(
+     "/sessions",
+     response_model=SessionCreateResponse,
+diff --git a/backend/app/modules/daemon/session/service/git_diff.py b/backend/app/modules/daemon/session/service/git_diff.py
+new file mode 100644
+index 000000000..991d1385e
+--- /dev/null
++++ b/backend/app/modules/daemon/session/service/git_diff.py
+@@ -0,0 +1,233 @@
++"""会话级单文件 diff service（2026-11-06-session-git-approval task-09 / FR-02）。
++
++git 审批确认卡「单文件可查看 diff」的取数端：对会话命中工作区的**未提交**改动
++（已暂存/未暂存/未跟踪，工作区 vs HEAD 口径）取统一 diff 文本。
++
++- RPC 语义（源码对齐勘误，task-09 卡裁定）：design 文面写 ``git_diff_file``，但该
++  RPC 是 ``git show <sha>`` 提交级 diff（sha 必填，sillyhub-daemon/src/host-fs-handler.ts
++  gitDiffFile）；确认卡的文件是未提交工作区改动——实际调 daemon 平名 RPC
++  ``git_worktree_diff``（host-fs-handler gitWorktreeDiff：porcelain 单文件判态 +
++  ``git diff HEAD`` + untracked no-index 分流，返回 status/head_short/diff/truncated/
++  binary/error；daemon 侧已带 assertGitPathspec 与 allowed_roots 白名单守卫）。
++- root 决策链与错误面：**组件全部从 git_status.py 导入复用**（_probe_worktree 探测件、
++  SessionGit* 异常族、not-a-repo 判定 marker）；三层 root 链（worktree 探测 → cwd 快照
++  → 绑定根）为 get_session_git_status 同构序列镜像（卡约束「不修改 git_status.py、
++  不复制探测实现」——组件复用 + 序列镜像，两处变更须同步）。
++- 路径安全：path 参数原样透传 daemon（daemon 侧白名单与 pathspec 校验兜底），
++  backend 不做绝对路径拼接；响应只含 diff 相关字段。
++
++设计依据：``.sillyspec/changes/2026-11-06-session-git-approval/design.md``（W3 节 /
++接口定义 get_session_git_diff / 数据模型「schema 在本文件定义」）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from typing import Any, Final, Literal
++
++from pydantic import BaseModel
++from sqlalchemy import select
++
++from app.modules.daemon.runtime.service import (
++    DaemonRpcRemoteError,
++    DaemonRpcTimeout,
++    DaemonRuntimeOffline,
++)
++from app.modules.daemon.session.service.git_status import (
++    _NOT_A_GIT_REPO_MARKER,
++    SessionGitDaemonForbidden,
++    SessionGitDaemonOffline,
++    SessionGitDaemonRemoteError,
++    SessionGitDaemonTimeout,
++    SessionGitNotBound,
++    _probe_worktree,
++)
++from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
++from app.modules.workspace.service import resolve_root_path_for_daemon
++
++# worktree-diff RPC 超时（单文件 diff 与 git_status 同档 30s；daemon 侧整体兜底内含
++# no-index 分支，宽预算不改语义）。
++SESSION_GIT_DIFF_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
++
++
++class SessionGitDiffResponse(BaseModel):
++    """单文件 diff 响应（schema 在本文件定义——design 数据模型节）。"""
++
++    git_mode: Literal["git", "no_git", "no_root"]
++    root: str | None = None
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
++    path: str | None = None
++    status: str | None = None
++    head_short: str | None = None
++    diff: str | None = None
++    truncated: bool = False
++    binary: bool = False
++    synced_at: str
++
++
++def _now_iso() -> str:
++    return datetime.now(UTC).isoformat()
++
++
++def _empty(
++    git_mode: Literal["no_git", "no_root"],
++    path: str | None,
++    root: str | None = None,
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none",
++) -> SessionGitDiffResponse:
++    """空态响应（no_root / no_git）：diff 相关字段全 None。"""
++    return SessionGitDiffResponse(
++        git_mode=git_mode,
++        root=root,
++        root_source=root_source,
++        path=path,
++        status=None,
++        head_short=None,
++        diff=None,
++        truncated=False,
++        binary=False,
++        synced_at=_now_iso(),
++    )
++
++
++async def get_session_git_diff(
++    svc: Any,
++    session_id: uuid.UUID,
++    path: str,
++    user_id: uuid.UUID,
++) -> SessionGitDiffResponse:
++    """会话工作区单文件 diff（工作区 vs HEAD 口径；错误面见模块 docstring）。
++
++    ``svc`` 为 DaemonService——复用 ``get_agent_session`` 属主校验（缺失/跨用户
++    统一 404 不泄露存在性）。
++    """
++    from app.modules.daemon.ws_hub import get_daemon_ws_hub
++
++    agent_session = await svc.get_agent_session(session_id, user_id)
++
++    # ── binding 解析 + 三层 root 链（git_status.get_session_git_status 同构
++    #    序列镜像：组件复用、两处变更须同步）──────────────────────────────────
++    if agent_session.workspace_id is None:
++        return _empty("no_root", path)
++    binding = await MemberBindingResolver.resolve_member_binding_or_none(
++        svc._session,
++        agent_session.workspace_id,
++        user_id,
++        log_tag="session_git_diff_resolve_member_binding_unexpected_error",
++    )
++    if binding is None or binding.daemon_id is None:
++        raise SessionGitNotBound(
++            "当前账号未绑定本机工作区，无法查询会话文件差异。",
++            details={
++                "session_id": str(session_id),
++                "workspace_id": str(agent_session.workspace_id),
++            },
++        )
++    daemon_id = binding.daemon_id
++    binding_root = resolve_root_path_for_daemon(binding.root_path)
++    hub = get_daemon_ws_hub()
++
++    root: str | None = None
++    root_source: Literal["worktree", "cwd", "workspace_root", "none"] = "none"
++    change_key: str | None = None
++    if agent_session.current_change_id is not None:
++        from app.modules.change.model import Change
++
++        change_key = (
++            await svc._session.execute(
++                select(Change.change_key).where(Change.id == agent_session.current_change_id)
++            )
++        ).scalar_one_or_none()
++    if change_key:
++        worktree_root = await _probe_worktree(hub, daemon_id, binding_root, change_key)
++        if worktree_root is not None:
++            root = worktree_root
++            root_source = "worktree"
++    if root is None:
++        if agent_session.cwd:
++            root = resolve_root_path_for_daemon(agent_session.cwd)
++            root_source = "cwd"
++        else:
++            root = binding_root
++            root_source = "workspace_root"
++
++    context: dict[str, Any] = {"session_id": str(session_id), "path": path}
++    try:
++        result: dict[str, Any] = await hub.send_rpc(
++            daemon_id,
++            "git_worktree_diff",
++            {"root": root, "path": path},
++            timeout=SESSION_GIT_DIFF_RPC_TIMEOUT_SECONDS,
++        )
++    except DaemonRuntimeOffline as exc:
++        details: dict[str, Any] = {
++            "daemon_id": str(daemon_id),
++            "method": "git_worktree_diff",
++            **(exc.details or {}),
++            **context,
++        }
++        if "mid-rpc" in str(exc):
++            raise SessionGitDaemonOffline(
++                "与守护进程的传输中断，请稍后重试。",
++                details={**details, "reason": "disconnected_mid_rpc"},
++            ) from exc
++        raise SessionGitDaemonOffline(
++            "本机守护进程当前离线，无法查询会话文件差异；请确认守护进程在线后重试。",
++            details={**details, "reason": "offline_or_send_failed"},
++        ) from exc
++    except DaemonRpcTimeout as exc:
++        raise SessionGitDaemonTimeout(
++            "会话文件差异查询超时，请稍后重试。",
++            details={
++                "daemon_id": str(daemon_id),
++                "method": "git_worktree_diff",
++                **(exc.details or {}),
++                **context,
++            },
++        ) from exc
++    except DaemonRpcRemoteError as exc:
++        remote_details: dict[str, Any] = {
++            "daemon_id": str(daemon_id),
++            "method": "git_worktree_diff",
++            "daemon_code": exc.code,
++            "daemon_message": exc.message,
++            **context,
++        }
++        if exc.code == "forbidden":
++            raise SessionGitDaemonForbidden(
++                "守护进程拒绝访问该会话工作目录：不在允许的访问范围内。",
++                details=remote_details,
++            ) from exc
++        raise SessionGitDaemonRemoteError(
++            "守护进程查询会话文件差异失败，请稍后重试。",
++            details=remote_details,
++        ) from exc
++
++    # 结构化 error：非 git 仓库 → no_git 空态；其余 → 502（不静默成空态，防错数据）。
++    error = result.get("error")
++    if error:
++        if _NOT_A_GIT_REPO_MARKER in str(error):
++            return _empty("no_git", path, root=root, root_source=root_source)
++        raise SessionGitDaemonRemoteError(
++            "守护进程查询会话文件差异失败，请稍后重试。",
++            details={
++                "daemon_id": str(daemon_id),
++                "method": "git_worktree_diff",
++                "daemon_message": str(error),
++                **context,
++            },
++        )
++
++    return SessionGitDiffResponse(
++        git_mode="git",
++        root=root,
++        root_source=root_source,
++        path=result.get("path", path),
++        status=result.get("status"),
++        head_short=result.get("head_short"),
++        diff=result.get("diff"),
++        truncated=bool(result.get("truncated")),
++        binary=bool(result.get("binary")),
++        synced_at=_now_iso(),
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 0bb15116d..7beee4218 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -17200,6 +17200,61 @@
+         }
+       }
+     },
++    "/api/daemon/sessions/{session_id}/git-diff": {
++      "get": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Get Session Git Diff",
++        "description": "会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。\n\ngit 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/\n已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``\nRPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``\n模块 docstring（组件复用 git_status.py）。",
++        "operationId": "get_session_git_diff_api_daemon_sessions__session_id__git_diff_get",
++        "parameters": [
++          {
++            "name": "session_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Session Id"
++            }
++          },
++          {
++            "name": "path",
++            "in": "query",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "description": "工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）",
++              "title": "Path"
++            },
++            "description": "工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）"
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/SessionGitDiffResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/sessions/{session_id}/fork": {
+       "post": {
+         "tags": [
+@@ -72218,6 +72273,106 @@
+         "title": "SessionForkResponse",
+         "description": "POST /api/daemon/sessions/{id}/fork 响应（design §接口定义）。\n\n``tier``：'native'（引擎真截断：claude resume_at / pi rpc_fork / pi clone）\n| 'seed'（codex 前情转述，有损）。错误语义：404 会话/run 不存在或不属于\n该会话；409 run 进行中；422 caps sessionFork=none 或 native 档锚点缺失。"
+       },
++      "SessionGitDiffResponse": {
++        "properties": {
++          "git_mode": {
++            "type": "string",
++            "enum": [
++              "git",
++              "no_git",
++              "no_root"
++            ],
++            "title": "Git Mode"
++          },
++          "root": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Root"
++          },
++          "root_source": {
++            "type": "string",
++            "enum": [
++              "worktree",
++              "cwd",
++              "workspace_root",
++              "none"
++            ],
++            "title": "Root Source",
++            "default": "none"
++          },
++          "path": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Path"
++          },
++          "status": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Status"
++          },
++          "head_short": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Head Short"
++          },
++          "diff": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Diff"
++          },
++          "truncated": {
++            "type": "boolean",
++            "title": "Truncated",
++            "default": false
++          },
++          "binary": {
++            "type": "boolean",
++            "title": "Binary",
++            "default": false
++          },
++          "synced_at": {
++            "type": "string",
++            "title": "Synced At"
++          }
++        },
++        "type": "object",
++        "required": [
++          "git_mode",
++          "synced_at"
++        ],
++        "title": "SessionGitDiffResponse",
++        "description": "单文件 diff 响应（schema 在本文件定义——design 数据模型节）。"
++      },
+       "SessionGitStatusResponse": {
+         "properties": {
+           "git_mode": {
+@@ -80248,6 +80403,17 @@
+               }
+             ],
+             "title": "Reason"
++          },
++          "index_sync": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Index Sync"
+           }
+         },
+         "type": "object",
+@@ -80255,7 +80421,7 @@
+           "results"
+         ],
+         "title": "VectorSearchOut",
+-        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"
++        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。\n\nindex_sync=\"scheduled\"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧\n已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results\n不受影响，字段供观测与测试断言。"
+       },
+       "VectorSearchResultItem": {
+         "properties": {
+diff --git a/frontend/src/components/daemon/__tests__/git-approval-card.test.tsx b/frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+new file mode 100644
+index 000000000..23233f33e
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/git-approval-card.test.tsx
+@@ -0,0 +1,265 @@
++/**
++ * GitApprovalCard 组件测试（2026-11-06-session-git-approval task-13）。
++ *
++ * 覆盖（= 卡 acceptance）：
++ *   1. commit 态三分流渲染（已暂存/未暂存/未跟踪目录树 + 四色徽标 + 增删统计 + 预填勾选）；
++ *   2. 勾选交互（文件勾/目录级勾选/计数联动）与 msg 编辑；
++ *   3. 提交流：respondSessionPermission('allow', dialog_result{approve, message, selectedFiles})
++ *      成功后 onResolved 触发（父级移卡——R-11 清卡路径的组件面）；失败可重试；
++ *   4. 拒绝流：快捷原因 chips + 确认拒绝（deny + reject dialog_result）；
++ *   5. push 态：remoteTarget/保护分支警示/ahead 按条明细展开文件明细（D-014/D-015）；
++ *   6. 畸形 payload 兜底不崩；minimized 渲染 null。
++ *
++ * 手法对齐 ask-user-dialog-card.test.tsx（vi.mock session store + testing-library）；
++ * respondSessionPermission / apiFetch 全 mock（零网络）。
++ */
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { describe, expect, it, vi, beforeEach } from "vitest";
++
++import { GitApprovalCard } from "@/components/daemon/git-approval-card";
++import type { SessionPermissionRequest } from "@/lib/daemon";
++
++vi.mock("@/stores/session", () => ({
++  useSession: { getState: () => ({ accessToken: "test-token" }) },
++}));
++
++// 两工厂内定义实例（vi.mock 提升后引用顶层变量会 ReferenceError），再 import 取引用。
++vi.mock("@/lib/daemon/sessions", async (importOriginal) => {
++  const orig = await importOriginal<typeof import("@/lib/daemon/sessions")>();
++  return { ...orig, respondSessionPermission: vi.fn(async () => {}) };
++});
++import { respondSessionPermission } from "@/lib/daemon/sessions";
++const respondMock = vi.mocked(respondSessionPermission);
++
++vi.mock("@/lib/api", async (importOriginal) => {
++  const orig = await importOriginal<typeof import("@/lib/api")>();
++  return {
++    ...orig,
++    apiFetch: vi.fn(async () => ({
++      git_mode: "git",
++      diff: "@@ -1 +1 @@\n-a\n+b",
++      truncated: false,
++      binary: false,
++    })),
++  };
++});
++import { apiFetch } from "@/lib/api";
++const apiFetchMock = vi.mocked(apiFetch);
++
++function makeRequest(payload: Record<string, unknown>): SessionPermissionRequest {
++  return {
++    session_id: "sess-1",
++    run_id: "run-1",
++    request_id: "req-1",
++    tool_name: "Bash",
++    input: { command: "git commit -m x" },
++    dialog_kind: "git_approval",
++    dialog_payload: payload,
++  };
++}
++
++const COMMIT_PAYLOAD = {
++  operation: "commit",
++  command: 'git commit -m "feat: x"',
++  worktree: "C:/repo",
++  branch: "main",
++  message: "feat: x",
++  files: [
++    { path: "backend/app/service.py", status: "modified", staged: true, addLines: 38, delLines: 4 },
++    { path: "backend/app/other.py", status: "modified", staged: true, addLines: 2, delLines: 0 },
++    { path: "frontend/src/app.tsx", status: "modified", staged: false, addLines: 10, delLines: 2 },
++    { path: "docs/notes.md", status: "untracked", staged: false, addLines: 5, delLines: 0 },
++  ],
++  defaultSelected: ["backend/app/service.py", "backend/app/other.py"],
++};
++
++const PUSH_PAYLOAD = {
++  operation: "push",
++  command: "sillyspec push",
++  worktree: "C:/repo",
++  branch: "main",
++  message: "",
++  remoteTarget: "origin/main",
++  runner: "sillyspec",
++  protectedBranch: true,
++  aheadCount: 2,
++  aheadCommits: [
++    {
++      sha: "fff0001",
++      subject: "feat: first",
++      author: "qinyi",
++      date: "2026-11-06",
++      files: [
++        { path: "backend/a.py", status: "modified", addLines: 20, delLines: 1 },
++        { path: "new/b.tsx", status: "added", addLines: 8, delLines: 0 },
++      ],
++    },
++    { sha: "fff0002", subject: "feat: second", author: "qinyi", date: "2026-11-06", files: [] },
++  ],
++  files: [],
++  defaultSelected: [],
++};
++
++beforeEach(() => {
++  respondMock.mockReset();
++  respondMock.mockResolvedValue(undefined);
++  apiFetchMock.mockClear();
++});
++
++describe("GitApprovalCard · commit 态", () => {
++  it("三分组目录树渲染（已暂存/未暂存/未跟踪）+ 四色徽标 + 增删统计 + 预填勾选计数", () => {
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} />);
++    expect(screen.getByText("已暂存")).toBeInTheDocument();
++    expect(screen.getByText("(2)")).toBeInTheDocument();
++    expect(screen.getByText("未暂存改动")).toBeInTheDocument();
++    // 「未跟踪」兼作分组标题与文件状态徽标（getAllBy 断言存在）。
++    expect(screen.getAllByText("未跟踪").length).toBeGreaterThan(0);
++    // 文件行 basename + 增删统计（目录树形态：父路径由层级表达）。
++    expect(screen.getByText("service.py")).toBeInTheDocument();
++    // 增删统计在文件行与目录聚合行重复出现（getAllBy 断言存在）。
++    expect(screen.getAllByText("+38").length).toBeGreaterThan(0);
++    expect(screen.getAllByText("-4").length).toBeGreaterThan(1);
++    // 预填勾选 2 个（defaultSelected）。
++    expect(screen.getByText("提交文件范围（勾选 2 个）")).toBeInTheDocument();
++    expect(screen.getByTestId("git-approval-approve")).toHaveTextContent("提交 2 个文件");
++  });
++
++  it("文件勾选切换与按钮计数联动；目录级勾选批量增减", () => {
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} />);
++    // 取消一个文件勾选 → 计数 1。
++    const fileLabel = screen.getByTestId("git-approval-file-backend/app/service.py");
++    const cb = fileLabel.querySelector("input[type=checkbox]") as HTMLInputElement;
++    fireEvent.click(cb);
++    expect(screen.getByText("提交文件范围（勾选 1 个）")).toBeInTheDocument();
++    // 目录级勾选（backend/ 目录行）勾上子树全部（service+other）→ 计数 2。
++    const dirToggle = screen.getAllByTitle(/目录级勾选/)[0] as HTMLInputElement;
++    fireEvent.click(dirToggle);
++    expect(screen.getByText("提交文件范围（勾选 2 个）")).toBeInTheDocument();
++  });
++
++  it("msg 编辑生效并随提交流提交（respondSessionPermission allow + dialog_result）", async () => {
++    const onResolved = vi.fn();
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} onResolved={onResolved} />);
++    const msg = screen.getByTestId("git-approval-msg-input") as HTMLTextAreaElement;
++    fireEvent.change(msg, { target: { value: "用户改写 msg" } });
++    fireEvent.click(screen.getByTestId("git-approval-approve"));
++    await waitFor(() => expect(respondMock).toHaveBeenCalledTimes(1));
++    expect(respondMock).toHaveBeenCalledWith(
++      "sess-1",
++      "req-1",
++      "allow",
++      undefined,
++      { action: "approve", message: "用户改写 msg", selectedFiles: ["backend/app/service.py", "backend/app/other.py"] },
++    );
++    // 成功后 onResolved 触发（父级移卡——R-11 清卡路径组件面）。
++    expect(onResolved).toHaveBeenCalledWith("req-1", "allow");
++  });
++
++  it("提交失败 → 错误提示且可重试", async () => {
++    respondMock.mockRejectedValueOnce(new Error("network down"));
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} />);
++    fireEvent.click(screen.getByTestId("git-approval-approve"));
++    await waitFor(() => expect(screen.getByTestId("git-approval-error")).toBeInTheDocument());
++    fireEvent.click(screen.getByTestId("git-approval-approve"));
++    await waitFor(() => expect(respondMock).toHaveBeenCalledTimes(2));
++  });
++
++  it("单文件 diff 入口：点击调会话级端点并在弹窗渲染 DiffBody", async () => {
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} />);
++    fireEvent.click(screen.getAllByRole("button", { name: "查看改动" })[0]!);
++    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1));
++    expect(apiFetchMock).toHaveBeenCalledWith(
++      "/api/daemon/sessions/sess-1/git-diff",
++      // 树按字母序，首个 diff 入口是 other.py（断言调用形态而非顺序假设）。
++      expect.objectContaining({ query: { path: expect.stringMatching(/^backend\/app\/(service|other)\.py$/) } }),
++    );
++  });
++});
++
++describe("GitApprovalCard · 拒绝流（D-007）", () => {
++  it("快捷原因 chips + 确认拒绝（deny + reject dialog_result + reason）", async () => {
++    const onResolved = vi.fn();
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} onResolved={onResolved} />);
++    fireEvent.click(screen.getByTestId("git-approval-reject"));
++    fireEvent.click(screen.getByTestId("git-approval-reject-chip-先不提交"));
++    fireEvent.click(screen.getByTestId("git-approval-reject-confirm"));
++    await waitFor(() => expect(respondMock).toHaveBeenCalledTimes(1));
++    expect(respondMock).toHaveBeenCalledWith(
++      "sess-1",
++      "req-1",
++      "deny",
++      undefined,
++      { action: "reject", reason: "先不提交" },
++    );
++    expect(onResolved).toHaveBeenCalledWith("req-1", "deny");
++  });
++
++  it("返回确认卡可退出拒绝子态", () => {
++    render(<GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} />);
++    fireEvent.click(screen.getByTestId("git-approval-reject"));
++    expect(screen.getByTestId("git-approval-reject-confirm")).toBeInTheDocument();
++    fireEvent.click(screen.getByText("返回确认卡"));
++    expect(screen.queryByTestId("git-approval-reject-confirm")).not.toBeInTheDocument();
++  });
++});
++
++describe("GitApprovalCard · push 态（D-014/D-015/D-006）", () => {
++  it("目标/保护分支警示/ahead 按条明细；单条展开文件明细（D-015 纯浏览）", async () => {
++    render(<GitApprovalCard request={makeRequest(PUSH_PAYLOAD)} />);
++    expect(screen.getByText("origin/main")).toBeInTheDocument();
++    expect(screen.getByText("保护分支 · 推送影响远端主线")).toBeInTheDocument();
++    expect(screen.getByText("将推送的提交")).toBeInTheDocument();
++    expect(screen.getByText("feat: first")).toBeInTheDocument();
++    // 展开首条 → 文件明细（basename + 增删）。
++    fireEvent.click(screen.getByTestId("git-approval-ahead-fff0001").querySelector("button")!);
++    await waitFor(() => expect(screen.getByText("a.py")).toBeInTheDocument());
++    expect(screen.getByText("+20")).toBeInTheDocument();
++    // sillyspec 压扁语义提示。
++    expect(screen.getByText(/按变更段压扁本地提交再快进推送/)).toBeInTheDocument();
++    // 确认推送按钮。
++    expect(screen.getByTestId("git-approval-approve")).toHaveTextContent("确认推送");
++  });
++
++  it("确认推送：allow + approve（push 无 selectedFiles）", async () => {
++    render(<GitApprovalCard request={makeRequest(PUSH_PAYLOAD)} />);
++    fireEvent.click(screen.getByTestId("git-approval-approve"));
++    await waitFor(() =>
++      expect(respondMock).toHaveBeenCalledWith(
++        "sess-1",
++        "req-1",
++        "allow",
++        undefined,
++        { action: "approve", message: "" },
++      ),
++    );
++  });
++});
++
++describe("GitApprovalCard · 边界", () => {
++  it("畸形 payload（缺 files/defaultSelected）兜底不崩（D-012 降级面）", () => {
++    render(
++      <GitApprovalCard
++        request={makeRequest({ operation: "commit", command: "git commit -m x" })}
++      />,
++    );
++    expect(screen.getByText(/无文件清单——采集降级态/)).toBeInTheDocument();
++    // 空勾选禁用提交（防误提交）。
++    expect(screen.getByTestId("git-approval-approve")).toBeDisabled();
++  });
++
++  it("collectError 提示条渲染", () => {
++    render(
++      <GitApprovalCard
++        request={makeRequest({ ...COMMIT_PAYLOAD, files: [], defaultSelected: [], collectError: "工作区状态采集失败：boom" })}
++      />,
++    );
++    expect(screen.getByText(/工作区状态采集失败：boom/)).toBeInTheDocument();
++  });
++
++  it("minimized 渲染 null（保持挂载契约，勾选态由父保留）", () => {
++    const { container } = render(
++      <GitApprovalCard request={makeRequest(COMMIT_PAYLOAD)} minimized />,
++    );
++    expect(container).toBeEmptyDOMElement();
++  });
++});
+diff --git a/frontend/src/components/daemon/git-approval-card.tsx b/frontend/src/components/daemon/git-approval-card.tsx
+new file mode 100644
+index 000000000..1cca47c8f
+--- /dev/null
++++ b/frontend/src/components/daemon/git-approval-card.tsx
+@@ -0,0 +1,774 @@
++/**
++ * git 审批确认对话卡（2026-11-06-session-git-approval task-11 / FR-02/03/05）。
++ *
++ * agent 的 git commit/push/sillyspec push 被 daemon 拦截后（dialog_kind='git_approval'），
++ * 会话页弹出的 AskUserQuestion 同款对话卡（D-009 形态锚定，props 面对齐
++ * ask-user-dialog-card.tsx）：commit 态目录树勾选 + msg 编辑 + 单文件 diff（会话级
++ * 端点取数，D-014/D-015）；push 态目标 + 保护分支警示（D-006）+ 待推送提交按条明细
++ * 可展开文件明细；拒绝子态快捷原因 + 自由填写（D-007）。
++ *
++ * UI 形态基准：已批准原型 frontend/src/components/prototype/git-approval-view.tsx
++ *（目录树/四色状态/增删统计/按条展开同方言）；树构建复用 git-log buildFileTree
++ *（子树增删聚合内建）。payload 防御性解析，缺字段走兜底不崩。
++ */
++"use client";
++
++import { useMemo, useState } from "react";
++import { Modal } from "antd";
++import {
++  ChevronDown,
++  ChevronRight,
++  FileText,
++  GitBranch,
++  Minimize2,
++} from "lucide-react";
++
++import { buildFileTree, DiffBody, type GitLogFileTreeNode } from "@/components/git-log/file-tree";
++import { ApiError, apiFetch } from "@/lib/api";
++import { respondSessionPermission, type SessionPermissionRequest } from "@/lib/daemon/sessions";
++import { cn } from "@/lib/utils";
++
++/* ───────────── 局部类型（design 接口定义冻结，不强类型化 openapi） ───────────── */
++
++export type GitApprovalFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
++
++interface GitApprovalFile {
++  path: string;
++  status: GitApprovalFileStatus;
++  staged: boolean;
++  addLines: number;
++  delLines: number;
++}
++
++interface GitApprovalAheadCommit {
++  sha: string;
++  subject: string;
++  author: string;
++  date: string;
++  files: { path: string; status: GitApprovalFileStatus; addLines: number; delLines: number }[];
++  filesTruncated?: boolean;
++  fileCount?: number;
++}
++
++interface GitApprovalPayload {
++  operation: "commit" | "push";
++  command: string;
++  worktree: string;
++  branch: string;
++  message: string;
++  remoteTarget?: string;
++  runner?: "git" | "sillyspec";
++  protectedBranch?: boolean;
++  aheadCommits?: GitApprovalAheadCommit[];
++  aheadTruncated?: boolean;
++  aheadCount?: number;
++  files: GitApprovalFile[];
++  filesTruncated?: boolean;
++  fileCount?: number;
++  collectError?: string;
++  defaultSelected: string[];
++}
++
++/** 防御性解析：缺字段/格式不符走最小兜底 payload（不崩，卡面提示采集异常）。 */
++function parsePayload(raw: Record<string, unknown> | undefined): GitApprovalPayload {
++  const r = raw ?? {};
++  const str = (v: unknown): string => (typeof v === "string" ? v : "");
++  const filesRaw = Array.isArray(r.files) ? r.files : [];
++  const files: GitApprovalFile[] = filesRaw
++    .filter((f): f is Record<string, unknown> => !!f && typeof f === "object")
++    .map((f) => ({
++      path: str(f.path),
++      status: (["added", "modified", "deleted", "renamed", "untracked"].includes(str(f.status))
++        ? str(f.status)
++        : "modified") as GitApprovalFileStatus,
++      staged: f.staged === true,
++      addLines: typeof f.addLines === "number" ? f.addLines : 0,
++      delLines: typeof f.delLines === "number" ? f.delLines : 0,
++    }))
++    .filter((f) => f.path.length > 0);
++  const aheadRaw = Array.isArray(r.aheadCommits) ? r.aheadCommits : [];
++  const aheadCommits: GitApprovalAheadCommit[] = aheadRaw
++    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
++    .map((c) => ({
++      sha: str(c.sha).slice(0, 7),
++      subject: str(c.subject),
++      author: str(c.author),
++      date: str(c.date),
++      files: (Array.isArray(c.files) ? c.files : [])
++        .filter((f): f is Record<string, unknown> => !!f && typeof f === "object")
++        .map((f) => ({
++          path: str(f.path),
++          status: (["added", "modified", "deleted", "renamed", "untracked"].includes(str(f.status))
++            ? str(f.status)
++            : "modified") as GitApprovalFileStatus,
++          addLines: typeof f.addLines === "number" ? f.addLines : 0,
++          delLines: typeof f.delLines === "number" ? f.delLines : 0,
++        }))
++        .filter((f) => f.path.length > 0),
++      ...(c.filesTruncated === true ? { filesTruncated: true } : {}),
++      ...(typeof c.fileCount === "number" ? { fileCount: c.fileCount } : {}),
++    }));
++  return {
++    operation: r.operation === "push" ? "push" : "commit",
++    command: str(r.command),
++    worktree: str(r.worktree),
++    branch: str(r.branch),
++    message: str(r.message),
++    ...(r.remoteTarget !== undefined ? { remoteTarget: str(r.remoteTarget) } : {}),
++    ...(r.runner === "sillyspec" ? { runner: "sillyspec" as const } : {}),
++    ...(r.protectedBranch === true ? { protectedBranch: true } : {}),
++    ...(aheadCommits.length > 0 ? { aheadCommits } : {}),
++    ...(r.aheadTruncated === true ? { aheadTruncated: true } : {}),
++    ...(typeof r.aheadCount === "number" ? { aheadCount: r.aheadCount } : {}),
++    files,
++    ...(r.filesTruncated === true ? { filesTruncated: true } : {}),
++    ...(typeof r.fileCount === "number" ? { fileCount: r.fileCount } : {}),
++    ...(typeof r.collectError === "string" ? { collectError: r.collectError } : {}),
++    defaultSelected: Array.isArray(r.defaultSelected)
++      ? r.defaultSelected.filter((p): p is string => typeof p === "string")
++      : [],
++  };
++}
++
++/* ───────────── 状态元数据（git-log 四色同方言） ───────────── */
++
++const STATUS_META: Record<GitApprovalFileStatus, { label: string; cls: string; dotCls: string }> = {
++  added: { label: "新增", cls: "text-success", dotCls: "bg-success" },
++  modified: { label: "修改", cls: "text-primary", dotCls: "bg-primary" },
++  deleted: { label: "删除", cls: "text-error line-through", dotCls: "bg-error" },
++  renamed: { label: "重命名", cls: "text-muted-foreground", dotCls: "bg-muted-foreground" },
++  untracked: { label: "未跟踪", cls: "text-muted-foreground", dotCls: "bg-muted-foreground" },
++};
++
++const REJECT_QUICK_REASONS = ["提交信息不符合规范", "文件范围不对", "还有改动没包含", "先不提交"];
++
++/* ───────────── 单文件 diff 取数（会话级端点，W3） ───────────── */
++
++interface GitDiffState {
++  path: string;
++  loading: boolean;
++  diff?: string;
++  truncated?: boolean;
++  binary?: boolean;
++  error?: string;
++}
++
++async function fetchSessionGitDiff(sessionId: string, path: string): Promise<Partial<GitDiffState>> {
++  try {
++    const resp = await apiFetch<{ git_mode?: string; diff?: string | null; truncated?: boolean; binary?: boolean }>(
++      `/api/daemon/sessions/${encodeURIComponent(sessionId)}/git-diff`,
++      { query: { path } },
++    );
++    if (resp.git_mode && resp.git_mode !== "git") {
++      return { error: "无法获取差异（工作区不可用）" };
++    }
++    return {
++      diff: resp.diff ?? "",
++      truncated: resp.truncated === true,
++      binary: resp.binary === true,
++    };
++  } catch (err) {
++    return { error: err instanceof ApiError ? err.message : "差异获取失败" };
++  }
++}
++
++/* ───────────── 树勾选工具 ───────────── */
++
++function collectLeafPaths(node: GitLogFileTreeNode, acc: string[] = []): string[] {
++  if (node.children.length === 0) {
++    acc.push(node.path);
++    return acc;
++  }
++  for (const c of node.children) collectLeafPaths(c, acc);
++  return acc;
++}
++
++/* ───────────── 组件 ───────────── */
++
++export interface GitApprovalCardProps {
++  request: SessionPermissionRequest;
++  /** 卡片被移除时回调（permission_resolved SSE / 父组件清空时触发）。 */
++  onResolved?: (requestId: string, decision: "allow" | "deny") => void;
++  /** 最小化受控态：true 渲染 null 但保持挂载（勾选/msg 编辑态保留）。 */
++  minimized?: boolean;
++  /** 点击卡头最小化按钮回调。 */
++  onMinimize?: (requestId: string) => void;
++}
++
++export function GitApprovalCard({ request, onResolved, minimized, onMinimize }: GitApprovalCardProps) {
++  const payload = useMemo(() => parsePayload(request.dialog_payload), [request.dialog_payload]);
++  const [message, setMessage] = useState(payload.message);
++  const [selected, setSelected] = useState<Set<string>>(() => new Set(payload.defaultSelected));
++  const [rejectMode, setRejectMode] = useState(false);
++  const [rejectReason, setRejectReason] = useState("");
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [expandedAhead, setExpandedAhead] = useState<Set<string>>(new Set());
++  const [diffState, setDiffState] = useState<GitDiffState | null>(null);
++
++  // 三分组（顶层）：已暂存 / 未暂存改动 / 未跟踪（D-012）。
++  const groups = useMemo(() => {
++    const staged = payload.files.filter((f) => f.staged);
++    const unstaged = payload.files.filter((f) => !f.staged && f.status !== "untracked");
++    const untracked = payload.files.filter((f) => f.status === "untracked");
++    return [
++      { key: "staged", label: "已暂存", files: staged },
++      { key: "unstaged", label: "未暂存改动", files: unstaged },
++      { key: "untracked", label: "未跟踪", files: untracked },
++    ].filter((g) => g.files.length > 0);
++  }, [payload.files]);
++
++  const openDiff = async (path: string) => {
++    setDiffState({ path, loading: true });
++    const r = await fetchSessionGitDiff(request.session_id, path);
++    setDiffState((prev) => (prev && prev.path === path ? { ...prev, loading: false, ...r } : prev));
++  };
++
++  const submitApprove = async () => {
++    setSubmitting(true);
++    setError(null);
++    const dialogResult =
++      payload.operation === "commit"
++        ? { action: "approve", message, selectedFiles: [...selected] }
++        : { action: "approve", message: "" };
++    try {
++      await respondSessionPermission(
++        request.session_id,
++        request.request_id,
++        "allow",
++        undefined,
++        dialogResult,
++      );
++      onResolved?.(request.request_id, "allow");
++    } catch (err) {
++      setSubmitting(false);
++      setError(err instanceof ApiError ? err.message : "提交失败，请重试");
++    }
++  };
++
++  const submitReject = async () => {
++    setSubmitting(true);
++    setError(null);
++    try {
++      await respondSessionPermission(request.session_id, request.request_id, "deny", undefined, {
++        action: "reject",
++        reason: rejectReason,
++      });
++      onResolved?.(request.request_id, "deny");
++    } catch (err) {
++      setSubmitting(false);
++      setError(err instanceof ApiError ? err.message : "提交失败，请重试");
++    }
++  };
++
++  if (minimized) return null;
++
++  const opLabel = payload.operation === "commit" ? "提交" : "推送";
++
++  return (
++    <div className="rounded-lg border border-border bg-card shadow-sm">
++      {/* 卡头（AskUser 同方言 brand 头部） */}
++      <div className="flex items-start justify-between gap-2 rounded-t-lg border-b border-brand-200 bg-brand-50/60 px-4 py-2.5">
++        <div className="min-w-0">
++          <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
++            <GitBranch aria-hidden className="h-4 w-4 text-brand-600" />
++            Git {opLabel}确认
++            {payload.branch ? (
++              <span className="ml-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] font-normal text-muted-foreground">
++                {payload.branch}
++              </span>
++            ) : null}
++          </p>
++          <p className="mt-0.5 text-xs text-muted-foreground">
++            {rejectMode
++              ? "拒绝后将把原因反馈给 Agent，它可调整后重新发起"
++              : `Agent 请求${opLabel}代码，请确认后执行（由平台代为执行，结果回传 Agent）`}
++          </p>
++        </div>
++        {onMinimize ? (
++          <button
++            type="button"
++            title="最小化为待决策胶囊"
++            onClick={() => onMinimize(request.request_id)}
++            className="shrink-0 rounded p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
++            data-testid="git-approval-minimize"
++          >
++            <Minimize2 aria-hidden className="h-3.5 w-3.5" />
++          </button>
++        ) : null}
++      </div>
++
++      <div className="px-4 py-3" data-testid="git-approval-body">
++        {/* 原始命令（agent 意图，等宽） */}
++        {payload.command ? (
++          <p
++            className={cn(
++              "mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground",
++              rejectMode && "mb-3",
++            )}
++            title={payload.command}
++          >
++            $ {payload.command}
++          </p>
++        ) : null}
++
++        {payload.collectError ? (
++          <p className="mb-2 rounded border border-error/40 bg-error/10 px-2.5 py-1.5 text-[11px] text-error">
++            {payload.collectError}
++          </p>
++        ) : null}
++
++        {rejectMode ? (
++          /* ── 拒绝子态 ── */
++          <>
++            <p className="mb-1 text-xs font-medium text-foreground">拒绝原因（将反馈给 Agent）</p>
++            <div className="mb-2 flex flex-wrap gap-1.5">
++              {REJECT_QUICK_REASONS.map((r) => (
++                <button
++                  key={r}
++                  type="button"
++                  onClick={() => setRejectReason(r)}
++                  className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++                  data-testid={`git-approval-reject-chip-${r}`}
++                >
++                  {r}
++                </button>
++              ))}
++            </div>
++            <textarea
++              value={rejectReason}
++              onChange={(e) => setRejectReason(e.target.value)}
++              placeholder="或自由填写拒绝原因……"
++              rows={2}
++              className="mb-3 w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none"
++              data-testid="git-approval-reject-input"
++            />
++          </>
++        ) : payload.operation === "commit" ? (
++          /* ── commit 主态 ── */
++          <>
++            <label className="mb-1 block text-xs font-medium text-foreground" data-testid="git-approval-msg-label">
++              提交信息（可修改）
++            </label>
++            <textarea
++              value={message}
++              onChange={(e) => setMessage(e.target.value)}
++              rows={4}
++              placeholder="提交信息……"
++              className="mb-3 w-full resize-y rounded border border-border bg-background px-2 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none"
++              data-testid="git-approval-msg-input"
++            />
++            {payload.filesTruncated ? (
++              <p className="mb-2 rounded border border-border bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
++                改动文件共 {payload.fileCount ?? payload.files.length} 个，超出卡片展示上限（500）——下方为样本，
++                全量请在 Git 日志页查看；提交将包含全部预填范围。
++              </p>
++            ) : null}
++            <p className="mb-1 text-xs font-medium text-foreground">
++              提交文件范围（勾选 {selected.size} 个）
++            </p>
++            <div className="mb-3 max-h-56 overflow-y-auto rounded border border-border" data-testid="git-approval-files">
++              {groups.map((g) => (
++                <FileGroup
++                  key={g.key}
++                  label={g.label}
++                  files={g.files}
++                  selected={selected}
++                  onSelect={(paths, on) =>
++                    setSelected((prev) => {
++                      const next = new Set(prev);
++                      for (const p of paths) {
++                        if (on) next.add(p);
++                        else next.delete(p);
++                      }
++                      return next;
++                    })
++                  }
++                  onOpenDiff={openDiff}
++                />
++              ))}
++              {payload.files.length === 0 ? (
++                <p className="px-3 py-2 text-xs text-muted-foreground">（无文件清单——采集降级态，请谨慎确认）</p>
++              ) : null}
++            </div>
++          </>
++        ) : (
++          /* ── push 主态 ── */
++          <>
++            <div className="mb-3 flex flex-col gap-1.5 rounded border border-border px-3 py-2.5 text-xs">
++              <div className="flex items-center justify-between">
++                <span className="text-muted-foreground">目标</span>
++                <span className="flex items-center gap-1.5 font-mono text-foreground">
++                  {payload.remoteTarget || "origin/（当前分支）"}
++                  {payload.protectedBranch ? (
++                    <span className="rounded border border-error/40 bg-error/10 px-1.5 py-0.5 text-[10px] font-medium text-error">
++                      保护分支 · 推送影响远端主线
++                    </span>
++                  ) : null}
++                </span>
++              </div>
++              {typeof payload.aheadCount === "number" ? (
++                <div className="flex items-center justify-between">
++                  <span className="text-muted-foreground">待推送提交</span>
++                  <span className="tabular-nums text-foreground">
++                    {payload.aheadCommits?.length ?? 0} 个提交（领先远端 {payload.aheadCount}）
++                  </span>
++                </div>
++              ) : null}
++            </div>
++            {payload.runner === "sillyspec" ? (
++              <p className="mb-3 rounded border border-brand-200 bg-brand-50/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
++                该推送经 <code className="font-mono">sillyspec push</code> 发起：确认后将按变更段压扁本地提交再快进推送（压扁语义由平台代执行保留）。
++              </p>
++            ) : null}
++            {(payload.aheadCommits?.length ?? 0) > 0 ? (
++              <>
++                <p className="mb-1 text-xs font-medium text-foreground">将推送的提交</p>
++                <div className="mb-3 flex max-h-56 flex-col gap-0.5 overflow-y-auto rounded border border-border px-2 py-1.5">
++                  {payload.aheadCommits!.map((c) => (
++                    <AheadCommitRow
++                      key={c.sha}
++                      commit={c}
++                      open={expandedAhead.has(c.sha)}
++                      onToggle={() =>
++                        setExpandedAhead((prev) => {
++                          const next = new Set(prev);
++                          if (next.has(c.sha)) next.delete(c.sha);
++                          else next.add(c.sha);
++                          return next;
++                        })
++                      }
++                    />
++                  ))}
++                  {payload.aheadTruncated ? (
++                    <p className="px-1 py-1 text-[11px] text-muted-foreground">
++                      …（共 {payload.aheadCount ?? payload.aheadCommits!.length} 个提交，超出 20 条展示上限）
++                    </p>
++                  ) : null}
++                </div>
++              </>
++            ) : null}
++          </>
++        )}
++
++        {error ? (
++          <p className="mb-2 rounded border border-error/40 bg-error/10 px-2.5 py-1.5 text-[11px] text-error" data-testid="git-approval-error">
++            {error}
++          </p>
++        ) : null}
++
++        {/* 底部按钮组 */}
++        <div className="flex items-center justify-between gap-2">
++          <span className="text-[11px] text-muted-foreground">批准后由平台代为执行，结果自动回传给 Agent</span>
++          <div className="flex shrink-0 gap-2">
++            {rejectMode ? (
++              <>
++                <button
++                  type="button"
++                  onClick={() => setRejectMode(false)}
++                  className="h-7 rounded border border-border px-3 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++                >
++                  返回确认卡
++                </button>
++                <button
++                  type="button"
++                  onClick={submitReject}
++                  disabled={submitting}
++                  className="h-7 rounded border border-error/50 bg-error/10 px-3 text-[11px] font-medium text-error transition-colors hover:bg-error/20 disabled:opacity-50"
++                  data-testid="git-approval-reject-confirm"
++                >
++                  确认拒绝
++                </button>
++              </>
++            ) : (
++              <>
++                <button
++                  type="button"
++                  onClick={() => setRejectMode(true)}
++                  className="h-7 rounded border border-border px-3 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++                  data-testid="git-approval-reject"
++                >
++                  拒绝
++                </button>
++                <button
++                  type="button"
++                  onClick={submitApprove}
++                  disabled={submitting || (payload.operation === "commit" && (selected.size === 0 || message.trim().length === 0))}
++                  className="h-7 rounded bg-brand-600 px-3 text-[11px] font-medium text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
++                  data-testid="git-approval-approve"
++                >
++                  {submitting
++                    ? "提交中…"
++                    : payload.operation === "commit"
++                      ? `提交 ${selected.size} 个文件`
++                      : "确认推送"}
++                </button>
++              </>
++            )}
++          </div>
++        </div>
++      </div>
++
++      {/* 单文件 diff 弹窗（会话级端点取数 + DiffBody 渲染；关闭态零请求） */}
++      <Modal
++        open={diffState !== null}
++        title={diffState ? `文件改动 · ${diffState.path}` : "文件改动"}
++        onCancel={() => setDiffState(null)}
++        footer={null}
++        width={720}
++      >
++        {diffState?.loading ? (
++          <p className="py-4 text-xs text-muted-foreground">差异加载中…</p>
++        ) : diffState?.error ? (
++          <p className="py-4 text-xs text-error">{diffState.error}</p>
++        ) : diffState?.binary ? (
++          <p className="py-4 text-xs text-muted-foreground">二进制文件，无法展示文本差异。</p>
++        ) : (
++          <>
++            <DiffBody diff={diffState?.diff ?? ""} />
++            {diffState?.truncated ? (
++              <p className="mt-2 text-[11px] text-muted-foreground">差异过长已截断，全量请在 Git 日志页查看。</p>
++            ) : null}
++          </>
++        )}
++      </Modal>
++    </div>
++  );
++}
++
++/* ───────────── 顶层分组（组内目录树 + 勾选） ───────────── */
++
++function FileGroup({
++  label,
++  files,
++  selected,
++  onSelect,
++  onOpenDiff,
++}: {
++  label: string;
++  files: GitApprovalFile[];
++  selected: Set<string>;
++  onSelect: (paths: string[], on: boolean) => void;
++  onOpenDiff: (path: string) => void;
++}) {
++  const [open, setOpen] = useState(true);
++  const fileByPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
++  // 复用 git-log buildFileTree（子树增删聚合内建；字段适配映射）。
++  const tree = useMemo(
++    () => buildFileTree(files.map((f) => ({ path: f.path, add: f.addLines, del: f.delLines, binary: false }))),
++    [files],
++  );
++  return (
++    <div className="border-b border-border/60 last:border-b-0">
++      <button
++        type="button"
++        onClick={() => setOpen(!open)}
++        className="flex w-full items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
++      >
++        {open ? <ChevronDown aria-hidden className="h-3 w-3" /> : <ChevronRight aria-hidden className="h-3 w-3" />}
++        <span className="font-medium">{label}</span>
++        <span className="tabular-nums">({files.length})</span>
++      </button>
++      {open ? (
++        <div className="ml-3 border-l border-border/60">
++          {tree.map((n) => (
++            <TreeNodeRow
++              key={n.path}
++              node={n}
++              depth={0}
++              fileByPath={fileByPath}
++              selected={selected}
++              onSelect={onSelect}
++              onOpenDiff={onOpenDiff}
++            />
++          ))}
++        </div>
++      ) : null}
++    </div>
++  );
++}
++
++/* ───────────── 树行（目录级勾选 + 文件行勾选/增删/徽标/diff 入口） ───────────── */
++
++function TreeNodeRow({
++  node,
++  depth,
++  fileByPath,
++  selected,
++  onSelect,
++  onOpenDiff,
++}: {
++  node: GitLogFileTreeNode;
++  depth: number;
++  fileByPath: Map<string, GitApprovalFile>;
++  selected: Set<string>;
++  onSelect: (paths: string[], on: boolean) => void;
++  onOpenDiff: (path: string) => void;
++}) {
++  const isLeaf = node.children.length === 0;
++  const [open, setOpen] = useState(true);
++  const leafPaths = useMemo(() => (isLeaf ? [node.path] : collectLeafPaths(node)), [isLeaf, node]);
++  const selCount = leafPaths.filter((p) => selected.has(p)).length;
++  const file = isLeaf ? fileByPath.get(node.path) : undefined;
++  const meta = file ? STATUS_META[file.status] : undefined;
++
++  if (isLeaf) {
++    const name = node.path.split("/").pop() ?? node.path;
++    return (
++      <label
++        className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted/60"
++        style={{ paddingLeft: `${depth * 14 + 6}px` }}
++        data-testid={`git-approval-file-${node.path}`}
++      >
++        <input
++          type="checkbox"
++          checked={selected.has(node.path)}
++          onChange={(e) => onSelect([node.path], e.target.checked)}
++          className="h-3 w-3 accent-brand-600"
++        />
++        {meta ? <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotCls)} /> : null}
++        <span className={cn("min-w-0 flex-1 truncate font-mono", meta?.cls)} title={node.path}>
++          {name}
++        </span>
++        <span className="shrink-0 font-mono text-[10px] tabular-nums">
++          <span className="text-success">+{node.add}</span> <span className="text-error">-{node.del}</span>
++        </span>
++        {meta ? (
++          <span className={cn("shrink-0 rounded border border-border px-1 text-[10px]", meta.cls)}>{meta.label}</span>
++        ) : null}
++        <span
++          role="button"
++          tabIndex={0}
++          title="查看改动"
++          onClick={(e) => {
++            e.preventDefault();
++            e.stopPropagation();
++            onOpenDiff(node.path);
++          }}
++          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
++        >
++          <FileText aria-hidden className="h-3 w-3" />
++        </span>
++      </label>
++    );
++  }
++
++  return (
++    <div>
++      <div
++        className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
++        style={{ paddingLeft: `${depth * 14 + 6}px` }}
++      >
++        <button
++          type="button"
++          onClick={() => setOpen(!open)}
++          aria-label={open ? "折叠目录" : "展开目录"}
++          className="shrink-0 cursor-pointer"
++        >
++          {open ? <ChevronDown aria-hidden className="h-3 w-3" /> : <ChevronRight aria-hidden className="h-3 w-3" />}
++        </button>
++        <input
++          type="checkbox"
++          checked={selCount === leafPaths.length && leafPaths.length > 0}
++          ref={(el) => {
++            if (el) el.indeterminate = selCount > 0 && selCount < leafPaths.length;
++          }}
++          onChange={(e) => onSelect(leafPaths, e.target.checked)}
++          title={`目录级勾选（${selCount}/${leafPaths.length} 已选）`}
++          className="h-3 w-3 accent-brand-600"
++        />
++        <span className="truncate font-mono">{node.name}/</span>
++        <span className="ml-auto flex shrink-0 items-center gap-2">
++          <span className="font-mono text-[10px] tabular-nums">
++            <span className="text-success">+{node.add}</span> <span className="text-error">-{node.del}</span>
++          </span>
++          <span className="tabular-nums text-[10px] text-muted-foreground/70">
++            {selCount}/{leafPaths.length}
++          </span>
++        </span>
++      </div>
++      {open ? (
++        <div className="border-l border-border/60" style={{ marginLeft: `${depth * 14}px` }}>
++          {node.children.map((c) => (
++            <TreeNodeRow
++              key={c.path}
++              node={c}
++              depth={0}
++              fileByPath={fileByPath}
++              selected={selected}
++              onSelect={onSelect}
++              onOpenDiff={onOpenDiff}
++            />
++          ))}
++        </div>
++      ) : null}
++    </div>
++  );
++}
++
++/* ───────────── push 态单条提交行（可展开文件明细，D-015 纯浏览） ───────────── */
++
++function AheadCommitRow({
++  commit,
++  open,
++  onToggle,
++}: {
++  commit: GitApprovalAheadCommit;
++  open: boolean;
++  onToggle: () => void;
++}) {
++  const totalAdd = commit.files.reduce((s, f) => s + f.addLines, 0);
++  const totalDel = commit.files.reduce((s, f) => s + f.delLines, 0);
++  return (
++    <div className="rounded px-1 py-1 text-xs hover:bg-muted/60" data-testid={`git-approval-ahead-${commit.sha}`}>
++      <button type="button" onClick={onToggle} className="flex w-full items-start gap-2 text-left">
++        {open ? (
++          <ChevronDown aria-hidden className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
++        ) : (
++          <ChevronRight aria-hidden className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
++        )}
++        <span className="mt-0.5 shrink-0 rounded border border-border bg-muted/50 px-1 font-mono text-[10px] text-muted-foreground">
++          {commit.sha}
++        </span>
++        <span className="min-w-0 flex-1">
++          <span className="block truncate text-foreground" title={commit.subject}>
++            {commit.subject}
++          </span>
++          <span className="block text-[10px] text-muted-foreground/80">
++            {commit.author} · {commit.date} · {commit.fileCount ?? commit.files.length} 个文件{" "}
++            <span className="text-success">+{totalAdd}</span> <span className="text-error">-{totalDel}</span>
++          </span>
++        </span>
++      </button>
++      {open ? (
++        <div className="mt-1 ml-7 rounded border border-border/70 bg-muted/20 px-1.5 py-1">
++          {commit.files.map((f) => {
++            const meta = STATUS_META[f.status];
++            const dir = f.path.split("/").slice(0, -1).join("/");
++            const name = f.path.split("/").pop() ?? f.path;
++            return (
++              <div key={f.path} className="flex items-center gap-2 rounded px-1 py-0.5 text-[11px] hover:bg-muted/60">
++                <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotCls)} />
++                <span className={cn("min-w-0 flex-1 truncate font-mono", meta.cls)} title={f.path}>
++                  {dir ? `${dir}/` : ""}
++                  <span className="text-foreground">{name}</span>
++                </span>
++                <span className="shrink-0 font-mono text-[10px] tabular-nums">
++                  <span className="text-success">+{f.addLines}</span> <span className="text-error">-{f.delLines}</span>
++                </span>
++                <span className={cn("shrink-0 rounded border border-border px-1 text-[10px]", meta.cls)}>
++                  {meta.label}
++                </span>
++              </div>
++            );
++          })}
++          {commit.filesTruncated ? (
++            <p className="px-1 py-0.5 text-[10px] text-muted-foreground">
++              …（该提交共 {commit.fileCount ?? commit.files.length} 个文件，超出 50 条展示上限）
++            </p>
++          ) : null}
++        </div>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/pending-dialog-dock.tsx b/frontend/src/components/daemon/pending-dialog-dock.tsx
+index a2ce5223b..5629fbcb0 100644
+--- a/frontend/src/components/daemon/pending-dialog-dock.tsx
++++ b/frontend/src/components/daemon/pending-dialog-dock.tsx
+@@ -28,6 +28,7 @@
+ import { useCallback, useEffect, useRef, useState } from "react";
+ 
+ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
++import { GitApprovalCard } from "@/components/daemon/git-approval-card";
+ import { ErrorBoundary } from "@/components/error-boundary";
+ import {
+   MinimizedDialogCapsule,
+@@ -137,17 +138,31 @@ export function PendingDialogDock({
+           {pendingRequests.map((req) => (
+             <ErrorBoundary
+               key={req.request_id}
+-              label="ask-user-dialog-card"
++              label={req.dialog_kind === "git_approval" ? "git-approval-card" : "ask-user-dialog-card"}
+               fallback={() => (
+-                <div className="text-[11px] text-red-600/70">提问卡片渲染失败</div>
++                <div className="text-[11px] text-red-600/70">
++                  {req.dialog_kind === "git_approval" ? "Git 确认卡渲染失败" : "提问卡片渲染失败"}
++                </div>
+               )}
+             >
+-              <AskUserDialogCard
+-                request={req}
+-                minimized={minimizedIds.has(req.request_id)}
+-                onMinimize={handleMinimize}
+-                onResolved={onResolved}
+-              />
++              {req.dialog_kind === "git_approval" ? (
++                // 2026-11-06-session-git-approval task-12 / D-009：git 审批确认卡
++                //（dialog_kind='git_approval' 分流；props 面与 AskUser 卡同构，
++                // 双模式挂载由本 dock 统一承载——panel 对带 kind 请求无差别放行）。
++                <GitApprovalCard
++                  request={req}
++                  minimized={minimizedIds.has(req.request_id)}
++                  onMinimize={handleMinimize}
++                  onResolved={onResolved}
++                />
++              ) : (
++                <AskUserDialogCard
++                  request={req}
++                  minimized={minimizedIds.has(req.request_id)}
++                  onMinimize={handleMinimize}
++                  onResolved={onResolved}
++                />
++              )}
+             </ErrorBoundary>
+           ))}
+         </div>
+diff --git a/frontend/src/components/prototype/git-approval-view.tsx b/frontend/src/components/prototype/git-approval-view.tsx
+new file mode 100644
+index 000000000..3b670bac6
+--- /dev/null
++++ b/frontend/src/components/prototype/git-approval-view.tsx
+@@ -0,0 +1,713 @@
++/**
++ * 会话 git 提交/推送确认对话卡原型视图（2026-11-06-session-git-approval）。
++ *
++ * 展示 agent 触发 git commit/push 时在会话页弹出的「git 确认对话卡」形态：
++ * AskUserQuestion 同款对话卡外壳（替换输入栏位置），内容为 git 确认面板——
++ * commit 态（msg 编辑 + 文件树勾选 + diff 入口）/ push 态（目标分支 + 警示）/
++ * 拒绝态（原因填写）三态。
++ *
++ * 素材来源声明（真码五要素）：
++ *   - 对话卡外壳：frontend/src/components/ask-user-dialog-card.tsx 卡头/按钮组
++ *     同方言复刻（border-brand-200 / bg-brand-50/60 头部、Button size sm）；
++ *   - 文件树行：frontend/src/components/git-log/worktree-changes-card.tsx
++ *     StatusTreeRows 目录树行 + WORKTREE_STATUS_META 四色状态徽标同方言复刻
++ *     （text-success/text-primary/text-error line-through/text-muted-foreground）；
++ *   - token：语义阶全走 styles/themes.ts（brand 系列、border、bg-card 等，随 data-theme 换肤）；
++ *   - 图标：lucide-react 真实依赖（GitBranch/GitCommitHorizontal/GitPullRequest/
++ *     FileText/Minus/ChevronRight/ChevronDown/Minimize2）；
++ *   - 交互：prototype-build 内嵌 data-state-btn / data-state-panel 三态切换，
++ *     初始态名必须是 commit（脚本默认 setState("commit")）。
++ *
++ * 预填勾选规则（D-008 设计，段 2）：命令带 pathspec 勾 pathspec；-a 勾全部
++ * tracked 改动；都无勾当前暂存区；暂存区空勾全部改动。本原型 fixture 演示
++ * 「agent 已 git add 两个文件、另有未暂存改动与未跟踪文件」的典型场景：
++ * 默认勾选 = 暂存区两文件，用户可增选。
++ */
++import * as React from "react";
++import {
++  ChevronDown,
++  ChevronRight,
++  FileText,
++  GitBranch,
++  Minimize2,
++} from "lucide-react";
++
++import { DemoBar } from "./demo-chrome";
++
++/* ───────────── 文件状态元数据（WORKTREE_STATUS_META 同方言） ───────────── */
++
++type FileStatus = "added" | "modified" | "deleted" | "untracked";
++
++const STATUS_META: Record<FileStatus, { label: string; cls: string; dotCls: string }> = {
++  added: { label: "新增", cls: "text-success", dotCls: "bg-success" },
++  modified: { label: "修改", cls: "text-primary", dotCls: "bg-primary" },
++  deleted: { label: "删除", cls: "text-error line-through", dotCls: "bg-error" },
++  untracked: { label: "未跟踪", cls: "text-muted-foreground", dotCls: "bg-muted-foreground" },
++};
++
++interface GitFileItem {
++  path: string;
++  status: FileStatus;
++  /** 是否在暂存区（agent 已 git add）。 */
++  staged: boolean;
++  /** 预填勾选（默认提交范围）。 */
++  defaultSelected: boolean;
++  /** 增/删行数（git diff --numstat，暂存区文件取 --cached 口径）。 */
++  addLines: number;
++  delLines: number;
++}
++
++/* ───────────── 勾选文件行（StatusTreeRows 同方言 + checkbox） ───────────── */
++
++function FileRow({ f }: { f: GitFileItem }) {
++  const meta = STATUS_META[f.status];
++  // 目录树形态：行内只显 basename，父路径由层级表达（git-log 工作区更改同款）
++  const name = f.path.split("/").pop() ?? f.path;
++  return (
++    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted/60">
++      <input type="checkbox" defaultChecked={f.defaultSelected} className="h-3 w-3 accent-brand-600" />
++      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotCls}`} />
++      <span className={`min-w-0 flex-1 truncate font-mono ${meta.cls}`} title={f.path}>
++        {name}
++      </span>
++      {/* 增删行数（numstat 口径；增绿删红 tabular-nums） */}
++      <span className="shrink-0 font-mono text-[10px] tabular-nums">
++        <span className="text-success">+{f.addLines}</span>{" "}
++        <span className="text-error">-{f.delLines}</span>
++      </span>
++      <span className={`shrink-0 rounded border border-border px-1 text-[10px] ${meta.cls}`}>
++        {meta.label}
++      </span>
++      {f.staged ? (
++        <span className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
++          已暂存
++        </span>
++      ) : null}
++      {/* 单文件 diff 入口（实现复用 WorktreeDiffModal；原型仅示意按钮形态） */}
++      <span
++        role="button"
++        tabIndex={0}
++        title="查看改动"
++        className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
++      >
++        <FileText aria-hidden className="h-3 w-3" />
++      </span>
++    </label>
++  );
++}
++
++/* ───────────── 目录树（buildFileTree 同方言：路径段逐级折叠 + 目录级勾选） ───────────── */
++
++interface TreeNode {
++  name: string;
++  path: string;
++  children: Map<string, TreeNode>;
++  files: GitFileItem[];
++}
++
++function buildTree(files: GitFileItem[]): TreeNode {
++  const root: TreeNode = { name: "", path: "", children: new Map(), files: [] };
++  for (const f of files) {
++    const parts = f.path.split("/");
++    let node = root;
++    for (let i = 0; i < parts.length - 1; i++) {
++      const seg = parts[i];
++      if (seg === undefined) continue;
++      if (!node.children.has(seg)) {
++        node.children.set(seg, {
++          name: seg,
++          path: parts.slice(0, i + 1).join("/"),
++          children: new Map(),
++          files: [],
++        });
++      }
++      const next = node.children.get(seg);
++      if (!next) break;
++      node = next;
++    }
++    node.files.push(f);
++  }
++  return root;
++}
++
++function countFiles(node: TreeNode): number {
++  let n = node.files.length;
++  for (const c of node.children.values()) n += countFiles(c);
++  return n;
++}
++
++/** 子树增删行数聚合（目录行显示总改动量）。 */
++function sumLines(node: TreeNode): { add: number; del: number } {
++  let add = 0;
++  let del = 0;
++  for (const f of node.files) {
++    add += f.addLines;
++    del += f.delLines;
++  }
++  for (const c of node.children.values()) {
++    const s = sumLines(c);
++    add += s.add;
++    del += s.del;
++  }
++  return { add, del };
++}
++
++function TreeDirRow({ node, depth }: { node: TreeNode; depth: number }) {
++  const [open, setOpen] = React.useState(true);
++  const total = countFiles(node);
++  const selected = node.files.filter((f) => f.defaultSelected).length;
++  const { add, del } = sumLines(node);
++  return (
++    <div>
++      <div
++        className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
++        style={{ paddingLeft: `${depth * 14 + 6}px` }}
++      >
++        <button
++          type="button"
++          onClick={() => setOpen(!open)}
++          aria-label={open ? "折叠目录" : "展开目录"}
++          className="shrink-0 cursor-pointer"
++        >
++          {open ? (
++            <ChevronDown aria-hidden className="h-3 w-3" />
++          ) : (
++            <ChevronRight aria-hidden className="h-3 w-3" />
++          )}
++        </button>
++        {/* 目录级勾选：勾目录 = 勾该目录下全部文件（递归） */}
++        <input
++          type="checkbox"
++          defaultChecked={selected > 0}
++          title={`目录级勾选（${selected}/${total} 已选）`}
++          className="h-3 w-3 accent-brand-600"
++        />
++        <span className="truncate font-mono">{node.name}/</span>
++        <span className="ml-auto flex shrink-0 items-center gap-2">
++          {/* 子树增删聚合（与文件行同口径） */}
++          <span className="font-mono text-[10px] tabular-nums">
++            <span className="text-success">+{add}</span>{" "}
++            <span className="text-error">-{del}</span>
++          </span>
++          <span className="tabular-nums text-[10px] text-muted-foreground/70">
++            {selected}/{total}
++          </span>
++        </span>
++      </div>
++      {open ? <TreeChildren node={node} depth={depth + 1} /> : null}
++    </div>
++  );
++}
++
++function TreeChildren({ node, depth }: { node: TreeNode; depth: number }) {
++  return (
++    <div className="border-l border-border/60" style={{ marginLeft: `${depth * 14}px` }}>
++      {[...node.children.values()]
++        .sort((a, b) => a.name.localeCompare(b.name))
++        .map((c) => (
++          <TreeDirRow key={c.path} node={c} depth={0} />
++        ))}
++      {node.files.map((f) => (
++        <FileRow key={f.path} f={f} />
++      ))}
++    </div>
++  );
++}
++
++/* ───────────── 状态分组（顶层三分组，组内目录树——工作区更改同款） ───────────── */
++
++function GroupHeader({
++  label,
++  count,
++  files,
++  defaultOpen = true,
++}: {
++  label: string;
++  count: number;
++  files: GitFileItem[];
++  defaultOpen?: boolean;
++}) {
++  const [open, setOpen] = React.useState(defaultOpen);
++  const tree = buildTree(files);
++  return (
++    <div className="mt-1">
++      <button
++        type="button"
++        onClick={() => setOpen(!open)}
++        className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
++      >
++        {open ? (
++          <ChevronDown aria-hidden className="h-3 w-3" />
++        ) : (
++          <ChevronRight aria-hidden className="h-3 w-3" />
++        )}
++        <span className="font-medium">{label}</span>
++        <span className="tabular-nums">({count})</span>
++      </button>
++      {open ? (
++        <div className="ml-3 border-l border-border/60">
++          <TreeChildren node={tree} depth={0} />
++        </div>
++      ) : null}
++    </div>
++  );
++}
++
++/* fixture：典型场景——agent 已 add 两个文件，另有未暂存改动与未跟踪文件 */
++const FIXTURE_FILES: GitFileItem[] = [
++  { path: "backend/app/modules/daemon/permission_service.py", status: "modified", staged: true, defaultSelected: true, addLines: 38, delLines: 4 },
++  { path: "backend/app/modules/daemon/router/notify.py", status: "modified", staged: true, defaultSelected: true, addLines: 12, delLines: 2 },
++  { path: "frontend/src/components/git-approval/git-approval-card.tsx", status: "added", staged: false, defaultSelected: false, addLines: 216, delLines: 0 },
++  { path: "frontend/src/components/git-approval/__tests__/git-approval-card.test.tsx", status: "added", staged: false, defaultSelected: false, addLines: 88, delLines: 0 },
++  { path: "sillyhub-daemon/src/interactive/git-command-guard.ts", status: "modified", staged: false, defaultSelected: false, addLines: 142, delLines: 6 },
++  { path: "sillyhub-daemon/src/interactive/git-executor.ts", status: "modified", staged: false, defaultSelected: false, addLines: 95, delLines: 3 },
++  { path: "docs/notes.md", status: "untracked", staged: false, defaultSelected: false, addLines: 17, delLines: 0 },
++];
++
++/* ───────────── 对话卡外壳（ask-user-dialog-card 同方言） ───────────── */
++
++function DialogShell({
++  title,
++  subtitle,
++  children,
++}: {
++  title: React.ReactNode;
++  subtitle?: React.ReactNode;
++  children: React.ReactNode;
++}) {
++  return (
++    <div className="rounded-lg border border-border bg-card shadow-sm">
++      <div className="flex items-start justify-between gap-2 rounded-t-lg border-b border-brand-200 bg-brand-50/60 px-4 py-2.5">
++        <div className="min-w-0">
++          <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
++            {title}
++          </p>
++          {subtitle ? (
++            <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
++          ) : null}
++        </div>
++        {/* 最小化胶囊入口（PendingDialogDock 既有行为） */}
++        <button
++          type="button"
++          title="最小化为待决策胶囊"
++          className="shrink-0 rounded p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
++        >
++          <Minimize2 aria-hidden className="h-3.5 w-3.5" />
++        </button>
++      </div>
++      <div className="px-4 py-3">{children}</div>
++    </div>
++  );
++}
++
++/* 主按钮/次按钮（shadcn button 规格：size sm h-7 text-[11px] 同方言） */
++function BtnPrimary({ children }: { children: React.ReactNode }) {
++  return (
++    <button
++      type="button"
++      className="h-7 rounded bg-brand-600 px-3 text-[11px] font-medium text-white transition-colors hover:bg-brand-700"
++    >
++      {children}
++    </button>
++  );
++}
++function BtnGhost({ children }: { children: React.ReactNode }) {
++  return (
++    <button
++      type="button"
++      className="h-7 rounded border border-border px-3 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++    >
++      {children}
++    </button>
++  );
++}
++
++/* ───────────── 态一：commit 确认卡 ───────────── */
++
++function CommitCard() {
++  const selectedCount = FIXTURE_FILES.filter((f) => f.defaultSelected).length;
++  return (
++    <DialogShell
++      title={
++        <>
++          <GitBranch aria-hidden className="h-4 w-4 text-brand-600" />
++          Git 提交确认
++          <span className="ml-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] font-normal text-muted-foreground">
++            main
++          </span>
++        </>
++      }
++      subtitle="Agent 请求提交代码，请确认提交信息与文件范围后执行"
++    >
++      {/* 原始命令（等宽，供对照 agent 意图） */}
++      <p className="mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
++        $ git commit -m "feat(daemon): git 提交人工接管——识别与挂起"
++      </p>
++      {/* commit msg 编辑（预填解析值，用户可改） */}
++      <label className="mb-1 block text-xs font-medium text-foreground">
++        提交信息（可修改）
++      </label>
++      <textarea
++        defaultValue={'feat(daemon): git 提交人工接管——识别与挂起\n\n- git-command-guard 复合命令拆段识别\n- dialog_kind=git_approval 挂起等待用户确认'}
++        rows={4}
++        className="mb-3 w-full resize-y rounded border border-border bg-background px-2 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none"
++      />
++      {/* 文件范围（工作区更改卡同款：顶层状态分组 + 组内目录树 + 四色状态 + 勾选） */}
++      <p className="mb-1 text-xs font-medium text-foreground">
++        提交文件范围（勾选 {selectedCount} 个）
++      </p>
++      <div className="mb-3 max-h-56 overflow-y-auto rounded border border-border">
++        <GroupHeader
++          label="已暂存"
++          count={FIXTURE_FILES.filter((f) => f.staged).length}
++          files={FIXTURE_FILES.filter((f) => f.staged)}
++        />
++        <GroupHeader
++          label="未暂存改动"
++          count={FIXTURE_FILES.filter((f) => !f.staged && f.status !== "untracked").length}
++          files={FIXTURE_FILES.filter((f) => !f.staged && f.status !== "untracked")}
++        />
++        <GroupHeader
++          label="未跟踪"
++          count={FIXTURE_FILES.filter((f) => f.status === "untracked").length}
++          files={FIXTURE_FILES.filter((f) => f.status === "untracked")}
++        />
++      </div>
++      <div className="flex items-center justify-between gap-2">
++        <span className="text-[11px] text-muted-foreground">
++          批准后由平台代为执行提交，结果自动回传给 Agent
++        </span>
++        <div className="flex shrink-0 gap-2">
++          <BtnGhost>拒绝</BtnGhost>
++          <BtnPrimary>提交 {selectedCount} 个文件</BtnPrimary>
++        </div>
++      </div>
++    </DialogShell>
++  );
++}
++
++/* ───────────── 态二：push 确认卡 ───────────── */
++
++/* fixture：待推送提交按条明细（≤20 条，超出显统计行；D-014/D-015——单条可展开文件明细）。 */
++interface AheadCommitFile {
++  path: string;
++  status: FileStatus | "renamed";
++  addLines: number;
++  delLines: number;
++}
++const AHEAD_COMMITS: {
++  sha: string;
++  subject: string;
++  author: string;
++  date: string;
++  files: AheadCommitFile[];
++}[] = [
++  {
++    sha: "a1b2c3d",
++    subject: "feat(daemon): git 提交人工接管——识别与挂起",
++    author: "qinyi",
++    date: "11-06 23:12",
++    files: [
++      { path: "sillyhub-daemon/src/interactive/git-command-guard.ts", status: "added", addLines: 142, delLines: 0 },
++      { path: "sillyhub-daemon/src/interactive/session-manager/permission.ts", status: "modified", addLines: 38, delLines: 4 },
++    ],
++  },
++  {
++    sha: "e4f5a6b",
++    subject: "test(daemon): git-command-guard 复合命令拆段用例",
++    author: "qinyi",
++    date: "11-06 23:26",
++    files: [
++      { path: "sillyhub-daemon/tests/interactive/git-command-guard.test.ts", status: "added", addLines: 96, delLines: 0 },
++    ],
++  },
++  {
++    sha: "c7d8e9f",
++    subject: "docs(spec): 2026-11-06-session-git-approval 四件套",
++    author: "qinyi",
++    date: "11-06 23:41",
++    files: [
++      { path: ".sillyspec/changes/2026-11-06-session-git-approval/design.md", status: "added", addLines: 253, delLines: 0 },
++      { path: ".sillyspec/changes/2026-11-06-session-git-approval/decisions.md", status: "added", addLines: 88, delLines: 0 },
++    ],
++  },
++];
++
++/** 展开态文件明细行（与提交确认卡同款展示：状态点 + basename + +/- 统计；纯浏览无勾选）。 */
++const RENAMED_META = { label: "重命名", cls: "text-muted-foreground", dotCls: "bg-muted-foreground" };
++
++function CommitFileRows({ files }: { files: AheadCommitFile[] }) {
++  return (
++    <div className="mt-1 ml-7 flex flex-col rounded border border-border/70 bg-muted/20 px-1.5 py-1">
++      {files.map((f) => {
++        const meta = f.status === "renamed" ? RENAMED_META : STATUS_META[f.status];
++        const name = f.path.split("/").pop() ?? f.path;
++        const dir = f.path.split("/").slice(0, -1).join("/");
++        return (
++          <div key={f.path} className="flex items-center gap-2 rounded px-1 py-0.5 text-[11px] hover:bg-muted/60">
++            <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotCls}`} />
++            <span className={`min-w-0 flex-1 truncate font-mono ${meta.cls}`} title={f.path}>
++              {dir ? `${dir}/` : ""}
++              <span className="text-foreground">{name}</span>
++            </span>
++            <span className="shrink-0 font-mono text-[10px] tabular-nums">
++              <span className="text-success">+{f.addLines}</span>{" "}
++              <span className="text-error">-{f.delLines}</span>
++            </span>
++            <span className={`shrink-0 rounded border border-border px-1 text-[10px] ${meta.cls}`}>
++              {meta.label}
++            </span>
++          </div>
++        );
++      })}
++    </div>
++  );
++}
++
++/** 单条待推送提交（可展开文件明细，D-015）。 */
++function AheadCommitRow({
++  c,
++  defaultOpen = false,
++}: {
++  c: (typeof AHEAD_COMMITS)[number];
++  defaultOpen?: boolean;
++}) {
++  const [open, setOpen] = React.useState(defaultOpen);
++  const totalAdd = c.files.reduce((s, f) => s + f.addLines, 0);
++  const totalDel = c.files.reduce((s, f) => s + f.delLines, 0);
++  return (
++    <div className="rounded px-1 py-1 text-xs hover:bg-muted/60">
++      <button
++        type="button"
++        onClick={() => setOpen(!open)}
++        className="flex w-full items-start gap-2 text-left"
++      >
++        {open ? (
++          <ChevronDown aria-hidden className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
++        ) : (
++          <ChevronRight aria-hidden className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
++        )}
++        <span className="mt-0.5 shrink-0 rounded border border-border bg-muted/50 px-1 font-mono text-[10px] text-muted-foreground">
++          {c.sha}
++        </span>
++        <span className="min-w-0 flex-1">
++          <span className="block truncate text-foreground" title={c.subject}>
++            {c.subject}
++          </span>
++          <span className="block text-[10px] text-muted-foreground/80">
++            {c.author} · {c.date} · {c.files.length} 个文件{" "}
++            <span className="text-success">+{totalAdd}</span>{" "}
++            <span className="text-error">-{totalDel}</span>
++          </span>
++        </span>
++      </button>
++      {open ? <CommitFileRows files={c.files} /> : null}
++    </div>
++  );
++}
++
++function PushCard() {
++  return (
++    <DialogShell
++      title={
++        <>
++          <GitBranch aria-hidden className="h-4 w-4 text-brand-600" />
++          Git 推送确认
++        </>
++      }
++      subtitle="Agent 请求推送代码，请确认目标与提交内容后执行"
++    >
++      <p className="mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
++        $ sillyspec push
++      </p>
++      <div className="mb-3 flex flex-col gap-1.5 rounded border border-border px-3 py-2.5 text-xs">
++        <div className="flex items-center justify-between">
++          <span className="text-muted-foreground">目标仓库</span>
++          <span className="font-mono text-foreground">origin</span>
++        </div>
++        <div className="flex items-center justify-between">
++          <span className="text-muted-foreground">目标分支</span>
++          <span className="flex items-center gap-1.5 font-mono text-foreground">
++            main
++            {/* 保护分支警示徽标（D-006：警示不硬拦） */}
++            <span className="rounded border border-error/40 bg-error/10 px-1.5 py-0.5 text-[10px] font-medium text-error">
++              保护分支 · 推送影响远端主线
++            </span>
++          </span>
++        </div>
++        <div className="flex items-center justify-between">
++          <span className="text-muted-foreground">待推送提交</span>
++          <span className="tabular-nums text-foreground">
++            {AHEAD_COMMITS.length} 个提交（领先远端 {AHEAD_COMMITS.length}）
++          </span>
++        </div>
++      </div>
++      {/* 待推送提交按条明细（D-014：sha+首行+作者/日期；D-015：点开单条展开文件明细） */}
++      <p className="mb-1 text-xs font-medium text-foreground">将推送的提交</p>
++      <div className="mb-3 flex max-h-56 flex-col gap-0.5 overflow-y-auto rounded border border-border px-2 py-1.5">
++        {AHEAD_COMMITS.map((c, i) => (
++          <AheadCommitRow key={c.sha} c={c} defaultOpen={i === 0} />
++        ))}
++      </div>
++      {/* runner=sillyspec 压扁语义提示（D-013） */}
++      <p className="mb-3 rounded border border-brand-200 bg-brand-50/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
++        该推送经 <code className="font-mono">sillyspec push</code> 发起：确认后将按变更段压扁本地提交再快进推送（压扁语义由平台代执行保留）。
++      </p>
++      <div className="flex items-center justify-between gap-2">
++        <span className="text-[11px] text-muted-foreground">
++          批准后由平台代为执行推送，结果自动回传给 Agent
++        </span>
++        <div className="flex shrink-0 gap-2">
++          <BtnGhost>拒绝</BtnGhost>
++          <BtnPrimary>确认推送</BtnPrimary>
++        </div>
++      </div>
++    </DialogShell>
++  );
++}
++
++/* ───────────── 态三：拒绝原因填写 ───────────── */
++
++function RejectCard() {
++  return (
++    <DialogShell
++      title={
++        <>
++          <GitBranch aria-hidden className="h-4 w-4 text-brand-600" />
++          Git 提交确认
++          <span className="ml-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] font-normal text-muted-foreground">
++            main
++          </span>
++        </>
++      }
++      subtitle="拒绝后将把原因反馈给 Agent，它可调整后重新发起"
++    >
++      <p className="mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
++        $ git commit -m "feat(daemon): git 提交人工接管——识别与挂起"
++      </p>
++      <p className="mb-1 text-xs font-medium text-foreground">拒绝原因（将反馈给 Agent）</p>
++      <div className="mb-2 flex flex-wrap gap-1.5">
++        {["提交信息不符合规范", "文件范围不对", "还有改动没包含", "先不提交"].map((r) => (
++          <button
++            key={r}
++            type="button"
++            className="rounded-full border border-border px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++          >
++            {r}
++          </button>
++        ))}
++      </div>
++      <textarea
++        placeholder="或自由填写拒绝原因……"
++        rows={2}
++        className="mb-3 w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none"
++      />
++      <div className="flex items-center justify-end gap-2">
++        <BtnGhost>返回确认卡</BtnGhost>
++        <button
++          type="button"
++          className="h-7 rounded border border-error/50 bg-error/10 px-3 text-[11px] font-medium text-error transition-colors hover:bg-error/20"
++        >
++          确认拒绝
++        </button>
++      </div>
++    </DialogShell>
++  );
++}
++
++/* ───────────── 态说明行 ───────────── */
++
++function StateNote({ children }: { children: React.ReactNode }) {
++  return (
++    <p className="mt-2 rounded border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
++      {children}
++    </p>
++  );
++}
++
++const STATES: [string, string][] = [
++  ["commit", "提交确认（主形态）"],
++  ["push", "推送确认"],
++  ["reject", "拒绝原因填写"],
++];
++
++const CHROME = "rounded-lg border border-border bg-card px-5 pb-4 pt-3 shadow-sm";
++
++export function GitApprovalView() {
++  return (
++    <div className="min-h-screen bg-background text-foreground">
++      <DemoBar />
++      <div className="mx-auto max-w-3xl px-4 py-6">
++        <h1 className="mb-1 text-lg font-semibold">会话 · Git 提交/推送确认卡</h1>
++        <p className="mb-4 text-xs text-muted-foreground">
++          2026-11-06-session-git-approval · agent 触发 git commit/push 时拦截挂起，
++          会话页弹出 AskUserQuestion 同款对话卡（替换输入栏位置，可最小化）；
++          用户二次修改提交信息与文件范围，点「提交/推送」后由平台代执行并回喂
++          agent。刷新页面卡片不丢（dialog 落库恢复）。
++        </p>
++
++        {/* 状态切换按钮（内嵌 vanilla JS 切换面板） */}
++        <div className="mb-4 flex flex-wrap gap-1.5">
++          {STATES.map(([k, label]) => (
++            <button
++              key={k}
++              type="button"
++              data-state-btn={k}
++              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++            >
++              {label}
++            </button>
++          ))}
++        </div>
++
++        {/* 态一：commit 确认卡（主形态） */}
++        <div data-state-panel="commit" className={CHROME}>
++          <p className="mb-2 text-[11px] font-medium text-muted-foreground">
++            ── 会话输入栏位置（PendingDialogDock 替换输入框，下方为消息流末尾） ──
++          </p>
++          <CommitCard />
++          <StateNote>
++            <strong>提交确认（主形态）</strong>：预填 agent 的 commit msg 与提交
++            范围（本例 agent 已 <code className="font-mono">git add</code> 两个
++            文件→默认勾选暂存区；未暂存/未跟踪按需增选）。文件列表为 git 日志页
++            「工作区更改」同款<strong>目录树</strong>（顶层状态三分组：已暂存/
++            未暂存改动/未跟踪；组内按路径逐级折叠，文件行只显文件名，父路径由
++            层级表达）+ 四色状态徽标 + 行内 checkbox；目录节点支持目录级勾选
++            （勾目录 = 勾其下全部文件，右侧显示已选/总数）；点{" "}
++            <FileText aria-hidden className="inline h-3 w-3" /> 看单文件 diff
++            （复用 WorktreeDiffModal）。
++          </StateNote>
++        </div>
++
++        {/* 态二：push 确认卡 */}
++        <div data-state-panel="push" className={CHROME} style={{ display: "none" }}>
++          <p className="mb-2 text-[11px] font-medium text-muted-foreground">
++            ── 会话输入栏位置（PendingDialogDock 替换输入框，下方为消息流末尾） ──
++          </p>
++          <PushCard />
++          <StateNote>
++            <strong>推送确认</strong>：不涉及 msg 与文件勾选——展示目标 remote/
++            分支、<strong>待推送提交按条明细</strong>（每条 sha 徽标 + 提交首行 +
++            作者/日期，≤20 条超出显统计，D-014）；经{" "}
++            <code className="font-mono">sillyspec push</code> 发起的推送显示压扁
++            语义提示（确认后按变更段压扁再推送，D-013）；
++            <strong>main/master 显示红色保护分支警示徽标但不硬拦</strong>（D-006：
++            用户点击即视为用户授权）。
++          </StateNote>
++        </div>
++
++        {/* 态三：拒绝原因填写 */}
++        <div data-state-panel="reject" className={CHROME} style={{ display: "none" }}>
++          <p className="mb-2 text-[11px] font-medium text-muted-foreground">
++            ── 会话输入栏位置（PendingDialogDock 替换输入框，下方为消息流末尾） ──
++          </p>
++          <RejectCard />
++          <StateNote>
++            <strong>拒绝</strong>：快捷原因 + 自由填写，回喂 agent 后它可修改
++            msg/文件范围重新发起（与计划审批 deny.message 同构，D-007）。
++          </StateNote>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 088df015a..c19b0e44f 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -6601,6 +6601,31 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/git-diff": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Session Git Diff
++         * @description 会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。
++         *
++         *     git 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/
++         *     已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``
++         *     RPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``
++         *     模块 docstring（组件复用 git_status.py）。
++         */
++        get: operations["get_session_git_diff_api_daemon_sessions__session_id__git_diff_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/fork": {
+         parameters: {
+             query?: never;
+@@ -26431,6 +26456,45 @@ export interface components {
+             tier: "native" | "seed";
+             lineage: components["schemas"]["SessionForkLineage"];
+         };
++        /**
++         * SessionGitDiffResponse
++         * @description 单文件 diff 响应（schema 在本文件定义——design 数据模型节）。
++         */
++        SessionGitDiffResponse: {
++            /**
++             * Git Mode
++             * @enum {string}
++             */
++            git_mode: "git" | "no_git" | "no_root";
++            /** Root */
++            root?: string | null;
++            /**
++             * Root Source
++             * @default none
++             * @enum {string}
++             */
++            root_source: "worktree" | "cwd" | "workspace_root" | "none";
++            /** Path */
++            path?: string | null;
++            /** Status */
++            status?: string | null;
++            /** Head Short */
++            head_short?: string | null;
++            /** Diff */
++            diff?: string | null;
++            /**
++             * Truncated
++             * @default false
++             */
++            truncated: boolean;
++            /**
++             * Binary
++             * @default false
++             */
++            binary: boolean;
++            /** Synced At */
++            synced_at: string;
++        };
+         /** SessionGitStatusResponse */
+         SessionGitStatusResponse: {
+             /**
+@@ -30051,6 +30115,10 @@ export interface components {
+         /**
+          * VectorSearchOut
+          * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
++         *
++         *     index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
++         *     已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
++         *     不受影响，字段供观测与测试断言。
+          */
+         VectorSearchOut: {
+             /**
+@@ -30067,6 +30135,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * VectorSearchResultItem
+@@ -41884,6 +41954,40 @@ export interface operations {
+             };
+         };
+     };
++    get_session_git_diff_api_daemon_sessions__session_id__git_diff_get: {
++        parameters: {
++            query: {
++                /** @description 工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底） */
++                path: string;
++            };
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["SessionGitDiffResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     fork_session_api_daemon_sessions__session_id__fork_post: {
+         parameters: {
+             query?: never;
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 088df015a..c19b0e44f 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -6601,6 +6601,31 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/sessions/{session_id}/git-diff": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Session Git Diff
++         * @description 会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。
++         *
++         *     git 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/
++         *     已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``
++         *     RPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``
++         *     模块 docstring（组件复用 git_status.py）。
++         */
++        get: operations["get_session_git_diff_api_daemon_sessions__session_id__git_diff_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/sessions/{session_id}/fork": {
+         parameters: {
+             query?: never;
+@@ -26431,6 +26456,45 @@ export interface components {
+             tier: "native" | "seed";
+             lineage: components["schemas"]["SessionForkLineage"];
+         };
++        /**
++         * SessionGitDiffResponse
++         * @description 单文件 diff 响应（schema 在本文件定义——design 数据模型节）。
++         */
++        SessionGitDiffResponse: {
++            /**
++             * Git Mode
++             * @enum {string}
++             */
++            git_mode: "git" | "no_git" | "no_root";
++            /** Root */
++            root?: string | null;
++            /**
++             * Root Source
++             * @default none
++             * @enum {string}
++             */
++            root_source: "worktree" | "cwd" | "workspace_root" | "none";
++            /** Path */
++            path?: string | null;
++            /** Status */
++            status?: string | null;
++            /** Head Short */
++            head_short?: string | null;
++            /** Diff */
++            diff?: string | null;
++            /**
++             * Truncated
++             * @default false
++             */
++            truncated: boolean;
++            /**
++             * Binary
++             * @default false
++             */
++            binary: boolean;
++            /** Synced At */
++            synced_at: string;
++        };
+         /** SessionGitStatusResponse */
+         SessionGitStatusResponse: {
+             /**
+@@ -30051,6 +30115,10 @@ export interface components {
+         /**
+          * VectorSearchOut
+          * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
++         *
++         *     index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
++         *     已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
++         *     不受影响，字段供观测与测试断言。
+          */
+         VectorSearchOut: {
+             /**
+@@ -30067,6 +30135,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * VectorSearchResultItem
+@@ -41884,6 +41954,40 @@ export interface operations {
+             };
+         };
+     };
++    get_session_git_diff_api_daemon_sessions__session_id__git_diff_get: {
++        parameters: {
++            query: {
++                /** @description 工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底） */
++                path: string;
++            };
++            header?: never;
++            path: {
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["SessionGitDiffResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     fork_session_api_daemon_sessions__session_id__fork_post: {
+         parameters: {
+             query?: never;
+diff --git a/sillyhub-daemon/src/interactive/git-approval-collector.ts b/sillyhub-daemon/src/interactive/git-approval-collector.ts
+new file mode 100644
+index 000000000..6f0db04e4
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/git-approval-collector.ts
+@@ -0,0 +1,408 @@
++/**
++ * git-approval-collector —— git 审批确认卡的工作区采集器（2026-11-06-session-git-approval task-02）。
++ *
++ * 职责：对命中工作区只读采集（git status --porcelain=v2 -z --branch + numstat 双口径 +
++ * push 态 ahead 提交明细），组装 GitApprovalPayload 数据面（含 task-01 resolveDefaultSelection
++ * 预填），按 R-03 容量截断（files>500 仅统计 / 每提交 files>50 截断 / ahead>20 显统计）。
++ *
++ * 先例与铁律：
++ *  - 执行形态对齐 turn-file-changes.ts（GIT_BASE_ARGS 恒带 --no-optional-locks 与
++ *    core.quotePath=false；spawn 数组形参不经 shell；execFile 可注入供单测）；
++ *  - porcelain v2 的 `1` 条目 path 分隔符是空格不是 \t（知识库实证坑）——本实现用
++ *    `-z` NUL 终止条目 + 固定前缀字段数（slice(8).join(" ") 取 path），空格/中文路径天然安全；
++ *  - rename（`2` 条目）取 new 路径归 renamed 状态（-z 下 origPath 是随后的独立 NUL 段，跳过）；
++ *  - ESM import 带 .js；只读采集不抛裸错（失败面由调用方 task-03 收口）。
++ */
++import { execFile } from "node:child_process";
++
++import {
++  resolveDefaultSelection,
++  type GitCommandIntent,
++  type WorkspaceStatus,
++} from "./git-command-guard.js";
++
++/* ───────────── 类型（GitApprovalPayload 数据面，design 接口定义冻结） ───────────── */
++
++export type GitApprovalFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
++
++export interface GitApprovalFile {
++  path: string;
++  status: GitApprovalFileStatus;
++  /** 是否在暂存区（agent 已 git add）。 */
++  staged: boolean;
++  /** 增行数（staged 取 --cached 口径，未暂存取工作区口径）。 */
++  addLines: number;
++  delLines: number;
++}
++
++export interface GitApprovalAheadCommit {
++  sha: string;
++  subject: string;
++  author: string;
++  date: string;
++  files: { path: string; status: GitApprovalFileStatus; addLines: number; delLines: number }[];
++  /** 该提交文件明细被截断（>50）时 true，卡片显示统计行。 */
++  filesTruncated?: boolean;
++  fileCount?: number;
++}
++
++export interface GitApprovalPayload {
++  operation: "commit" | "push";
++  command: string;
++  worktree: string;
++  branch: string;
++  message: string;
++  /** push：remote/ref 展示串（缺省 origin + 当前分支）。 */
++  remoteTarget?: string;
++  runner?: "git" | "sillyspec";
++  /** push：目标分支为 main/master 时 true（D-006 警示数据）。 */
++  protectedBranch?: boolean;
++  /** push：待推送提交明细（≤20 条；ahead>20 时 aheadTruncated=true）。 */
++  aheadCommits?: GitApprovalAheadCommit[];
++  aheadTruncated?: boolean;
++  aheadCount?: number;
++  files: GitApprovalFile[];
++  /** 工作区文件清单被截断（>500）时 true——files 仅样本、fileCount 为全量数，卡片显示统计。 */
++  filesTruncated?: boolean;
++  fileCount?: number;
++  /** 采集降级标记（task-03 fail-closed 降级面：采集失败时最小 payload 携带的提示文案）。 */
++  collectError?: string;
++  defaultSelected: string[];
++}
++
++/** 可注入执行器（先例 turn-file-changes.ts defaultExecFile 同方言；测试注入 fixture）。 */
++export interface GitApprovalExecFile {
++  (args: string[], opts: { cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<{
++    stdout: string;
++    stderr: string;
++  }>;
++}
++
++export interface CollectGitApprovalCtx {
++  cwd: string;
++  sessionId?: string;
++  execFile?: GitApprovalExecFile;
++  signal?: AbortSignal;
++  /** 单条 git 子命令超时（默认 8s）。 */
++  timeoutMs?: number;
++}
++
++/* ───────────── 常量（先例 GIT_BASE_ARGS 同款） ───────────── */
++
++const GIT_BASE_ARGS = [
++  "-c",
++  "core.preloadIndex=true",
++  "-c",
++  "core.quotePath=false",
++  "--no-optional-locks",
++] as const;
++
++const GIT_MAX_BUFFER = 16 * 1024 * 1024;
++const DEFAULT_TIMEOUT_MS = 8_000;
++
++/** R-03 容量截断三档。 */
++const MAX_WORKSPACE_FILES = 500;
++const MAX_COMMIT_FILES = 50;
++const MAX_AHEAD_COMMITS = 20;
++/** 采样条数（截断态仍给前端少量样本渲染形态）。 */
++const TRUNCATED_SAMPLE_SIZE = 50;
++
++/** push 保护分支（D-006：警示不硬拦）。 */
++const PROTECTED_BRANCHES = new Set(["main", "master"]);
++
++/* ───────────── 默认执行器（禁 shell，数组形参） ───────────── */
++
++const defaultExecFile: GitApprovalExecFile = (args, opts) =>
++  new Promise((resolvePromise, rejectPromise) => {
++    execFile(
++      "git",
++      args,
++      {
++        cwd: opts.cwd,
++        timeout: opts.timeoutMs,
++        maxBuffer: GIT_MAX_BUFFER,
++        windowsHide: true,
++        signal: opts.signal,
++        encoding: "utf8",
++      },
++      (error, stdout, stderr) => {
++        if (error) {
++          rejectPromise(Object.assign(error, { stderr }));
++          return;
++        }
++        resolvePromise({ stdout: stdout ?? "", stderr: stderr ?? "" });
++      },
++    );
++  });
++
++/* ───────────── porcelain v2 -z --branch 解析 ───────────── */
++
++export interface ParsedStatus {
++  branch: string;
++  ahead: number;
++  behind: number;
++  files: { path: string; status: GitApprovalFileStatus; staged: boolean; renameFrom?: string }[];
++}
++
++/**
++ * 解析 `git status --porcelain=v2 -z --branch` 输出。
++ * 条目 NUL 终止；`2`（rename）条目的 origPath 是随后的独立 NUL 段（取 new 路径，orig 跳过）。
++ */
++export function parsePorcelainV2Z(stdout: string): ParsedStatus {
++  const segments = stdout.split("\0").filter((s) => s.length > 0);
++  const result: ParsedStatus = { branch: "", ahead: 0, behind: 0, files: [] };
++  let skipNext = false;
++  for (const seg of segments) {
++    if (skipNext) {
++      skipNext = false;
++      continue;
++    }
++    if (seg.startsWith("# branch.head ")) {
++      result.branch = seg.slice("# branch.head ".length);
++      continue;
++    }
++    if (seg.startsWith("# branch.ab ")) {
++      const m = /# branch\.ab \+(\d+) -(\d+)/.exec(seg);
++      if (m) {
++        result.ahead = Number(m[1]);
++        result.behind = Number(m[2]);
++      }
++      continue;
++    }
++    if (seg.startsWith("# ")) continue; // 其余 header 行（oid/upstream）忽略
++    if (seg.startsWith("? ")) {
++      result.files.push({ path: seg.slice(2), status: "untracked", staged: false });
++      continue;
++    }
++    if (seg.startsWith("! ")) continue; // ignored 不采集（v1 卡片不含忽略组）
++    if (seg.startsWith("1 ") || seg.startsWith("2 ")) {
++      const isRename = seg.startsWith("2 ");
++      // 固定前缀字段数：1/2 条目均为 8 个空格分隔字段（`<N> XY sub mH mI mW hH hI <path>`），
++      // path 从第 9 列起原样拼（空格分隔实证坑的正确解法）。
++      const cols = seg.split(" ");
++      const xy = cols[1] ?? "..";
++      const path = cols.slice(8).join(" ");
++      if (!path) continue;
++      const staged = xy.length > 0 && xy[0] !== ".";
++      const flag = (staged ? xy[0] : xy[1]) ?? "M";
++      const status: GitApprovalFileStatus =
++        flag === "A" || flag === "C"
++          ? "added"
++          : flag === "D"
++            ? "deleted"
++            : flag === "R"
++              ? "renamed"
++              : "modified";
++      const entry: ParsedStatus["files"][number] = { path, status, staged };
++      if (isRename) skipNext = true; // 下一个 NUL 段是 origPath（取 new 路径，orig 跳过）
++      result.files.push(entry);
++      continue;
++    }
++    if (seg.startsWith("u ")) continue; // unmerged v1 简化跳过（罕见态，卡片以 git-log 页全量兜底）
++  }
++  return result;
++}
++
++/* ───────────── numstat 解析（tab 三列；binary `-`；缺省 0） ───────────── */
++
++export function parseNumstat(stdout: string): Map<string, { addLines: number; delLines: number }> {
++  const map = new Map<string, { addLines: number; delLines: number }>();
++  for (const line of stdout.split("\n")) {
++    if (!line) continue;
++    const cols = line.split("\t");
++    if (cols.length < 3) continue;
++    const a = cols[0];
++    const d = cols[1];
++    const path = cols.slice(2).join("\t");
++    map.set(path, {
++      addLines: a === "-" || a === undefined ? 0 : Number(a) || 0,
++      delLines: d === "-" || d === undefined ? 0 : Number(d) || 0,
++    });
++  }
++  return map;
++}
++
++/* ───────────── ahead 提交明细解析（name-status 与 numstat 按 sha join） ───────────── */
++
++const FIELD_SEP = "\x1f";
++
++/** 解析 `git log --format=\0<sha>\x1f<subject>\x1f<author>\x1f<date> --name-status`（--max-count=21 探边）。 */
++export function parseLogNameStatus(stdout: string): Map<string, {
++  sha: string;
++  subject: string;
++  author: string;
++  date: string;
++  files: { path: string; status: GitApprovalFileStatus; addLines?: number; delLines?: number }[];
++}> {
++  const commits = new Map<string, { sha: string; subject: string; author: string; date: string; files: { path: string; status: GitApprovalFileStatus; addLines?: number; delLines?: number }[] }>();
++  let current: { sha: string; subject: string; author: string; date: string; files: { path: string; status: GitApprovalFileStatus }[] } | null = null;
++  for (const seg of stdout.split("\0")) {
++    for (const line of seg.split("\n")) {
++      if (!line) continue;
++      if (line.includes(FIELD_SEP)) {
++        const [sha = "", subject = "", author = "", date = ""] = line.split(FIELD_SEP);
++        current = { sha, subject, author, date, files: [] };
++        commits.set(sha, current);
++        continue;
++      }
++      if (!current) continue;
++      // name-status 行：`M\tpath` / `R100\told\tnew`（tab 分隔；rename 取 new 路径）
++      const cols = line.split("\t");
++      const raw = cols[0] ?? "";
++      if (raw.length === 0) continue;
++      const kind = raw[0];
++      if (kind === "R" || kind === "C") {
++        const newPath = cols[2];
++        if (newPath !== undefined) {
++          current.files.push({ path: newPath, status: kind === "R" ? "renamed" : "added" });
++        }
++        continue;
++      }
++      const path = cols.slice(1).join("\t");
++      if (!path) continue;
++      const status: GitApprovalFileStatus =
++        kind === "A" ? "added" : kind === "D" ? "deleted" : "modified";
++      current.files.push({ path, status });
++    }
++  }
++  return commits;
++}
++
++/** 解析 `git log --format=\0<sha> --numstat`，为 parseLogNameStatus 的结果回填增删行数。 */
++export function applyLogNumstat(stdout: string, commits: Map<string, { files: { path: string; addLines?: number; delLines?: number }[] }>): void {
++  let current: { files: { path: string; addLines?: number; delLines?: number }[] } | null = null;
++  for (const seg of stdout.split("\0")) {
++    for (const line of seg.split("\n")) {
++      if (!line) continue;
++      if (!line.includes("\t")) {
++        current = commits.get(line) ?? null;
++        continue;
++      }
++      if (!current) continue;
++      const cols = line.split("\t");
++      const a = cols[0];
++      const d = cols[1];
++      const path = cols.slice(2).join("\t");
++      const file = current.files.find((f) => f.path === path);
++      if (file) {
++        file.addLines = a === "-" || a === undefined ? 0 : Number(a) || 0;
++        file.delLines = d === "-" || d === undefined ? 0 : Number(d) || 0;
++      }
++    }
++  }
++}
++
++/* ───────────── 主函数 ───────────── */
++
++/** 只读采集并组装 GitApprovalPayload（R-03 三档截断内建）。 */
++export async function collectGitApprovalPayload(
++  intent: GitCommandIntent,
++  ctx: CollectGitApprovalCtx,
++): Promise<GitApprovalPayload> {
++  const run = ctx.execFile ?? defaultExecFile;
++  const cwd = intent.workDir ?? ctx.cwd;
++  const timeoutMs = ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS;
++  const opts = { cwd, timeoutMs, signal: ctx.signal };
++
++  const statusOut = await run([...GIT_BASE_ARGS, "status", "--porcelain=v2", "-z", "--branch"], opts);
++  const parsed = parsePorcelainV2Z(statusOut.stdout);
++
++  // numstat 双口径：未暂存（工作区 vs index）/ 已暂存（index vs HEAD）。
++  const unstagedOut = await run([...GIT_BASE_ARGS, "diff", "--numstat"], opts);
++  const stagedOut = await run([...GIT_BASE_ARGS, "diff", "--cached", "--numstat"], opts);
++  const unstagedNum = parseNumstat(unstagedOut.stdout);
++  const stagedNum = parseNumstat(stagedOut.stdout);
++
++  const allFiles: GitApprovalFile[] = parsed.files.map((f) => {
++    const num = f.staged ? stagedNum.get(f.path) : unstagedNum.get(f.path);
++    return {
++      path: f.path,
++      status: f.status,
++      staged: f.staged,
++      addLines: num?.addLines ?? 0,
++      delLines: num?.delLines ?? 0,
++    };
++  });
++
++  // 预填勾选（D-012 四分支，基于未截断全量状态计算）。
++  const workspaceStatus: WorkspaceStatus = {
++    files: parsed.files.map((f) => ({
++      path: f.path,
++      status: f.status === "renamed" ? "modified" : f.status,
++      staged: f.staged,
++    })),
++  };
++  const selected = resolveDefaultSelection(intent, workspaceStatus);
++
++  // R-03 截断①：工作区 files>500 → 仅样本 + 统计。
++  const filesTruncated = allFiles.length > MAX_WORKSPACE_FILES;
++  const files = filesTruncated ? allFiles.slice(0, TRUNCATED_SAMPLE_SIZE) : allFiles;
++
++  const payload: GitApprovalPayload = {
++    operation: intent.operation,
++    command: intent.command,
++    worktree: cwd,
++    branch: parsed.branch,
++    message: intent.message,
++    files,
++    defaultSelected: [...selected],
++  };
++  if (filesTruncated) {
++    payload.filesTruncated = true;
++    payload.fileCount = allFiles.length;
++  }
++
++  if (intent.operation === "push") {
++    const remote = intent.pushTarget.remote ?? "origin";
++    const ref = intent.pushTarget.ref ?? parsed.branch;
++    payload.remoteTarget = `${remote}/${ref}`;
++    payload.runner = intent.runner;
++    payload.protectedBranch = PROTECTED_BRANCHES.has(ref) || PROTECTED_BRANCHES.has(ref.split("/").pop() ?? "");
++    payload.aheadCount = parsed.ahead;
++
++    // ahead 明细（≤20 条；21 条探边显统计）。无上游分支（@{u} 不存在）→ 明细空。
++    // git --format 转义语言：NUL/US 分别写 %x00/%x1f（JS 字面 \0 是真实控制字符，
++    // 传 execFile 会抛 invalid argument，且 git 不认 JS 转义）。
++    const logArgs = (diffArgs: string[]) => [
++      ...GIT_BASE_ARGS,
++      "log",
++      "@{u}..HEAD",
++      "--max-count=21",
++      ...diffArgs,
++    ];
++    try {
++      const nsOut = await run(
++        logArgs(["--format=%x00%H%x1f%s%x1f%an%x1f%ad", "--name-status"]),
++        opts,
++      );
++      const commits = parseLogNameStatus(nsOut.stdout);
++      const numOut = await run(logArgs(["--format=%x00%H", "--numstat"]), opts);
++      applyLogNumstat(numOut.stdout, commits);
++      const list = [...commits.values()];
++      payload.aheadTruncated = list.length > MAX_AHEAD_COMMITS;
++      payload.aheadCommits = list.slice(0, MAX_AHEAD_COMMITS).map((c) => {
++        // R-03 截断②：每提交 files>50 → 截断样本 + 统计。
++        const truncated = c.files.length > MAX_COMMIT_FILES;
++        const files = (truncated ? c.files.slice(0, TRUNCATED_SAMPLE_SIZE) : c.files).map((f) => ({
++          path: f.path,
++          status: f.status,
++          addLines: f.addLines ?? 0,
++          delLines: f.delLines ?? 0,
++        }));
++        return {
++          sha: c.sha,
++          subject: c.subject,
++          author: c.author,
++          date: c.date,
++          files,
++          ...(truncated ? { filesTruncated: true, fileCount: c.files.length } : {}),
++        };
++      });
++    } catch {
++      // 无上游分支等场景：明细缺省（卡片显示 aheadCount 统计），不阻断审批卡。
++      payload.aheadCommits = [];
++    }
++  }
++
++  return payload;
++}
+diff --git a/sillyhub-daemon/src/interactive/git-command-guard.ts b/sillyhub-daemon/src/interactive/git-command-guard.ts
+new file mode 100644
+index 000000000..b6e715795
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/git-command-guard.ts
+@@ -0,0 +1,407 @@
++/**
++ * git-command-guard —— agent Bash 命令的 git 写操作识别纯函数（2026-11-06-session-git-approval task-01）。
++ *
++ * 职责：把一段 shell 命令按 && / || / ; / | / 换行拆段，逐段识别 git commit / git push /
++ * sillyspec push（推送形态），产出 GitCommandIntent 供挂载点（task-03 permission.ts /
++ * task-04 driver-factory.ts）拦截挂起；未命中返回 null 放行原路径（FR-01，R-01/R-09）。
++ *
++ * 纯函数铁律（task-01 constraints）：不 spawn 子进程、不读盘、不读环境变量、不抛错——
++ * 任何解析异常返回 null。逃生阀 SILLYHUB_GIT_APPROVAL 由挂载层判断，不在本模块。
++ * ESM 无外部依赖（无 import）；平台无关解析（不假设路径分隔符/工作目录）。
++ *
++ * 决策依据：D-003（只拦 commit/push）、D-012（预填勾选规则）、D-013（sillyspec push
++ * 识别——--dry-run/--no-push/--undo 无推送副作用不拦）、R-01（复合命令拆段防
++ * 「git add ... && git commit」前缀绕过，知识库实证坑）。
++ */
++
++/** push 的执行载体：裸 git push / sillyspec push CLI（后者确认后原样代执行保留压扁语义）。 */
++export type GitRunner = "git" | "sillyspec";
++
++export interface GitPushTarget {
++  /** push 目标 remote（位置参数第一个；缺省 null = 默认 origin）。 */
++  remote: string | null;
++  /** push 目标 ref（位置参数第二个；缺省 null = 当前分支）。 */
++  ref: string | null;
++}
++
++/** 拆解一段 shell 命令后识别出的 git 写操作意图。 */
++export interface GitCommandIntent {
++  operation: "commit" | "push";
++  runner: GitRunner;
++  /** 命中段原始命令文本（供确认卡展示 agent 意图；runner=sillyspec 时代执行原样执行）。 */
++  command: string;
++  /** commit：解析出的 msg（-m 多段空格拼接 / --message=；无则空串）。push 恒空串。 */
++  message: string;
++  /** commit：-F/--file 指定的 msg 文件路径（guard 纯函数不读盘，挂载层读取内容填 payload.message）。 */
++  messageFile: string | null;
++  /** commit：命令显式指定的 pathspec（未指定为 null，配合 allTracked 判定预填）。 */
++  pathspec: string[] | null;
++  /** commit：是否带 -a/--all（全部 tracked 改动）。 */
++  allTracked: boolean;
++  /** push：目标 remote/ref（缺省 null → 默认 origin+当前分支）。commit 恒 {remote:null,ref:null}。 */
++  pushTarget: GitPushTarget;
++  /** git -C <path> 指定的工作目录（无则 null = agent cwd）。 */
++  workDir: string | null;
++}
++
++/** resolveDefaultSelection 消费的最小工作区状态（task-02 采集产出对齐）。 */
++export interface WorkspaceStatusFile {
++  path: string;
++  status: "added" | "modified" | "deleted" | "untracked";
++  /** 是否在暂存区（agent 已 git add）。 */
++  staged: boolean;
++}
++
++export interface WorkspaceStatus {
++  files: WorkspaceStatusFile[];
++}
++
++/* ───────────── 拆段（引号感知） ───────────── */
++
++/**
++ * 按分隔符把复合命令拆成子命令段：&& / || / ; / | / 换行。
++ * 引号（单/双）内的分隔符不拆（如 git commit -m "a && b"）。
++ */
++export function splitCommandSegments(command: string): string[] {
++  const segments: string[] = [];
++  let current = "";
++  let quote: '"' | "'" | null = null;
++  const chars = Array.from(command);
++  for (let i = 0; i < chars.length; i++) {
++    const ch = chars[i];
++    if (quote) {
++      current += ch;
++      if (ch === quote) quote = null;
++      continue;
++    }
++    if (ch === '"' || ch === "'") {
++      quote = ch;
++      current += ch;
++      continue;
++    }
++    // 分隔符判定（引号外）：优先匹配双字符 && / ||
++    const two = ch + (chars[i + 1] ?? "");
++    if (two === "&&" || two === "||") {
++      segments.push(current);
++      current = "";
++      i++; // 跳过第二个字符
++      continue;
++    }
++    if (ch === ";" || ch === "|" || ch === "\n") {
++      segments.push(current);
++      current = "";
++      continue;
++    }
++    current += ch;
++  }
++  segments.push(current);
++  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
++}
++
++/** 引号感知的空白分词：带引号参数合并为单 token（值去引号）。导出供 git-executor
++ * 复用（sillyspec 原样代执行的 argv 拆分——单一真相，禁止两份 tokenizer 漂移）。 */
++export function tokenize(segment: string): string[] {
++  const tokens: string[] = [];
++  let current = "";
++  let hasToken = false;
++  let quote: '"' | "'" | null = null;
++  const chars = Array.from(segment);
++  for (const ch of chars) {
++    if (quote) {
++      if (ch === quote) {
++        quote = null;
++      } else {
++        current += ch;
++      }
++      continue;
++    }
++    if (ch === '"' || ch === "'") {
++      quote = ch;
++      hasToken = true;
++      continue;
++    }
++    if (ch === " " || ch === "\t" || ch === "\r") {
++      if (hasToken) {
++        tokens.push(current);
++        current = "";
++        hasToken = false;
++      }
++      continue;
++    }
++    current += ch;
++    hasToken = true;
++  }
++  if (hasToken) tokens.push(current);
++  return tokens;
++}
++
++/** basename（平台无关：/ 与 \ 都认）。 */
++function baseName(token: string): string {
++  const i = Math.max(token.lastIndexOf("/"), token.lastIndexOf("\\"));
++  return i >= 0 ? token.slice(i + 1) : token;
++}
++
++/** 可执行名是否为 git（兼容路径形态与 Windows .exe 后缀）。 */
++function isGitBinary(token: string): boolean {
++  const b = baseName(token);
++  return b === "git" || b === "git.exe";
++}
++
++/** 可执行名是否为 sillyspec CLI（兼容 .cmd/.exe shim 形态）。 */
++function isSillyspecBinary(token: string): boolean {
++  const b = baseName(token);
++  return b === "sillyspec" || b === "sillyspec.cmd" || b === "sillyspec.exe";
++}
++
++/* ───────────── 单段解析 ───────────── */
++
++/** 解析单个 git 段（tokens[0] 为 git 可执行名）；非 commit/push 返回 null。 */
++function parseGitSegment(segment: string, tokens: string[]): GitCommandIntent | null {
++  let i = 1;
++  let workDir: string | null = null;
++  // git 全局参数：仅消费 -C <path>（--git-dir/--work-tree 等 v1 忽略，不影响识别）
++  for (;;) {
++    const t = tokens[i];
++    if (t === undefined || !t.startsWith("-")) break;
++    if (t === "-C") {
++      const v = tokens[i + 1];
++      if (v === undefined) break;
++      workDir = v;
++      i += 2;
++      continue;
++    }
++    if (t.startsWith("--git-dir=") || t.startsWith("--work-tree=") || t === "--no-pager" || t === "--no-replace-objects") {
++      i += 1;
++      continue;
++    }
++    break; // 其它 flag 属于子命令域，交给下方解析
++  }
++  const sub = tokens[i];
++  if (sub === undefined || sub === "") return null;
++  const rest = tokens.slice(i + 1);
++  if (sub === "commit") return parseCommit(segment, rest, workDir);
++  if (sub === "push") return parsePush(segment, rest, workDir);
++  return null; // add/status/log/diff/merge/rebase/reset/checkout 等一律不拦（D-003）
++}
++
++/** git commit 段解析。 */
++function parseCommit(segment: string, rest: string[], workDir: string | null): GitCommandIntent | null {
++  let message = "";
++  let messageFile: string | null = null;
++  let allTracked = false;
++  const pathspec: string[] = [];
++  let j = 0;
++  while (j < rest.length) {
++    const t = rest[j];
++    if (t === undefined) break;
++    if (t === "-m" || t === "--message") {
++      const v = rest[j + 1];
++      if (v !== undefined) {
++        message = message ? `${message} ${v}` : v;
++        j += 2;
++        continue;
++      }
++      j += 1;
++      continue;
++    }
++    if (t.startsWith("--message=")) {
++      const v = t.slice("--message=".length);
++      message = message ? `${message} ${v}` : v;
++      j += 1;
++      continue;
++    }
++    if (t.startsWith("-m") && t.length > 2) {
++      // -m<msg> 连写形态
++      const v = t.slice(2);
++      message = message ? `${message} ${v}` : v;
++      j += 1;
++      continue;
++    }
++    if (t === "-F" || t === "--file") {
++      const v = rest[j + 1];
++      if (v !== undefined) messageFile = v;
++      j += v !== undefined ? 2 : 1;
++      continue;
++    }
++    if (t.startsWith("--file=")) {
++      messageFile = t.slice("--file=".length);
++      j += 1;
++      continue;
++    }
++    if (t === "-a" || t === "--all") {
++      allTracked = true;
++      j += 1;
++      continue;
++    }
++    if (t === "--") {
++      // pathspec 分隔符：其后全部是 pathspec
++      pathspec.push(...rest.slice(j + 1));
++      break;
++    }
++    if (t.startsWith("-")) {
++      // 其它 flag（-q/--no-verify/--amend 等）不拦识别，跳过；带值的常见 flag 跳两格防误收位置参数
++      const valued = ["--author", "-c", "-S", "--gpg-sign", "-t", "--template", "--cleanup", "-e", "--editor"];
++      if (valued.includes(t) && rest[j + 1] !== undefined) {
++        j += 2;
++        continue;
++      }
++      j += 1;
++      continue;
++    }
++    pathspec.push(t);
++    j += 1;
++  }
++  return {
++    operation: "commit",
++    runner: "git",
++    command: segment,
++    message,
++    messageFile,
++    pathspec: pathspec.length > 0 ? pathspec : null,
++    allTracked,
++    pushTarget: { remote: null, ref: null },
++    workDir,
++  };
++}
++
++/** git push 段解析。 */
++function parsePush(segment: string, rest: string[], workDir: string | null): GitCommandIntent | null {
++  const positional: string[] = [];
++  let j = 0;
++  while (j < rest.length) {
++    const t = rest[j];
++    if (t === undefined || t === "--") break;
++    // git push --dry-run 是 git 原生 flag（模拟推送不执行，无推送副作用）——
++    // 与 sillyspec push --dry-run 同判据不拦（D-013 一致性，task-07 用例锚定）。
++    if (t === "--dry-run") return null;
++    if (t.startsWith("-")) {
++      // pushspec refspec（如 HEAD:main / origin main）以非 flag 位置参数出现；
++      // 带值的常见 flag 跳两格（--repo/-u/--recurse-submodules/--receive-pack/-o/--push-option）
++      const valued = ["--repo", "-u", "--recurse-submodules", "--receive-pack", "-o", "--push-option", "--exec"];
++      if (valued.includes(t) && rest[j + 1] !== undefined) {
++        j += 2;
++        continue;
++      }
++      j += 1;
++      continue;
++    }
++    positional.push(t);
++    j += 1;
++  }
++  // `git push <repo> <refspec>`：第一个位置参数 remote（或 pushspec URL），第二个 refspec
++  const remote = positional[0] ?? null;
++  const ref = positional[1] ?? null;
++  return {
++    operation: "push",
++    runner: "git",
++    command: segment,
++    message: "",
++    messageFile: null,
++    pathspec: null,
++    allTracked: false,
++    pushTarget: { remote, ref },
++    workDir,
++  };
++}
++
++/** sillyspec push 段解析（D-013/R-09：--dry-run/--no-push/--undo 无推送副作用不拦）。 */
++function parseSillyspecSegment(segment: string, tokens: string[]): GitCommandIntent | null {
++  if (tokens[1] !== "push") return null;
++  const rest = tokens.slice(2);
++  let remote: string | null = null;
++  let ref: string | null = null;
++  let j = 0;
++  while (j < rest.length) {
++    const t = rest[j];
++    if (t === undefined) break;
++    if (t === "--dry-run" || t === "--no-push" || t === "--undo") {
++      return null; // 无推送副作用，放行（D-013）
++    }
++    if (t === "--remote" && rest[j + 1] !== undefined) {
++      remote = rest[j + 1] as string;
++      j += 2;
++      continue;
++    }
++    if (t.startsWith("--remote=")) {
++      remote = t.slice("--remote=".length);
++      j += 1;
++      continue;
++    }
++    if (t === "--branch" && rest[j + 1] !== undefined) {
++      ref = rest[j + 1] as string;
++      j += 2;
++      continue;
++    }
++    if (t.startsWith("--branch=")) {
++      ref = t.slice("--branch=".length);
++      j += 1;
++      continue;
++    }
++    j += 1; // 其余 flag（--mode one/--change <名>/--json 等）不影响拦判定
++  }
++  return {
++    operation: "push",
++    runner: "sillyspec",
++    command: segment,
++    message: "",
++    messageFile: null,
++    pathspec: null,
++    allTracked: false,
++    pushTarget: { remote, ref },
++    workDir: null,
++  };
++}
++
++/* ───────────── 对外主函数 ───────────── */
++
++/**
++ * 识别一段 shell 命令中的 git 写操作意图（复合命令拆段逐段匹配，首个命中段胜出）。
++ * 未命中 / 解析异常一律返回 null（放行原路径，零影响）。
++ */
++export function detectGitWriteIntent(command: string): GitCommandIntent | null {
++  try {
++    const segments = splitCommandSegments(command);
++    for (const seg of segments) {
++      const tokens = tokenize(seg);
++      if (tokens.length === 0) continue;
++      const head = tokens[0];
++      if (head === undefined) continue;
++      let intent: GitCommandIntent | null = null;
++      if (isGitBinary(head)) {
++        intent = parseGitSegment(seg, tokens);
++      } else if (isSillyspecBinary(head)) {
++        intent = parseSillyspecSegment(seg, tokens);
++      }
++      if (intent) return intent;
++    }
++    return null;
++  } catch {
++    return null; // 纯函数不抛错（task-01 constraints）
++  }
++}
++
++/**
++ * 预填勾选规则（D-012 裁决序）：
++ * ① 命令带 pathspec → 勾 pathspec（与工作区改动交集）；
++ * ② 带 -a → 勾全部 tracked 改动（非 untracked）；
++ * ③ 都无 → 勾当前暂存区（staged）文件；
++ * ④ 暂存区空 → 勾全部改动。
++ */
++export function resolveDefaultSelection(
++  intent: GitCommandIntent,
++  status: WorkspaceStatus,
++): Set<string> {
++  const files = status.files ?? [];
++  if (intent.pathspec && intent.pathspec.length > 0) {
++    const wanted = new Set(intent.pathspec);
++    return new Set(files.filter((f) => wanted.has(f.path)).map((f) => f.path));
++  }
++  if (intent.allTracked) {
++    return new Set(files.filter((f) => f.status !== "untracked").map((f) => f.path));
++  }
++  const staged = files.filter((f) => f.staged);
++  if (staged.length > 0) {
++    return new Set(staged.map((f) => f.path));
++  }
++  return new Set(files.map((f) => f.path));
++}
+diff --git a/sillyhub-daemon/src/interactive/git-executor.ts b/sillyhub-daemon/src/interactive/git-executor.ts
+new file mode 100644
+index 000000000..510ea7324
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/git-executor.ts
+@@ -0,0 +1,294 @@
++/**
++ * git-executor —— git 审批批准后的本机代执行引擎（2026-11-06-session-git-approval
++ * task-05 / D-002「不交回 agent 重跑」/ D-013 runner 分流 / D-018 精确重整）。
++ *
++ * commit 流：porcelain v2 取当前暂存集 → 差集精确重整（reset 仅「已暂存但未勾选」、
++ * add 仅「勾选但未暂存」，**禁止裸 reset**——共享工作区其他会话的 staged 文件不被代清，
++ * 仓纪「不替别人清理」）→ commit（用户改写 msg 单 argv）→ short sha。
++ * push 流：runner=git 代执行 git push；runner=sillyspec 原样代执行 intent.command
++ * 命中段（保守 tokenizer 拆 argv，零附加参数；Windows .cmd shim 解析 js 入口经
++ * process.execPath 执行——execFile 直跑 .cmd 必 EINVAL）。
++ * reject 流：零 git 命令执行（不动暂存区），组拒绝文本返回。
++ *
++ * 先例与铁律：execFile 数组形参不经 shell（host-fs-handler runCmd:598）+ core.quotepath=false
++ *（:750 GIT_QUOTEPATH_OFF_ARGS）+ per-invocation identity 注入（:1254 D-008 机制——
++ * headless daemon 无全局 git config 也能提交）；结果文本含实际提交文件集（R-04——
++ * agent 据此校准暂存区假设）与 stderr 原样（R-05 credential 差异可感知）。
++ */
++import { execFile } from "node:child_process";
++import { existsSync, readFileSync } from "node:fs";
++import { dirname, resolve as pathResolve } from "node:path";
++
++import { parsePorcelainV2Z } from "./git-approval-collector.js";
++import { tokenize, type GitCommandIntent } from "./git-command-guard.js";
++
++/* ───────────── 类型（design 接口定义冻结） ───────────── */
++
++export interface GitExecResult {
++  ok: boolean;
++  /** 回喂 agent 的结果文本（成功含 sha+文件集；失败含 stderr 原样；拒绝含原因）。 */
++  text: string;
++  /** commit 成功时的 short sha。 */
++  sha?: string;
++}
++
++/** 前端回传 GitApprovalResult 的 daemon 侧消费形态（W1 契约冻结结构）。 */
++export interface GitApprovalResult {
++  action: "approve" | "reject";
++  /** 用户改后的 commit msg（approve+commit 必填）。 */
++  message: string;
++  /** approve+commit：最终勾选文件集。 */
++  selectedFiles?: string[];
++  /** reject：拒绝原因。 */
++  reason?: string;
++}
++
++export interface GitExecCtx {
++  cwd: string;
++  sessionId: string;
++  /** 可注入执行器（单测 fixture；默认 execFile 数组形参不经 shell）。 */
++  execFile?: GitExecExecFile;
++  signal?: AbortSignal;
++  /** 单条 git 子命令超时（默认 60s——push 可能慢，宽于采集档）。 */
++  timeoutMs?: number;
++  /** per-invocation git identity（缺省 agent@sillyhub——与 worker 注入同模式，
++   * D-008 机制复用；不依赖宿主全局 config）。 */
++  identity?: { name: string; email: string };
++}
++
++export interface GitExecExecFile {
++  (cmd: string, args: string[], opts: { cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<{
++    stdout: string;
++    stderr: string;
++  }>;
++}
++
++const GIT_MAX_BUFFER = 16 * 1024 * 1024;
++const DEFAULT_TIMEOUT_MS = 60_000;
++/** 路径分批上限（Windows argv 32K 限制，500 文件×长路径需分批）。 */
++const PATH_BATCH = 100;
++/** 回喂文件清单上限（防超长文本刷屏）。 */
++const MAX_LIST_LINES = 50;
++/** git identity 缺省（与 host-fs-handler worker 注入同模式，agent 可追溯）。 */
++const DEFAULT_IDENTITY = { name: "agent", email: "agent@sillyhub" } as const;
++
++const defaultExecFile: GitExecExecFile = (cmd, args, opts) =>
++  new Promise((resolvePromise, rejectPromise) => {
++    execFile(
++      cmd,
++      args,
++      {
++        cwd: opts.cwd,
++        timeout: opts.timeoutMs,
++        maxBuffer: GIT_MAX_BUFFER,
++        windowsHide: true,
++        signal: opts.signal,
++        encoding: "utf8",
++      },
++      (error, stdout, stderr) => {
++        if (error) {
++          rejectPromise(Object.assign(error, { stderr }));
++          return;
++        }
++        resolvePromise({ stdout: stdout ?? "", stderr: stderr ?? "" });
++      },
++    );
++  });
++
++/* ───────────── 小工具 ───────────── */
++
++function identityArgs(identity: { name: string; email: string }): string[] {
++  return ["-c", `user.name=${identity.name}`, "-c", `user.email=${identity.email}`];
++}
++
++function errText(err: unknown): string {
++  if (err instanceof Error) {
++    const stderr = (err as Error & { stderr?: string }).stderr;
++    return stderr && stderr.length > 0 ? stderr : err.message;
++  }
++  return String(err ?? "unknown error");
++}
++
++function listLines(paths: string[]): string {
++  const shown = paths.slice(0, MAX_LIST_LINES).map((p) => `- ${p}`);
++  if (paths.length > MAX_LIST_LINES) {
++    shown.push(`- …（共 ${paths.length} 个文件，已省略 ${paths.length - MAX_LIST_LINES} 条）`);
++  }
++  return shown.join("\n");
++}
++
++/** 分批执行带路径列表的命令（reset/add；argv 长度限制）。 */
++async function runPathBatches(
++  run: (args: string[]) => Promise<unknown>,
++  verb: string,
++  paths: string[],
++): Promise<void> {
++  for (let i = 0; i < paths.length; i += PATH_BATCH) {
++    await run(["--", ...paths.slice(i, i + PATH_BATCH)]);
++    void verb;
++  }
++}
++
++/* ───────────── Windows .cmd shim 解析（runner=sillyspec） ───────────── */
++
++/**
++ * 解析 npm cmd-shim 指向的 js 入口（Windows：execFile 直跑 .cmd 必 EINVAL/ENOENT）。
++ * shim 标准模板含 `"%dp0%\\node_modules\\<pkg>\\...\\.js"` 行——正则抓相对入口，
++ * 相对 shim 目录解析绝对路径。找不到返回 null（按失败回喂，不猜）。
++ */
++export function resolveCmdShimJsEntry(command: string): string | null {
++  if (process.platform !== "win32") return null;
++  // 仅处理裸命令名（含路径形态不解析——PATH 查找超 v1 边界，失败回喂可感知）。
++  if (command.includes("/") || command.includes("\\")) return null;
++  const pathEnv = process.env.PATH ?? "";
++  const exts = [".cmd", ".CMD"];
++  for (const dir of pathEnv.split(";")) {
++    if (!dir) continue;
++    for (const ext of exts) {
++      const shim = pathResolve(dir, command + ext);
++      if (!existsSync(shim)) continue;
++      try {
++        const content = readFileSync(shim, "utf8");
++        const m = /node_modules[\\/]([^"'\r\n]+\.js)/i.exec(content);
++        if (m) return pathResolve(dirname(shim), "node_modules", m[1]!.replace(/\\/g, "/"));
++      } catch {
++        // 读失败按未命中继续找
++      }
++    }
++  }
++  return null;
++}
++
++/* ───────────── 主函数 ───────────── */
++
++/** 代执行入口（task-06 分发调用）。任何失败 ok=false 且 text 含原因（不抛出）。 */
++export async function executeGitApproval(
++  intent: GitCommandIntent,
++  result: GitApprovalResult,
++  ctx: GitExecCtx,
++): Promise<GitExecResult> {
++  const run = ctx.execFile ?? defaultExecFile;
++  const cwd = intent.workDir ?? ctx.cwd;
++  const timeoutMs = ctx.timeoutMs ?? DEFAULT_TIMEOUT_MS;
++  const opts = { cwd, timeoutMs, signal: ctx.signal };
++  const git = (args: string[]) => run("git", ["-c", "core.quotepath=false", "--no-optional-locks", ...args], opts);
++
++  // reject：零 git 命令（不动暂存区，D-007/D-018 拒绝路径）。
++  if (result.action === "reject") {
++    const opLabel = intent.operation === "commit" ? "提交" : "推送";
++    const reason = result.reason && result.reason.length > 0 ? result.reason : "未提供原因";
++    return {
++      ok: false,
++      text: `❌ 用户拒绝了本次${opLabel}：${reason}。暂存区未改动；可调整提交信息或文件范围后重新发起。`,
++    };
++  }
++
++  try {
++    if (intent.operation === "commit") {
++      return await executeCommit(intent, result, { run, git, opts, identity: ctx.identity ?? DEFAULT_IDENTITY });
++    }
++    return await executePush(intent, { run, git, opts, cwd });
++  } catch (err) {
++    return {
++      ok: false,
++      text: `❌ git 代执行失败（${intent.operation}）：${errText(err)}`,
++    };
++  }
++}
++
++interface ExecPass {
++  run: GitExecExecFile;
++  git: (args: string[]) => Promise<{ stdout: string; stderr: string }>;
++  opts: { cwd: string; timeoutMs: number; signal?: AbortSignal };
++}
++
++/** commit 流：精确重整（D-018）→ commit → short sha + 文件集文本（R-04）。 */
++async function executeCommit(
++  intent: GitCommandIntent,
++  result: GitApprovalResult,
++  p: ExecPass & { identity: { name: string; email: string } },
++): Promise<GitExecResult> {
++  const selected = new Set(result.selectedFiles ?? []);
++
++  // 当前暂存集（porcelain v2 -z，与采集器同一解析器——单一真相）。
++  const statusOut = await p.git(["status", "--porcelain=v2", "-z"]);
++  const parsed = parsePorcelainV2Z(statusOut.stdout);
++  const staged = new Set(parsed.files.filter((f) => f.staged).map((f) => f.path));
++
++  // 差集精确重整：reset 仅「已暂存但未勾选」、add 仅「勾选但未暂存」。
++  const toUnstage = [...staged].filter((f) => !selected.has(f));
++  const toAdd = [...selected].filter((f) => !staged.has(f));
++  await runPathBatches((args) => p.git(["reset", "-q", ...args]), "reset", toUnstage);
++  await runPathBatches((args) => p.git(["add", ...args]), "add", toAdd);
++
++  // 提交（用户改写 msg 单 argv；identity per-invocation 注入）。
++  await p.git([...identityArgs(p.identity), "commit", "-m", result.message]);
++
++  // short sha（提交后采集；失败不阻断成功语义）。
++  let sha: string | undefined;
++  try {
++    const rev = await p.git(["rev-parse", "--short", "HEAD"]);
++    sha = rev.stdout.trim();
++  } catch {
++    sha = undefined;
++  }
++
++  const fileList = [...selected];
++  return {
++    ok: true,
++    sha,
++    text: `✅ 已提交${sha ? ` ${sha}` : ""}：${result.message}（${fileList.length} 个文件，由用户在确认卡上批准）\n${listLines(fileList)}`,
++  };
++}
++
++/** push 流：runner 分流（git=显式 push / sillyspec=原样代执行，D-013）。 */
++async function executePush(
++  intent: GitCommandIntent,
++  p: ExecPass & { cwd: string },
++): Promise<GitExecResult> {
++  if (intent.runner === "sillyspec") {
++    // 原样代执行：intent.command 经保守 tokenizer 拆 argv（零附加参数；原命令带
++    // --json 回 json 输出，否则人类可读——输出原样回喂）。不经 shell。
++    const argv = tokenize(intent.command);
++    if (argv.length === 0) {
++      return { ok: false, text: "❌ git 代执行失败（push）：无法解析命令" };
++    }
++    const out = await runSillyspec(p, argv);
++    return {
++      ok: true,
++      text: `✅ 已由平台代执行推送（sillyspec push，压扁语义保留）：\n${out.trim()}`,
++    };
++  }
++  // runner=git：缺省补 origin + 当前分支。
++  const remote = intent.pushTarget.remote ?? "origin";
++  let ref = intent.pushTarget.ref;
++  if (!ref) {
++    const rev = await p.git(["rev-parse", "--abbrev-ref", "HEAD"]);
++    ref = rev.stdout.trim() || "HEAD";
++  }
++  const out = await p.git(["push", remote, ref]);
++  return {
++    ok: true,
++    text: `✅ 已推送到 ${remote}/${ref}（由用户在确认卡上批准）${out.stderr ? `\n${out.stderr.trim()}` : ""}`,
++  };
++}
++
++/** sillyspec 命令执行（Windows .cmd shim → js 入口经 process.execPath）。 */
++async function runSillyspec(p: ExecPass, argv: string[]): Promise<string> {
++  const head = argv[0]!;
++  const rest = argv.slice(1);
++  const bare = head.replace(/^.*[\\/]/, "").replace(/\.(cmd|exe)$/i, "");
++  if (bare !== "sillyspec") {
++    throw new Error(`runner=sillyspec 但命令头非 sillyspec：${head}`);
++  }
++  if (process.platform === "win32" && !head.toLowerCase().endsWith(".exe")) {
++    const jsEntry = resolveCmdShimJsEntry("sillyspec");
++    if (!jsEntry) {
++      throw new Error("Windows 下未能在 PATH 解析 sillyspec cmd-shim 的 js 入口（.cmd 无法被 execFile 直跑）");
++    }
++    const r = await p.run(process.execPath, [jsEntry, ...rest], p.opts);
++    return r.stdout || r.stderr;
++  }
++  const r = await p.run(head, rest, p.opts);
++  return r.stdout || r.stderr;
++}
+diff --git a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+index 49ee5fe1a..d33efe6b0 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+@@ -33,6 +33,7 @@ import {
+ } from '../../mcp-config.js';
+ // ql-20260920-004：主模型 one_m 补 [1m] 后缀（与 injector 规则 3/5 同源约定）。
+ import { withOneMSuffix } from '../../credential-injector.js';
++import { withGitApprovalBefore } from './permission.js';
+ import type {
+   CanUseToolFn,
+   DriverOptionsSpec,
+@@ -372,11 +373,27 @@ export function buildDriverOptions(
+     // 不依赖 resolver/wsClient（纯本地校验）：写工具白名单外 deny、白名单内 allow；
+     // 读工具 / 其他 allow（读自由）。SDK 不会因 canUseTool 注入而走人审（人审只在
+     // approvalReady 分支内经 resolver.register 触发）。
++    //
++    // D-016（2026-11-06-session-git-approval task-04）：git 审批最小接线——本分支
++    // 是 D-001「默认全局生效」的可达性缺口（原无 resolver/WS 通道，git 分支挂
++    // buildCanUseToolCallback 在此不可达）。factory/wsClient 均在时构造 resolver 存
++    // _resolversBySession（与 approvalReady 分支同时机：会话启动即建，R-12 时序——
++    // 通道初始化不晚于首个 git 命令），并把 withGitApprovalBefore 前置到写校验内层
++    //（git 命令 → dialog 审批挂起；其余命令行为与现状逐字节一致）。任一缺失保持
++    // 现状不接线（fail-soft 不恶化）。
++    let gitApprovalReady = false;
++    if (mgr._permissionResolverFactory && mgr._permissionWsClient) {
++      const gitResolver = mgr._permissionResolverFactory();
++      mgr._resolversBySession.set(state.sessionId, gitResolver);
++      gitApprovalReady = true;
++    }
+     const inner = mgr._buildWriteOnlyCanUseToolCallback(state.sessionId);
+     driverOpts.canUseTool = mgr._wrapWithWriteGuard(
+       state.sessionId,
+       state.provider,
+-      inner,
++      gitApprovalReady
++        ? withGitApprovalBefore(mgr, state.sessionId, inner)
++        : inner,
+     );
+   }
+   // 2026-08-06-public-mcp-server verify 修复（read_only 物制 layer 3 / G3 / D-005@v2）：
+diff --git a/sillyhub-daemon/src/interactive/session-manager/permission.ts b/sillyhub-daemon/src/interactive/session-manager/permission.ts
+index bcca14ec9..e482009b2 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/permission.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/permission.ts
+@@ -12,6 +12,9 @@
+ 
+ import type { PermissionResolver } from '../permission-resolver.js';
+ import type { CanUseToolDecision, SessionState } from '../types.js';
++import { collectGitApprovalPayload } from '../git-approval-collector.js';
++import { detectGitWriteIntent, type GitCommandIntent } from '../git-command-guard.js';
++import { executeGitApproval, type GitApprovalResult } from '../git-executor.js';
+ import { STALE_RUN_WRITE_GRACE_MS } from './types.js';
+ import type {
+   CanUseToolFn,
+@@ -325,6 +328,186 @@ async function requestUserDialogImpl(
+   }
+ }
+ 
++/**
++ * git 审批命中判定（2026-11-06-session-git-approval task-03/task-04 共享单一真相）：
++ * Bash 工具 + 逃生阀未关（SILLYHUB_GIT_APPROVAL 仅精确 'off' 关闭，未设恒 on）+
++ * command 字符串经 guard 识别命中。未命中返回 null（调用方走原路径）。
++ * buildCanUseToolCallback 内联分支与 withGitApprovalBefore 包装器共用，禁止两份漂移。
++ */
++export function matchGitApprovalCall(
++  toolName: string,
++  toolInput: unknown,
++): GitCommandIntent | null {
++  if (
++    toolName === 'Bash' &&
++    process.env.SILLYHUB_GIT_APPROVAL !== 'off' &&
++    toolInput &&
++    typeof (toolInput as Record<string, unknown>)['command'] === 'string'
++  ) {
++    return detectGitWriteIntent(
++      (toolInput as Record<string, unknown>)['command'] as string,
++    );
++  }
++  return null;
++}
++
++/**
++ * git 审批前置包装器（task-04 / D-016）：把 matchGitApprovalCall + handleGitApproval
++ * 前置到任意内层 canUseTool（driver-factory 仅写校验分支用——enableApproval=false 会话
++ * 的 git 审批可达性）。命中 → handleGitApproval（同 task-03 挂载点同一 handler，
++ * 单一真相）；未命中 / state 缺失 → 透传 inner（守卫与写校验语义归内层）。
++ */
++export function withGitApprovalBefore(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  inner: CanUseToolFn,
++): CanUseToolFn {
++  return async (toolName, toolInput, options) => {
++    const intent = matchGitApprovalCall(toolName, toolInput);
++    if (intent) {
++      const state = mgr._store.get(sessionId);
++      // state/currentRunId 缺失：git 审批通道不可达（守卫面交内层，普通工具语义不变）。
++      if (state && state.currentRunId) {
++        const updatedInput: Record<string, unknown> =
++          toolInput && typeof toolInput === 'object'
++            ? (toolInput as Record<string, unknown>)
++            : { value: toolInput };
++        return handleGitApproval(
++          mgr,
++          sessionId,
++          state.currentRunId,
++          state,
++          intent,
++          updatedInput,
++          options,
++        );
++      }
++    }
++    return inner(toolName, toolInput, options);
++  };
++}
++
++/**
++ * git 写操作审批 handler（2026-11-06-session-git-approval task-03 / FR-01 / D-004/D-017）。
++ *
++ * 识别命中后的挂起-响应闭环：采集器组 payload（失败降级最小 payload 继续，**禁止
++ * 因采集失败放行裸 git 命令**——fail-closed）→ resolver.register 携
++ * dialogKind='git_approval'（backend 见 dialog_kind 走 dialog 路径：持久化 + 不 arm
++ * 5min 超时 + SSE 携带 payload 渲染确认卡，D-008 复用零协议改动）→ await 长驻挂起。
++ *
++ * 响应映射（task-06 / D-002/D-007）：
++ *   - allow 且 dialog_result.action=approve → executeGitApproval 代执行（按用户改写
++ *     msg/勾选集精确重整暂存区提交（commit）或按 runner 原样代执行（push/sillyspec，
++ *     D-018/D-013））；执行文本经 deny.message 回喂（canUseTool 唯一回传自定义内容
++ *     通道，AskUserQuestion 先例），原 Bash 命令被 deny 阻止不经 agent 重跑；
++ *   - deny / reject / 畸形 dialog_result（fail-safe 不抛）→ `用户拒绝了本次提交/推送：
++ *     <原因>` 回喂（D-007），暂存区原样，Claude 可调整后重新发起；
++ *   - wrapper 异常 / abort：deny 默认文案不上抛（先例 AskUserQuestion catch）。
++ */
++async function handleGitApproval(
++  mgr: SessionManagerCore,
++  sessionId: string,
++  runId: string,
++  state: SessionState,
++  intent: GitCommandIntent,
++  updatedInput: Record<string, unknown>,
++  options?: { signal?: AbortSignal },
++): ReturnType<CanUseToolFn> {
++  const resolver = mgr._resolversBySession.get(sessionId);
++  const wsClient = mgr._permissionWsClient;
++  if (!resolver || !wsClient) {
++    return {
++      behavior: 'deny',
++      message: `Git approval channel unavailable (session=${sessionId}, run=${runId}); the command was not executed.`,
++    };
++  }
++  // 采集（fail-closed 降级面）：工作区根取 intent.workDir ?? 会话固定 cwd。
++  const cwd = intent.workDir ?? state.cwd;
++  let payload: Awaited<ReturnType<typeof collectGitApprovalPayload>>;
++  try {
++    payload = await collectGitApprovalPayload(intent, {
++      cwd,
++      sessionId,
++      signal: options?.signal,
++    });
++  } catch (err) {
++    const reason = err instanceof Error ? err.message : String(err ?? 'unknown error');
++    // 最小 payload 继续弹卡（分支/清单缺省空态）——不放行裸 git 命令（FR-01 fail-closed）。
++    payload = {
++      operation: intent.operation,
++      command: intent.command,
++      worktree: cwd,
++      branch: '',
++      message: intent.message,
++      files: [],
++      defaultSelected: [],
++      collectError: `工作区状态采集失败：${reason}（文件清单不可用，请谨慎确认）`,
++    };
++  }
++  try {
++    const { promise } = resolver.register({
++      sessionId,
++      runId,
++      toolName: 'Bash',
++      toolInput: updatedInput,
++      signal: options?.signal,
++      send: (msg) => wsClient.send(msg),
++      // 后台锚点态标记（permission-resolver 该态 dialog 也启 5min 兜底 deny——
++      // FR-06 / D-019 fail-safe：后台任务 git 提交自动拒绝回喂）。
++      ...(backgroundTaskFlag(state, mgr) ? { backgroundTask: true } : {}),
++      dialogKind: 'git_approval',
++      dialogPayload: payload as unknown as Record<string, unknown>,
++    });
++    const decision = await promise;
++    // task-06（D-002 代执行接管）：dialog_result 解析（dialogResultOf 收敛入口）。
++    // 畸形/缺 action 字段一律按拒绝处理（fail-safe 不抛——executor 零调用，暂存区原样）。
++    const rawResult = dialogResultOf(decision);
++    const parsed = rawResult && typeof rawResult === 'object' ? (rawResult as Record<string, unknown>) : null;
++    const denyMsg = decision.behavior === 'deny' ? decision.message : undefined;
++    const userReason =
++      parsed && typeof parsed['reason'] === 'string' && parsed['reason'].length > 0
++        ? parsed['reason']
++        : denyMsg && denyMsg.length > 0
++          ? denyMsg
++          : '';
++    const opLabel = intent.operation === 'commit' ? '提交' : '推送';
++
++    if (decision.behavior === 'allow' && parsed && parsed['action'] === 'approve') {
++      // 批准 → executor 代执行（D-002：原命令不经 agent 重跑）。deny.message 是
++      // canUseTool 唯一回传自定义内容给 Claude 的通道（AskUserQuestion 先例）——
++      // 执行文本经此回喂（Claude 把 deny.message 当 tool_result 消费，✅/❌ 文本
++      // 可区分成败），Bash 原命令被 deny 阻止不再执行。
++      const gitResult: GitApprovalResult = {
++        action: 'approve',
++        message: typeof parsed['message'] === 'string' ? parsed['message'] : intent.message,
++        ...(Array.isArray(parsed['selectedFiles'])
++          ? { selectedFiles: parsed['selectedFiles'].filter((p): p is string => typeof p === 'string') }
++          : {}),
++      };
++      const exec = await executeGitApproval(intent, gitResult, {
++        cwd,
++        sessionId,
++      });
++      return { behavior: 'deny', message: exec.text };
++    }
++
++    // deny / reject / 畸形 dialog_result / 超时 / abort → 拒绝文案（零 git 调用）。
++    return {
++      behavior: 'deny',
++      message: userReason
++        ? `用户拒绝了本次${opLabel}：${userReason}`
++        : `用户拒绝了本次${opLabel}，命令未执行；可调整提交信息或文件范围后重新发起。`,
++    };
++  } catch (err) {
++    const reason =
++      err instanceof Error ? err.message : String(err ?? 'unknown error');
++    return {
++      behavior: 'deny',
++      message: `Git 审批通道异常（${reason}），命令未执行；请稍后重试或手动执行。`,
++    };
++  }
++}
++
+ /**
+  * task-08（D-007@v1 / spike-02 §3.7 D2）+ task-09（deny 收敛）：
+  * 构造 canUseTool 远程人审回调。
+@@ -450,6 +633,24 @@ export function buildCanUseToolCallback(
+         };
+       }
+     }
++    // git 写操作拦截（2026-11-06-session-git-approval task-03 / D-017 先序硬约束）：
++    // Bash 命令经 git-command-guard 识别命中 git commit / git push / sillyspec push
++    //（推送形态）→ 采集器组 payload → resolver.register 发 dialog_kind='git_approval'
++    // 长驻挂起（无 5min 兜底；后台锚点态例外走 5min deny fail-safe，D-019）。
++    // 位置必须在 askUserOnly 自动放行之前（D-017）——门户「只问不审」会话的 git
++    // 写操作不漏拦；逃生阀判定收敛于 matchGitApprovalCall（与 task-04 包装器同一真相）。
++    const gitIntent = matchGitApprovalCall(toolName, updatedInput);
++    if (gitIntent) {
++      return await handleGitApproval(
++        mgr,
++        sessionId,
++        runId,
++        state,
++        gitIntent,
++        updatedInput,
++        options,
++      );
++    }
+     // scan 真阻塞（AskUserQuestion-only 策略，改造点 D）：askUserOnly=true 的 session
+     //（scan）AskUserQuestion 已在上方拦截，其他工具 allow-through 让 scan 自动推进；
+     // 默认 askUserOnly=false（全工具人审的 chat）其他工具走 register
+diff --git a/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts b/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+index 8c6fa00e1..e8bb90879 100644
+--- a/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
++++ b/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+@@ -8,7 +8,13 @@
+ //   基类 InteractiveDriverStartOptions 对两字段的契约（"driver 读取并据此决定
+ //   审批行为"）即本接线的设计依据。
+ 
+-import { describe, it, expect, vi } from 'vitest';
++import { beforeEach, describe, it, expect, vi } from 'vitest';
++
++// git 审批接线测试（2026-11-06-session-git-approval task-04）：mock 采集器
++//（采集面在 git-approval-collector.test.ts 覆盖，这里测接线可达性）。
++vi.mock('../../src/interactive/git-approval-collector.js', () => ({
++  collectGitApprovalPayload: vi.fn(),
++}));
+ import { SessionManager } from '../../src/interactive/session-manager.js';
+ import type {
+   InteractiveDriver,
+@@ -123,3 +129,119 @@ describe('审批三态接线（driver-factory → codex 族 driverOpts）', () =
+     expect(opts.sessionPermission).toBeUndefined();
+   }, 15_000);
+ });
++
++// ── git 审批接线（2026-11-06-session-git-approval task-04 / D-016 / R-12）────────
++
++import { collectGitApprovalPayload as collectGitApprovalPayloadRef } from '../../src/interactive/git-approval-collector.js';
++
++describe('git 审批接线（enableApproval=false + writeGuardEnabled 分支）', () => {
++  const collectMock = vi.mocked(collectGitApprovalPayloadRef);
++
++  beforeEach(() => {
++    collectMock.mockReset();
++    delete process.env.SILLYHUB_GIT_APPROVAL;
++  });
++
++  function okPayload() {
++    return {
++      operation: 'commit',
++      command: 'git commit -m x',
++      worktree: 'C:\\work',
++      branch: 'main',
++      message: 'x',
++      files: [],
++      defaultSelected: [],
++    };
++  }
++
++  /** chat 会话（manualApproval=false）+ 写守卫（allowedRootsProvider）+ 通道就绪。 */
++  async function makeChatSession(over?: { wsClient?: unknown }) {
++    const { driver, getOpts } = makeCapturingDriver('claude' as never);
++    const sm = new SessionManager(
++      { drivers: { claude: driver }, ...noopDeps } as never,
++      {
++        manualApproval: true,
++        permissionWsClient: (over?.wsClient ?? permissionWsClient) as never,
++        allowedRootsProvider: () => ['C:\\work'],
++      } as never,
++    );
++    await sm.create({ ...baseInput('claude' as never), manualApproval: false } as never);
++    const opts = getOpts() as unknown as {
++      canUseTool?: (n: string, i: unknown, o?: { signal?: AbortSignal }) => Promise<unknown>;
++    };
++    return { canUseTool: opts.canUseTool, sm };
++  }
++
++  it('R-12：会话启动即拦截可达——首个 Bash git commit 即 resolver.register（dialog_kind=git_approval）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload() as never);
++    const send = vi.fn(() => true);
++    const { canUseTool, sm } = await makeChatSession({ wsClient: { send } });
++    expect(typeof canUseTool).toBe('function');
++    const p = canUseTool!('Bash', { command: 'git commit -m x' }, { signal: undefined });
++    // 等 collect（mock）→ register → send；包对象防 async 展开陷阱（同 task-03 教训）。
++    await new Promise((r) => setTimeout(r, 200));
++    expect(send).toHaveBeenCalledTimes(1);
++    const sent = send.mock.calls[0]![0] as { payload: Record<string, unknown> };
++    expect(sent.payload.dialog_kind).toBe('git_approval');
++    // resolver 已随会话启动构造（D-016 与 approvalReady 分支同时机）。
++    expect(sm.getPermissionResolver('sess-claude')).toBeDefined();
++    // deny 收口（不留 pending promise）。
++    sm.getPermissionResolver('sess-claude')!.resolve(
++      {
++        session_id: 'sess-claude',
++        request_id: sent.payload.request_id as string,
++        decision: 'deny',
++        message: '先不提交',
++      },
++      'sess-claude',
++    );
++    const decision = (await p) as { behavior: string; message?: string };
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('用户拒绝了本次提交');
++  }, 15_000);
++
++  it('SILLYHUB_GIT_APPROVAL=off → 不拦（逃生阀与现状一致）', async () => {
++    process.env.SILLYHUB_GIT_APPROVAL = 'off';
++    const send = vi.fn(() => true);
++    const { canUseTool } = await makeChatSession({ wsClient: { send } });
++    const decision = (await canUseTool!('Bash', { command: 'git commit -m x' }, {
++      signal: undefined,
++    })) as { behavior: string };
++    expect(decision.behavior).toBe('allow');
++    expect(send).not.toHaveBeenCalled();
++  }, 15_000);
++
++  it('通道缺失（无 wsClient）→ 不接线不抛错（fail-soft 走现状写校验）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload() as never);
++    const { driver, getOpts } = makeCapturingDriver('claude' as never);
++    const sm = new SessionManager(
++      { drivers: { claude: driver }, ...noopDeps } as never,
++      {
++        // 实例级 manualApproval=false（构造校验：true 必配 wsClient）——
++        // 不传 permissionWsClient → 通道缺失 → git 接线 fail-soft 走现状写校验。
++        manualApproval: false,
++        allowedRootsProvider: () => ['C:\\work'],
++      } as never,
++    );
++    await sm.create({ ...baseInput('claude' as never), manualApproval: false } as never);
++    const opts = getOpts() as unknown as {
++      canUseTool?: (n: string, i: unknown, o?: { signal?: AbortSignal }) => Promise<unknown>;
++    };
++    const decision = (await opts.canUseTool!('Bash', { command: 'git commit -m x' }, {
++      signal: undefined,
++    })) as { behavior: string };
++    // git 命令提取不到写路径 → 写校验放行（与现状一致）；未弹卡。
++    expect(decision.behavior).toBe('allow');
++    expect(collectMock).not.toHaveBeenCalled();
++    expect(sm.getPermissionResolver('sess-claude')).toBeUndefined();
++  }, 15_000);
++
++  it('普通命令行为不变：git status 未命中 → allow（写校验现状语义）', async () => {
++    const { canUseTool } = await makeChatSession();
++    const decision = (await canUseTool!('Bash', { command: 'git status' }, {
++      signal: undefined,
++    })) as { behavior: string };
++    expect(decision.behavior).toBe('allow');
++    expect(collectMock).not.toHaveBeenCalled();
++  }, 15_000);
++});
+diff --git a/sillyhub-daemon/tests/interactive/git-approval-collector.test.ts b/sillyhub-daemon/tests/interactive/git-approval-collector.test.ts
+new file mode 100644
+index 000000000..f542db8a2
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/git-approval-collector.test.ts
+@@ -0,0 +1,328 @@
++/**
++ * interactive/git-approval-collector 单测（2026-11-06-session-git-approval task-02）。
++ *
++ * 手法：注入 execFile fixture（对齐 turn-file-changes.test.ts 惯例的假件面）——
++ * porcelain v2 -z / numstat 双口径 / git log 明细全部以真实 git 输出形态构造字符串，
++ * 解析口径以 `--porcelain=v2 -z`（NUL 终止、`1` 条目 path 空格分隔实证坑）为准。
++ *
++ * 覆盖（= task-02 acceptance 逐条）：
++ *   1. porcelain 解析：staged 归属 / 中文与含空格路径（R-07）/ rename 取 new 路径；
++ *   2. numstat 双口径合并（staged 取 --cached、未暂存取工作区）；
++ *   3. push 态 ahead 明细（sha/subject/author/date/files；rename 取 new；>20 显统计；
++ *      每提交 >50 截断为样本+统计）；无上游分支降级不抛；
++ *   4. R-03 截断三档（files>500 / 每提交 files>50 / ahead>20）；
++ *   5. defaultSelected 四分支接线（D-012：pathspec / -a / 暂存区 / 暂存区空勾全部）；
++ *   6. 容量实测（R-03 验收）：500 文件 fixture 的 payload 序列化 < 512KB
++ *      （查证事实：dialog_payload 为 JSON 列无固定上限、8KB 截断仅 bash_chunk 事件，
++ *       512KB 为保守断言上限）。
++ */
++import { describe, expect, it } from "vitest";
++
++import {
++  collectGitApprovalPayload,
++  parseLogNameStatus,
++  parseNumstat,
++  parsePorcelainV2Z,
++  type GitApprovalExecFile,
++  type GitApprovalPayload,
++} from "../../src/interactive/git-approval-collector.js";
++import { detectGitWriteIntent } from "../../src/interactive/git-command-guard.js";
++
++/* ───────────── fixture 工具 ───────────── */
++
++const NUL = "\0";
++const SEP = "\x1f";
++
++/** 典型 porcelain v2 -z 输出：分支 main 领先 3；staged 修改 + 未暂存修改 + rename + 未跟踪。 */
++const PORCELAIN_FIXTURE = [
++  "# branch.oid 1234567890abcdef",
++  "# branch.head main",
++  "# branch.upstream origin/main",
++  "# branch.ab +3 -0",
++  // staged modified（X=M Y=空格→worktree 无二次改动）
++  `1 M. N... 100644 100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} backend/app/service.py`,
++  // staged modified + worktree 又改（XY=M M）
++  `1 MM N... 100644 100644 100644 ${"c".repeat(40)} ${"d".repeat(40)} docs/中文 文档.md`,
++  // 仅未暂存 modified（XY=.M）
++  `1 .M N... 100644 100644 100644 ${"e".repeat(40)} ${"f".repeat(40)} frontend/src/app.tsx`,
++  // staged deleted
++  `1 D. N... 100644 000000 000000 ${"0".repeat(40)} ${"0".repeat(40)} old/removed.txt`,
++  // staged rename（2 条目；new path 含空格；origPath 为随后 NUL 段）
++  `2 R. N... 100644 100644 100644 ${"1".repeat(40)} ${"2".repeat(40)} new dir/renamed file.ts`,
++  "old dir/original file.ts",
++  // untracked
++  "? notes/未跟踪 草稿.md",
++]
++  .join(NUL) + NUL;
++
++const NUMSTAT_UNSTAGED = ["10\t2\tfrontend/src/app.tsx", "5\t0\tdocs/中文 文档.md"].join("\n") + "\n";
++const NUMSTAT_STAGED = [
++  "38\t4\tbackend/app/service.py",
++  "12\t2\tdocs/中文 文档.md",
++  "0\t0\tnew dir/renamed file.ts",
++  "0\t9\told/removed.txt",
++].join("\n") + "\n";
++
++/** ahead 明细 fixture（2 条提交；第 2 条含 rename R100 双路径）。 */
++const LOG_NS_FIXTURE =
++  [
++    `fff0001${SEP}feat: first${SEP}qinyi${SEP}2026-11-06`,
++    "M\tbackend/a.py",
++    "A\tfrontend/b.tsx",
++    "",
++    `fff0002${SEP}feat: second${SEP}qinyi${SEP}2026-11-06`,
++    "R100\told/x.ts\tnew/x.ts",
++  ].join("\n") + NUL;
++const LOG_NUM_FIXTURE = ["fff0001", "20\t1\tbackend/a.py", "8\t0\tfrontend/b.tsx", "", "fff0002", "3\t3\tnew/x.ts"].join("\n") + NUL;
++
++/** 按 args 关键词分发的 fixture 执行器。 */
++function makeExec(routes: Array<{ match: (args: string[]) => boolean; stdout?: string; reject?: boolean }>): GitApprovalExecFile {
++  return async (args) => {
++    for (const r of routes) {
++      if (r.match(args)) {
++        if (r.reject) throw new Error("fixture: command failed");
++        return { stdout: r.stdout ?? "", stderr: "" };
++      }
++    }
++    return { stdout: "", stderr: "" };
++  };
++}
++
++function baseRoutes(overrides?: Partial<Record<"status" | "unstaged" | "staged" | "logNs" | "logNum", { stdout?: string; reject?: boolean }>>): Array<{ match: (args: string[]) => boolean; stdout?: string; reject?: boolean }> {
++  return [
++    {
++      match: (a) => a.includes("status"),
++      stdout: overrides?.status ? PORCELAIN_FIXTURE : undefined,
++      ...(overrides?.status ?? {}),
++    },
++  ];
++}
++
++/** 完整路由 fixture（status/双 numstat/log 两口径）。 */
++function fullExec(over: {
++  status?: string;
++  unstaged?: string;
++  staged?: string;
++  logNs?: string;
++  logNum?: string;
++  logReject?: boolean;
++} = {}): GitApprovalExecFile {
++  return makeExec([
++    { match: (a) => a.includes("status"), stdout: over.status ?? PORCELAIN_FIXTURE },
++    { match: (a) => a.includes("diff") && a.includes("--cached"), stdout: over.staged ?? NUMSTAT_STAGED },
++    { match: (a) => a.includes("diff"), stdout: over.unstaged ?? NUMSTAT_UNSTAGED },
++    { match: (a) => a.includes("--name-status"), stdout: over.logNs ?? LOG_NS_FIXTURE },
++    { match: (a) => a.includes("log"), stdout: over.logNum ?? LOG_NUM_FIXTURE, reject: over.logReject },
++  ]);
++}
++
++function intentOf(command: string) {
++  const intent = detectGitWriteIntent(command);
++  expect(intent).not.toBeNull();
++  return intent!;
++}
++
++const CTX = { cwd: "C:/repo", sessionId: "s-1" };
++
++/* ───────────── porcelain v2 -z 解析 ───────────── */
++
++describe("parsePorcelainV2Z", () => {
++  it("解析 branch/ahead 与 staged 归属（R-07：空格/中文路径、1 条目 path 空格分隔）", () => {
++    const p = parsePorcelainV2Z(PORCELAIN_FIXTURE);
++    expect(p.branch).toBe("main");
++    expect(p.ahead).toBe(3);
++    expect(p.behind).toBe(0);
++    const byPath = new Map(p.files.map((f) => [f.path, f]));
++    expect(byPath.get("backend/app/service.py")).toMatchObject({ status: "modified", staged: true });
++    expect(byPath.get("docs/中文 文档.md")).toMatchObject({ status: "modified", staged: true });
++    expect(byPath.get("frontend/src/app.tsx")).toMatchObject({ status: "modified", staged: false });
++    expect(byPath.get("old/removed.txt")).toMatchObject({ status: "deleted", staged: true });
++    expect(byPath.get("notes/未跟踪 草稿.md")).toMatchObject({ status: "untracked", staged: false });
++  });
++
++  it("rename（2 条目）取 new 路径归 renamed，origPath 段被跳过不产生伪条目", () => {
++    const p = parsePorcelainV2Z(PORCELAIN_FIXTURE);
++    expect(p.files.some((f) => f.path === "new dir/renamed file.ts" && f.status === "renamed" && f.staged)).toBe(true);
++    expect(p.files.some((f) => f.path === "old dir/original file.ts")).toBe(false);
++    expect(p.files).toHaveLength(6);
++  });
++});
++
++/* ───────────── numstat 解析 ───────────── */
++
++describe("parseNumstat", () => {
++  it("tab 三列解析，binary `-` 归 0", () => {
++    const m = parseNumstat("1\t2\ta.txt\n-\t-\tbin.dat\n");
++    expect(m.get("a.txt")).toEqual({ addLines: 1, delLines: 2 });
++    expect(m.get("bin.dat")).toEqual({ addLines: 0, delLines: 0 });
++  });
++});
++
++/* ───────────── ahead 明细解析 ───────────── */
++
++describe("parseLogNameStatus + applyLogNumstat（经 collect 集成）", () => {
++  it("rename R100 双路径取 new；numstat 按 sha 回填", async () => {
++    const payload = await collectGitApprovalPayload(intentOf("git push"), { ...CTX, execFile: fullExec() });
++    const commits = payload.aheadCommits ?? [];
++    expect(commits).toHaveLength(2);
++    expect(commits[0]).toMatchObject({ sha: "fff0001", subject: "feat: first", author: "qinyi" });
++    expect(commits[0]!.files.find((f) => f.path === "backend/a.py")).toMatchObject({ addLines: 20, delLines: 1 });
++    const rn = commits[1]!.files.find((f) => f.path === "new/x.ts");
++    expect(rn).toMatchObject({ status: "renamed", addLines: 3, delLines: 3 });
++    expect(commits[1]!.files.some((f) => f.path === "old/x.ts")).toBe(false);
++  });
++});
++
++/* ───────────── collectGitApprovalPayload 集成 ───────────── */
++
++describe("collectGitApprovalPayload", () => {
++  it("commit 态：numstat 双口径合并（staged 取 --cached、未暂存取工作区）", async () => {
++    const payload = await collectGitApprovalPayload(intentOf('git commit -m "x"'), {
++      ...CTX,
++      execFile: fullExec(),
++    });
++    const byPath = new Map(payload.files.map((f) => [f.path, f]));
++    // staged 文件取 --cached 口径 38/4（而非工作区口径 5/0）
++    expect(byPath.get("backend/app/service.py")).toMatchObject({ addLines: 38, delLines: 4, staged: true });
++    // 未暂存文件取工作区口径 10/2
++    expect(byPath.get("frontend/src/app.tsx")).toMatchObject({ addLines: 10, delLines: 2, staged: false });
++    // staged 且 worktree 又改（MM）：staged 口径优先
++    expect(byPath.get("docs/中文 文档.md")).toMatchObject({ addLines: 12, delLines: 2, staged: true });
++    expect(payload.branch).toBe("main");
++    expect(payload.message).toBe("x");
++  });
++
++  it("push 态：remoteTarget 缺省 origin+当前分支；main 保护分支警示（D-006）", async () => {
++    const payload = await collectGitApprovalPayload(intentOf("git push"), { ...CTX, execFile: fullExec() });
++    expect(payload.remoteTarget).toBe("origin/main");
++    expect(payload.protectedBranch).toBe(true);
++    expect(payload.runner).toBe("git");
++    expect(payload.aheadCount).toBe(3);
++  });
++
++  it("push 态：显式 remote/ref 与非保护分支", async () => {
++    const payload = await collectGitApprovalPayload(intentOf("git push upstream dev"), {
++      ...CTX,
++      execFile: fullExec(),
++    });
++    expect(payload.remoteTarget).toBe("upstream/dev");
++    expect(payload.protectedBranch).toBe(false);
++  });
++
++  it("sillyspec push：runner=sillyspec、remote/ref 从 --remote/--branch 解析", async () => {
++    const payload = await collectGitApprovalPayload(intentOf("sillyspec push --remote origin --branch main"), {
++      ...CTX,
++      execFile: fullExec(),
++    });
++    expect(payload.runner).toBe("sillyspec");
++    expect(payload.remoteTarget).toBe("origin/main");
++    expect(payload.protectedBranch).toBe(true);
++  });
++
++  it("无上游分支（git log 失败）→ aheadCommits 空且不抛（降级面）", async () => {
++    const payload = await collectGitApprovalPayload(intentOf("git push"), {
++      ...CTX,
++      execFile: fullExec({ logReject: true }),
++    });
++    expect(payload.aheadCommits).toEqual([]);
++    expect(payload.aheadCount).toBe(3);
++  });
++
++  it("defaultSelected 四分支（D-012）：pathspec / -a / 暂存区 / 暂存区空勾全部", async () => {
++    // ① pathspec：勾 pathspec ∩ 改动
++    const p1 = await collectGitApprovalPayload(intentOf("git commit -m x -- frontend/src/app.tsx docs/不存在.md"), {
++      ...CTX,
++      execFile: fullExec(),
++    });
++    expect(new Set(p1.defaultSelected)).toEqual(new Set(["frontend/src/app.tsx"]));
++    // ② -a：勾全部 tracked（非 untracked）
++    const p2 = await collectGitApprovalPayload(intentOf("git commit -a -m x"), { ...CTX, execFile: fullExec() });
++    expect(p2.defaultSelected).not.toContain("notes/未跟踪 草稿.md");
++    expect(p2.defaultSelected).toContain("backend/app/service.py");
++    // ③ 无 pathspec/-a：勾暂存区
++    const p3 = await collectGitApprovalPayload(intentOf("git commit -m x"), { ...CTX, execFile: fullExec() });
++    expect(new Set(p3.defaultSelected)).toEqual(
++      new Set(["backend/app/service.py", "docs/中文 文档.md", "old/removed.txt", "new dir/renamed file.ts"]),
++    );
++    // ④ 暂存区空：勾全部改动
++    const emptyStaged = PORCELAIN_FIXTURE.replace(
++      `1 M. N... 100644 100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} backend/app/service.py${NUL}`,
++      "",
++    )
++      .replace(`1 MM N... 100644 100644 100644 ${"c".repeat(40)} ${"d".repeat(40)} docs/中文 文档.md${NUL}`, `1 .M N... 100644 100644 100644 ${"c".repeat(40)} ${"d".repeat(40)} docs/中文 文档.md${NUL}`)
++      .replace(`1 D. N... 100644 000000 000000 ${"0".repeat(40)} ${"0".repeat(40)} old/removed.txt${NUL}`, "")
++      .replace(`2 R. N... 100644 100644 100644 ${"1".repeat(40)} ${"2".repeat(40)} new dir/renamed file.ts${NUL}`, "");
++    const p4 = await collectGitApprovalPayload(intentOf("git commit -m x"), {
++      ...CTX,
++      execFile: fullExec({ status: emptyStaged }),
++    });
++    expect(new Set(p4.defaultSelected)).toEqual(new Set(["docs/中文 文档.md", "frontend/src/app.tsx", "notes/未跟踪 草稿.md"]));
++  });
++
++  it("R-03 截断①：files>500 → 样本 50 + filesTruncated + fileCount", async () => {
++    const many = [PORCELAIN_FIXTURE];
++    for (let i = 0; i < 501; i++) {
++      many.push(`1 .M N... 100644 100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} dir/file-${i}.ts`);
++    }
++    const payload = await collectGitApprovalPayload(intentOf("git commit -m x"), {
++      ...CTX,
++      execFile: fullExec({ status: many.join(NUL) + NUL }),
++    });
++    expect(payload.filesTruncated).toBe(true);
++    expect(payload.fileCount).toBe(501 + 6);
++    expect(payload.files).toHaveLength(50);
++  });
++
++  it("R-03 截断③：ahead>20 → aheadTruncated 且 aheadCommits ≤20", async () => {
++    const lines: string[] = [];
++    for (let i = 0; i < 21; i++) {
++      lines.push(`sha-${i}${SEP}subject-${i}${SEP}qinyi${SEP}2026-11-06`, "M\ta.py", "");
++    }
++    const payload = await collectGitApprovalPayload(intentOf("git push"), {
++      ...CTX,
++      execFile: fullExec({ logNs: lines.join("\n") + NUL, logNum: "" }),
++    });
++    expect(payload.aheadTruncated).toBe(true);
++    expect(payload.aheadCommits).toHaveLength(20);
++  });
++
++  it("R-03 截断②：单提交 files>50 → 该提交截断样本 + filesTruncated + fileCount", async () => {
++    const lines: string[] = [`sha-big${SEP}big commit${SEP}qinyi${SEP}2026-11-06`];
++    for (let i = 0; i < 51; i++) lines.push(`M\tfile-${i}.ts`);
++    const payload = await collectGitApprovalPayload(intentOf("git push"), {
++      ...CTX,
++      execFile: fullExec({ logNs: lines.join("\n") + NUL, logNum: "" }),
++    });
++    const big = payload.aheadCommits?.[0];
++    expect(big?.filesTruncated).toBe(true);
++    expect(big?.fileCount).toBe(51);
++    expect(big?.files).toHaveLength(50);
++  });
++
++  it("R-03 容量实测：500 文件 payload 序列化 < 512KB（查证：dialog_payload JSON 列、8KB 截断仅 bash_chunk）", async () => {
++    const many = [`# branch.head main`];
++    for (let i = 0; i < 500; i++) {
++      many.push(`1 .M N... 100644 100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} some/deep/nested/path/file-${i}.ts`);
++    }
++    const payload: GitApprovalPayload = await collectGitApprovalPayload(intentOf("git commit -m x"), {
++      ...CTX,
++      execFile: fullExec({ status: many.join(NUL) + NUL }),
++    });
++    const bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
++    expect(payload.files).toHaveLength(500); // 500 恰不触发截断
++    expect(bytes).toBeLessThan(512 * 1024);
++  });
++
++  it("git -C <path>：采集落在 intent.workDir（cwd 覆盖）", async () => {
++    let seenCwd = "";
++    const exec: GitApprovalExecFile = async (args, opts) => {
++      seenCwd = opts.cwd;
++      if (args.includes("status")) return { stdout: PORCELAIN_FIXTURE, stderr: "" };
++      if (args.includes("diff") && args.includes("--cached")) return { stdout: NUMSTAT_STAGED, stderr: "" };
++      if (args.includes("diff")) return { stdout: NUMSTAT_UNSTAGED, stderr: "" };
++      return { stdout: "", stderr: "" };
++    };
++    await collectGitApprovalPayload(intentOf("git -C D:/other commit -m x"), { ...CTX, execFile: exec });
++    expect(seenCwd).toBe("D:/other");
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/git-command-guard.test.ts b/sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+new file mode 100644
+index 000000000..f41308dac
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/git-command-guard.test.ts
+@@ -0,0 +1,231 @@
++/**
++ * interactive/git-command-guard 单测（2026-11-06-session-git-approval task-07）。
++ *
++ * 只测 task-01 纯函数：detectGitWriteIntent（拆段识别/解析）与 resolveDefaultSelection
++ *（D-012 四分支）。纯字符串用例——不 spawn 子进程、不建真实 git 仓、不依赖平台路径。
++ *
++ * 覆盖（= task-07 acceptance 逐条）：
++ *   1. 复合命令绕过形态 && / ; / || / |（R-01：`git add ... && git commit` 前缀绕过回归锚）；
++ *   2. sillyspec push 参数矩阵（≥4 拦截例 + 三不拦 --dry-run/--no-push/--undo，D-013）；
++ *   3. 不拦清单 ≥6 例（D-003：git add/status/log/diff/merge/非 git/空串）；
++ *   4. -m 多段拼接 / pathspec / -a / -C / push 缺省与显式 remote-ref；
++ *   5. resolveDefaultSelection 四分支（D-012）。
++ */
++import { describe, expect, it } from 'vitest';
++
++import {
++  detectGitWriteIntent,
++  resolveDefaultSelection,
++  type GitCommandIntent,
++  type WorkspaceStatus,
++} from '../../src/interactive/git-command-guard.js';
++
++const STATUS: WorkspaceStatus = {
++  files: [
++    { path: 'a.py', status: 'modified', staged: true },
++    { path: 'b.py', status: 'modified', staged: false },
++    { path: 'new.txt', status: 'untracked', staged: false },
++  ],
++};
++
++/** 便捷：断言命中并返回 intent。 */
++function hit(command: string): GitCommandIntent {
++  const intent = detectGitWriteIntent(command);
++  expect(intent).not.toBeNull();
++  return intent!;
++}
++
++describe('detectGitWriteIntent · 复合命令拆段（R-01 绕过回归锚）', () => {
++  it('git add . && git commit —— 前缀段不造成漏判（知识库实证坑）', () => {
++    const i = hit('git add . && git commit -m "feat: x"');
++    expect(i.operation).toBe('commit');
++    expect(i.message).toBe('feat: x');
++  });
++
++  it('; 分隔段命中', () => {
++    expect(hit('echo build; git push origin main').operation).toBe('push');
++  });
++
++  it('|| 分隔段命中（前段失败回退分支）', () => {
++    const i = hit('git push --dry-run || git push');
++    // --dry-run 段不拦，命中的是第二段 git push。
++    expect(i.command).toBe('git push');
++  });
++
++  it('| 管道段命中', () => {
++    expect(hit('git status | grep x; git commit -m y').operation).toBe('commit');
++  });
++
++  it('换行分隔段命中', () => {
++    expect(hit('git add a.py\ngit commit -m z').operation).toBe('commit');
++  });
++
++  it('引号内的分隔符不拆（-m "a && b" 整体为 msg）', () => {
++    const i = hit('git commit -m "a && b; c"');
++    expect(i.message).toBe('a && b; c');
++  });
++});
++
++describe('detectGitWriteIntent · sillyspec push 参数矩阵（D-013）', () => {
++  it('默认形态拦（runner=sillyspec，command 为命中段原文）', () => {
++    const i = hit('sillyspec push');
++    expect(i).toMatchObject({ operation: 'push', runner: 'sillyspec', command: 'sillyspec push' });
++  });
++
++  it('--mode one 拦', () => {
++    expect(hit('sillyspec push --mode one --change foo').runner).toBe('sillyspec');
++  });
++
++  it('--remote origin 拦并解析 remote', () => {
++    expect(hit('sillyspec push --remote origin').pushTarget).toEqual({ remote: 'origin', ref: null });
++  });
++
++  it('--branch main 拦并解析 ref', () => {
++    expect(hit('sillyspec push --branch=main').pushTarget).toEqual({ remote: null, ref: 'main' });
++  });
++
++  it('--dry-run 不拦（只输出计划）', () => {
++    expect(detectGitWriteIntent('sillyspec push --dry-run')).toBeNull();
++  });
++
++  it('--no-push 不拦（只压扁不推送）', () => {
++    expect(detectGitWriteIntent('sillyspec push --no-push')).toBeNull();
++  });
++
++  it('--undo 不拦（恢复压扁不推送）', () => {
++    expect(detectGitWriteIntent('sillyspec push --undo')).toBeNull();
++  });
++
++  it('sillyspec 非 push 子命令不拦', () => {
++    expect(detectGitWriteIntent('sillyspec status --json')).toBeNull();
++  });
++});
++
++describe('detectGitWriteIntent · 不拦清单（D-003）', () => {
++  const passthrough = [
++    'git add .',
++    'git status',
++    'git log --oneline -5',
++    'git diff HEAD',
++    'git merge feature/x',
++    'git rebase main',
++    'git reset --soft HEAD~1',
++    'npm test',
++    '',
++  ];
++  for (const cmd of passthrough) {
++    it(`不拦：${cmd || '(空串)'}`, () => {
++      expect(detectGitWriteIntent(cmd)).toBeNull();
++    });
++  }
++});
++
++describe('detectGitWriteIntent · commit 解析', () => {
++  it('-m 多段拼接（空格连接）', () => {
++    const i = hit('git commit -m "feat: x" -m "body line"');
++    expect(i.message).toBe('feat: x body line');
++  });
++
++  it('-m 连写形态 -m<msg>', () => {
++    expect(hit('git commit -mfix:quick').message).toBe('fix:quick');
++  });
++
++  it('--message= 形态', () => {
++    expect(hit('git commit --message="docs: readme"').message).toBe('docs: readme');
++  });
++
++  it('pathspec 位置参数 + -- 后全为 pathspec', () => {
++    const i = hit('git commit -m x -- a.py "b c.py"');
++    expect(i.pathspec).toEqual(['a.py', 'b c.py']);
++  });
++
++  it('无 pathspec 时为 null', () => {
++    expect(hit('git commit -m x').pathspec).toBeNull();
++  });
++
++  it('-a → allTracked=true', () => {
++    expect(hit('git commit -a -m x').allTracked).toBe(true);
++  });
++
++  it('-F <file> → messageFile 携带路径、message 空（挂载层读内容）', () => {
++    const i = hit('git commit -F .git/MSG');
++    expect(i.messageFile).toBe('.git/MSG');
++    expect(i.message).toBe('');
++  });
++
++  it('常见带值 flag 不误收为 pathspec（--author 等）', () => {
++    const i = hit('git commit -m x --author "a <a@b.c>" -q');
++    expect(i.pathspec).toBeNull();
++  });
++});
++
++describe('detectGitWriteIntent · -C 与 push 解析', () => {
++  it('git -C <path> commit → workDir 记录', () => {
++    const i = hit('git -C /repo/wt commit -m x');
++    expect(i.workDir).toBe('/repo/wt');
++    expect(i.operation).toBe('commit');
++  });
++
++  it('git -C <path> push', () => {
++    expect(hit('git -C /repo/wt push').workDir).toBe('/repo/wt');
++  });
++
++  it('push 缺省 remote/ref 为 null（默认 origin+当前分支）', () => {
++    const i = hit('git push');
++    expect(i.pushTarget).toEqual({ remote: null, ref: null });
++  });
++
++  it('push 显式 remote+ref', () => {
++    expect(hit('git push upstream dev').pushTarget).toEqual({ remote: 'upstream', ref: 'dev' });
++  });
++
++  it('push 带值 flag（-u origin）不误收 remote/ref', () => {
++    const i = hit('git push -u origin');
++    expect(i.pushTarget).toEqual({ remote: null, ref: null });
++  });
++
++  it('引号包裹的绝对路径 git 可执行名（含空格/含 .exe）识别', () => {
++    expect(hit('"C:/Program Files/Git/bin/git.exe" commit -m x').operation).toBe('commit');
++  });
++});
++
++describe('resolveDefaultSelection · D-012 四分支', () => {
++  const intent = (over: Partial<GitCommandIntent>): GitCommandIntent => ({
++    operation: 'commit',
++    runner: 'git',
++    command: 'git commit -m x',
++    message: 'x',
++    messageFile: null,
++    pathspec: null,
++    allTracked: false,
++    pushTarget: { remote: null, ref: null },
++    workDir: null,
++    ...over,
++  });
++
++  it('① 命令带 pathspec → 勾 pathspec ∩ 改动', () => {
++    const s = resolveDefaultSelection(intent({ pathspec: ['a.py', '不存在.md'] }), STATUS);
++    expect([...s]).toEqual(['a.py']);
++  });
++
++  it('② -a → 勾全部 tracked（非 untracked）', () => {
++    const s = resolveDefaultSelection(intent({ allTracked: true }), STATUS);
++    expect([...s].sort()).toEqual(['a.py', 'b.py']);
++  });
++
++  it('③ 都无 → 勾当前暂存区', () => {
++    const s = resolveDefaultSelection(intent({}), STATUS);
++    expect([...s]).toEqual(['a.py']);
++  });
++
++  it('④ 暂存区空 → 勾全部改动', () => {
++    const noStaged: WorkspaceStatus = {
++      files: [
++        { path: 'a.py', status: 'modified', staged: false },
++        { path: 'new.txt', status: 'untracked', staged: false },
++      ],
++    };
++    const s = resolveDefaultSelection(intent({}), noStaged);
++    expect([...s].sort()).toEqual(['a.py', 'new.txt']);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/git-executor.test.ts b/sillyhub-daemon/tests/interactive/git-executor.test.ts
+new file mode 100644
+index 000000000..523f1285b
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/git-executor.test.ts
+@@ -0,0 +1,185 @@
++/**
++ * interactive/git-executor 单测（2026-11-06-session-git-approval task-08）。
++ *
++ * execFile 全程注入 fixture（不起真 git 子进程）——按 args 关键词路由返回
++ * porcelain/numstat/rev-parse/push 输出，断言命令序列与结果文本。
++ *
++ * 覆盖（= task-08 acceptance 逐条）：
++ *   1. 精确重整语义（D-018）：reset 仅「已暂存但未勾选」、add 仅「勾选但未暂存」、
++ *      禁止裸 reset——共享暂存区他人 staged 不被卷入提交；
++ *   2. commit 成败路径（R-04 文件集回喂 / R-05 stderr 原样）；
++ *   3. push runner 分流（git 缺省补 origin+当前分支；sillyspec 原样 argv +
++ *      Windows shim 经 process.execPath）；
++ *   4. reject 零 git 调用（D-007：不动暂存区）。
++ */
++import { describe, expect, it } from 'vitest';
++
++import { executeGitApproval, type GitExecExecFile } from '../../src/interactive/git-executor.js';
++import { detectGitWriteIntent } from '../../src/interactive/git-command-guard.js';
++
++const NUL = '\0';
++
++/** 记录调用 + 按关键词路由的 fixture 执行器。 */
++function makeRecorder(routes: Array<{ match: (args: string[]) => boolean; stdout?: string; reject?: boolean }>) {
++  const calls: Array<{ cmd: string; args: string[] }> = [];
++  const exec: GitExecExecFile = async (cmd, args) => {
++    calls.push({ cmd, args });
++    for (const r of routes) {
++      if (r.match(args)) {
++        if (r.reject) {
++          const err = new Error('fixture git failure') as Error & { stderr?: string };
++          err.stderr = 'fixture: remote rejected (pre-receive hook declined)';
++          throw err;
++        }
++        return { stdout: r.stdout ?? '', stderr: '' };
++      }
++    }
++    return { stdout: '', stderr: '' };
++  };
++  return { exec, calls };
++}
++
++function intentOf(command: string) {
++  const i = detectGitWriteIntent(command);
++  expect(i).not.toBeNull();
++  return i!;
++}
++
++const CTX_OVERRIDES = { cwd: 'C:/repo', sessionId: 's-1' };
++
++/** porcelain fixture：staged={a.py, other.py}，未暂存={c.py}，untracked={new.txt}。 */
++const PORCELAIN = [
++  '# branch.head main',
++  `1 M. N... 100644 100644 100644 ${'a'.repeat(40)} ${'b'.repeat(40)} a.py`,
++  `1 A. N... 100644 100644 100644 ${'a'.repeat(40)} ${'b'.repeat(40)} other.py`,
++  `1 .M N... 100644 100644 100644 ${'c'.repeat(40)} ${'d'.repeat(40)} c.py`,
++  '? new.txt',
++].join(NUL) + NUL;
++
++function baseRecorder(over: { commitReject?: boolean; pushStderr?: string } = {}) {
++  return makeRecorder([
++    { match: (a) => a.includes('status') && a.includes('--porcelain=v2'), stdout: PORCELAIN },
++    { match: (a) => a.includes('rev-parse') && a.includes('--short'), stdout: 'abc1234\n' },
++    { match: (a) => a.includes('rev-parse') && a.includes('--abbrev-ref'), stdout: 'main\n' },
++    { match: (a) => a.includes('commit'), reject: over.commitReject },
++    { match: (a) => a.includes('push'), stdout: '', ...(over.pushStderr ? {} : {}) },
++  ]);
++}
++
++describe('executeGitApproval · commit 精确重整（D-018）', () => {
++  it('reset 仅「已暂存但未勾选」、add 仅「勾选但未暂存」、无裸 reset；成功回喂 sha+文件集', async () => {
++    const r = baseRecorder();
++    // 勾选：a.py（已暂存）+ c.py（未暂存）；other.py（他人已暂存，未勾）应被 reset。
++    const result = await executeGitApproval(
++      intentOf('git commit -m 原msg'),
++      { action: 'approve', message: '用户改写 msg', selectedFiles: ['a.py', 'c.py'] },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    const resetCall = r.calls.find((c) => c.args.includes('reset'));
++    expect(resetCall?.args).toEqual(expect.arrayContaining(['reset', '-q', '--', 'other.py']));
++    expect(resetCall?.args).not.toContain('a.py'); // 已暂存且勾选的不动
++    const addCall = r.calls.find((c) => c.args.includes('add'));
++    expect(addCall?.args).toEqual(expect.arrayContaining(['add', '--', 'c.py']));
++    expect(addCall?.args).not.toContain('a.py'); // 已暂存且勾选的不重复 add
++    const commitCall = r.calls.find((c) => c.args.includes('commit'));
++    expect(commitCall?.args).toEqual(expect.arrayContaining(['commit', '-m', '用户改写 msg']));
++    // identity per-invocation 注入（D-008 机制）。
++    expect(commitCall?.args).toEqual(expect.arrayContaining([expect.stringContaining('user.name=')]));
++    expect(result.ok).toBe(true);
++    expect(result.sha).toBe('abc1234');
++    expect(result.text).toContain('abc1234');
++    expect(result.text).toContain('a.py');
++    expect(result.text).toContain('c.py');
++    expect(result.text).toContain('2 个文件');
++  });
++
++  it('全暂存一致（勾选=暂存集）→ 零 reset 零 add 直提交', async () => {
++    const r = baseRecorder();
++    await executeGitApproval(
++      intentOf('git commit -m x'),
++      { action: 'approve', message: 'x', selectedFiles: ['a.py', 'other.py'] },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    expect(r.calls.find((c) => c.args.includes('reset'))).toBeUndefined();
++    expect(r.calls.find((c) => c.args.includes('add'))).toBeUndefined();
++    expect(r.calls.find((c) => c.args.includes('commit'))).toBeDefined();
++  });
++
++  it('commit 失败 → ok=false 且 text 含 stderr 原样（R-05）', async () => {
++    const r = baseRecorder({ commitReject: true });
++    const result = await executeGitApproval(
++      intentOf('git commit -m x'),
++      { action: 'approve', message: 'x', selectedFiles: ['a.py'] },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    expect(result.ok).toBe(false);
++    expect(result.text).toContain('pre-receive hook declined');
++    expect(result.text).toContain('失败');
++  });
++});
++
++describe('executeGitApproval · push runner 分流（D-013）', () => {
++  it('runner=git：缺省 remote/ref → rev-parse 取当前分支 → push origin main', async () => {
++    const r = baseRecorder();
++    const result = await executeGitApproval(
++      intentOf('git push'),
++      { action: 'approve', message: '' },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    const pushCall = r.calls.find((c) => c.args.includes('push'));
++    expect(pushCall?.args).toEqual(expect.arrayContaining(['push', 'origin', 'main']));
++    expect(result.ok).toBe(true);
++    expect(result.text).toContain('origin/main');
++  });
++
++  it('runner=git：显式 remote/ref 透传', async () => {
++    const r = baseRecorder();
++    await executeGitApproval(
++      intentOf('git push upstream dev'),
++      { action: 'approve', message: '' },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    expect(r.calls.find((c) => c.args.includes('push'))?.args).toEqual(
++      expect.arrayContaining(['push', 'upstream', 'dev']),
++    );
++  });
++
++  it('runner=sillyspec：原样 argv（零附加参数）；Windows 下经 process.execPath 跑 shim 解析的 js 入口', async () => {
++    const r = baseRecorder();
++    const result = await executeGitApproval(
++      intentOf('sillyspec push --remote origin --branch main'),
++      { action: 'approve', message: '' },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    const call = r.calls.find((c) => c.args.includes('push'));
++    expect(call).toBeDefined();
++    if (process.platform === 'win32') {
++      // Windows：cmd=process.execPath，args[0]=shim 解析的 js 入口（真实 PATH 解析），
++      // 其后为原命令参数（零附加）。
++      expect(call!.cmd).toBe(process.execPath);
++      expect(call!.args[0]).toMatch(/sillyspec.*\.js$/i);
++      expect(call!.args.slice(1)).toEqual(['push', '--remote', 'origin', '--branch', 'main']);
++    } else {
++      expect(call!.cmd).toBe('sillyspec');
++      expect(call!.args).toEqual(['push', '--remote', 'origin', '--branch', 'main']);
++    }
++    expect(result.ok).toBe(true);
++    expect(result.text).toContain('sillyspec push');
++  });
++});
++
++describe('executeGitApproval · reject（D-007）', () => {
++  it('零 git 调用（暂存区原样），text 含原因', async () => {
++    const r = baseRecorder();
++    const result = await executeGitApproval(
++      intentOf('git commit -m x'),
++      { action: 'reject', message: '', reason: '提交信息不符合规范' },
++      { ...CTX_OVERRIDES, execFile: r.exec },
++    );
++    expect(r.calls).toHaveLength(0);
++    expect(result.ok).toBe(false);
++    expect(result.text).toContain('用户拒绝了本次提交');
++    expect(result.text).toContain('提交信息不符合规范');
++    expect(result.text).toContain('暂存区未改动');
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-permission.test.ts b/sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+index dc3257761..1a60a2fb0 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-permission.test.ts
+@@ -8,7 +8,7 @@
+ //
+ // 依据文档：C:\Users\qinyi\.claude\plans\generic-wibbling-whisper.md 改造点 C/D
+ 
+-import { describe, it, expect, vi } from 'vitest';
++import { beforeEach, describe, it, expect, vi } from 'vitest';
+ import type {
+   Query,
+   SDKMessage,
+@@ -16,6 +16,18 @@ import type {
+   SDKUserMessage,
+ } from '@anthropic-ai/claude-agent-sdk';
+ import { SessionManager } from '../../src/interactive/session-manager.js';
++
++// git 写操作拦截测试（2026-11-06-session-git-approval task-03）：mock 采集器——
++// handler 的采集面在 git-approval-collector.test.ts 已覆盖，这里只测拦截分支语义。
++vi.mock('../../src/interactive/git-approval-collector.js', () => ({
++  collectGitApprovalPayload: vi.fn(),
++}));
++// task-06 分发测试：mock executor（不起真 git 子进程；断言恰被调/零调用）。
++vi.mock('../../src/interactive/git-executor.js', () => ({
++  executeGitApproval: vi.fn(),
++}));
++import { collectGitApprovalPayload as collectGitApprovalPayloadRef } from '../../src/interactive/git-approval-collector.js';
++import { executeGitApproval as executeGitApprovalRef } from '../../src/interactive/git-executor.js';
+ import type {
+   ClaudeSdkDriver,
+   InteractiveDriverCallbacks,
+@@ -559,3 +571,233 @@ describe('onUserDialog 路由（AskUserQuestion → PERMISSION_REQUEST 带 dialo
+     expect(r).toEqual({ behavior: 'cancelled' });
+   });
+ });
++
++// ── git 写操作拦截（2026-11-06-session-git-approval task-03 / D-017 先序）──────
++
++describe('git 写操作拦截（dialog_kind=git_approval）', () => {
++  const collectMock = vi.mocked(collectGitApprovalPayloadRef);
++  const execMock = vi.mocked(executeGitApprovalRef);
++
++  // mock 调用计数/Once 队列跨用例隔离（vi.fn 全局单例，不重置会累积）。
++  beforeEach(() => {
++    collectMock.mockReset();
++    execMock.mockReset();
++  });
++
++  /** 采集成功 fixture payload。 */
++  function okPayload(op) {
++    return {
++      operation: op,
++      command: op === 'commit' ? 'git commit -m x' : 'git push',
++      worktree: 'C:\\work',
++      branch: 'main',
++      message: op === 'commit' ? 'x' : '',
++      files: [{ path: 'a.py', status: 'modified', staged: true, addLines: 1, delLines: 2 }],
++      defaultSelected: ['a.py'],
++    };
++  }
++
++  /** 构造 askUserOnly 会话并取 canUseTool（D-017 场景：门户「只问不审」）。 */
++  async function makeGitSession() {
++    const { driver, getOpts } = makeDriverCapturingOpts();
++    const sendMock = vi.fn(() => true);
++    const sm = new SessionManager({ driver, ...noopDeps }, {
++      manualApproval: true,
++      permissionWsClient: { send: sendMock },
++    });
++    await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
++    const canUseTool = getOpts()?.canUseTool;
++    expect(canUseTool).toBeTypeOf('function');
++    return { canUseTool: canUseTool, sendMock, sm };
++  }
++
++  /** 发起 git 调用（等 handler 走到 register 长驻挂起）并返回 promise。 */
++  async function startGitCall(canUseTool, command) {
++    const p = canUseTool('Bash', { command }, { signal: undefined });
++    // 等 handler 走完 collect（mock 微任务）→ register → send（同步）；200ms 足够。
++    await new Promise((r) => setTimeout(r, 200));
++    // 包对象返回：async 函数 return 裸 promise 会被展开——await 调用点等价于
++    // 等 handler 长驻 promise settle（永挂）；{p} 切断展开，调用方拿引用自行 await。
++    return { p };
++  }
++
++  /** 从 sendMock 取 dialog 消息。 */
++  function sentDialog(sendMock) {
++    return sendMock.mock.calls[0][0];
++  }
++
++  it('git commit 命中 → register 发 dialog_kind=git_approval（payload 采集结构），askUserOnly 会话不漏拦（D-017）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload('commit'));
++    const { canUseTool, sendMock, sm } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'git commit -m x');
++    expect(sendMock).toHaveBeenCalledTimes(1);
++    const sent = sentDialog(sendMock);
++    expect(sent.type).toBe('daemon:permission_request');
++    expect(sent.payload.dialog_kind).toBe('git_approval');
++    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'commit', branch: 'main' });
++    // 采集 cwd 取会话固定 cwd。
++    expect(collectMock).toHaveBeenCalledTimes(1);
++    expect(collectMock.mock.calls[0][1].cwd).toBe(BASE_INPUT.cwd);
++    // 手动 allow + approve dialog_result → executor 代执行，执行文本经 deny.message
++    // 回喂（task-06 / D-002——原命令被 deny 阻止不经 agent 重跑）。
++    execMock.mockResolvedValueOnce({ ok: true, text: '✅ 已提交 abc1234：x（1 个文件）' });
++    const requestId = sent.payload.request_id;
++    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
++      {
++        session_id: BASE_INPUT.sessionId,
++        request_id: requestId,
++        decision: 'allow',
++        dialog_result: { action: 'approve', message: '用户改写 msg', selectedFiles: ['a.py'] },
++      },
++      BASE_INPUT.sessionId,
++    );
++    const decision = await p;
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('✅ 已提交 abc1234');
++    expect(execMock).toHaveBeenCalledTimes(1);
++    expect(execMock.mock.calls[0][1]).toMatchObject({
++      action: 'approve',
++      message: '用户改写 msg',
++      selectedFiles: ['a.py'],
++    });
++  });
++
++  it('复合命令段命中（git add . && git commit，R-01）+ deny 带原因回喂（D-007）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload('commit'));
++    const { canUseTool, sendMock, sm } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'git add . && git commit -m "feat: x"');
++    const sent = sentDialog(sendMock);
++    expect(sent.payload.dialog_kind).toBe('git_approval');
++    const requestId = sent.payload.request_id;
++    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
++      {
++        session_id: BASE_INPUT.sessionId,
++        request_id: requestId,
++        decision: 'deny',
++        message: '提交信息不符合规范',
++      },
++      BASE_INPUT.sessionId,
++    );
++    const decision = await p;
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('用户拒绝了本次提交');
++    expect(decision.message).toContain('提交信息不符合规范');
++    expect(execMock).not.toHaveBeenCalled(); // D-007：拒绝零 git 调用
++  });
++
++  it('sillyspec push 命中（runner=sillyspec，D-013）', async () => {
++    collectMock.mockResolvedValueOnce({ ...okPayload('push'), runner: 'sillyspec' });
++    const { canUseTool, sendMock } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'sillyspec push');
++    const sent = sentDialog(sendMock);
++    expect(sent.payload.dialog_kind).toBe('git_approval');
++    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'push', runner: 'sillyspec' });
++    void p;
++  });
++
++  it('git status / git add 等未命中命令 → askUserOnly 原路径 allow-through（零影响）', async () => {
++    const { canUseTool, sendMock } = await makeGitSession();
++    const decision = await canUseTool('Bash', { command: 'git status' }, { signal: undefined });
++    expect(decision.behavior).toBe('allow');
++    expect(sendMock).not.toHaveBeenCalled();
++    expect(collectMock).not.toHaveBeenCalled();
++  });
++
++  it('SILLYHUB_GIT_APPROVAL=off → 不拦（逃生阀，仅精确 off 关闭）', async () => {
++    const prev = process.env.SILLYHUB_GIT_APPROVAL;
++    process.env.SILLYHUB_GIT_APPROVAL = 'off';
++    try {
++      const { canUseTool, sendMock } = await makeGitSession();
++      const decision = await canUseTool('Bash', { command: 'git commit -m x' }, {
++        signal: undefined,
++      });
++      expect(decision.behavior).toBe('allow');
++      expect(sendMock).not.toHaveBeenCalled();
++    } finally {
++      if (prev === undefined) delete process.env.SILLYHUB_GIT_APPROVAL;
++      else process.env.SILLYHUB_GIT_APPROVAL = prev;
++    }
++  });
++
++  it('采集失败 → 最小 payload 继续弹卡（fail-closed 禁止放行裸 git 命令）', async () => {
++    collectMock.mockRejectedValueOnce(new Error('collect boom'));
++    const { canUseTool, sendMock } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'git commit -m x');
++    const sent = sentDialog(sendMock);
++    expect(sent.payload.dialog_kind).toBe('git_approval');
++    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'commit', files: [] });
++    expect(String(sent.payload.dialog_payload.collectError)).toContain('采集失败');
++    void p;
++  });
++
++  it('resolver.register 抛异常 → deny 带原因不上抛（wrapper 异常防御）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload('commit'));
++    const { driver, getOpts } = makeDriverCapturingOpts();
++    const badResolver = {
++      register: vi.fn(() => {
++        throw new Error('resolver boom');
++      }),
++    };
++    const sm = new SessionManager(
++      { driver, ...noopDeps },
++      {
++        manualApproval: true,
++        permissionResolver: badResolver,
++        permissionWsClient: { send: vi.fn(() => true) },
++      },
++    );
++    await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
++    const canUseTool = getOpts()?.canUseTool;
++    expect(canUseTool).toBeTypeOf('function');
++    const decision = await canUseTool('Bash', { command: 'git push' }, {
++      signal: undefined,
++    });
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('Git 审批通道异常');
++    expect(decision.message).toContain('boom');
++  });
++
++  it('task-06 分发：allow 但 dialog_result 畸形（缺 action）→ 按拒绝兜底，executor 零调用（fail-safe）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload('commit'));
++    const { canUseTool, sendMock, sm } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'git commit -m x');
++    const sent = sentDialog(sendMock);
++    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
++      {
++        session_id: BASE_INPUT.sessionId,
++        request_id: sent.payload.request_id,
++        decision: 'allow',
++        dialog_result: { foo: 'bar' }, // 畸形：无 action
++      },
++      BASE_INPUT.sessionId,
++    );
++    const decision = await p;
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('用户拒绝了本次提交');
++    expect(execMock).not.toHaveBeenCalled();
++  });
++
++  it('task-06 分发：allow + reject action → 拒绝路径（executor 零调用，reason 优先 dialog_result）', async () => {
++    collectMock.mockResolvedValueOnce(okPayload('commit'));
++    const { canUseTool, sendMock, sm } = await makeGitSession();
++    const { p } = await startGitCall(canUseTool, 'git commit -m x');
++    const sent = sentDialog(sendMock);
++    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
++      {
++        session_id: BASE_INPUT.sessionId,
++        request_id: sent.payload.request_id,
++        decision: 'allow',
++        dialog_result: { action: 'reject', reason: '文件范围不对' },
++      },
++      BASE_INPUT.sessionId,
++    );
++    const decision = await p;
++    expect(decision.behavior).toBe('deny');
++    expect(decision.message).toContain('文件范围不对');
++    expect(execMock).not.toHaveBeenCalled();
++  });
++
++  // backgroundTask 锚点态标记（FR-06/D-019）：backgroundTaskFlag 透传与 AskUserQuestion
++  // 分支同一行代码（permission.ts backgroundTaskFlag(state, mgr)），resolver 层语义已有
++  // 既有测试覆盖；端到端锚点态（5min 兜底 deny 回喂）由 task-14 联调三场景验证。
++});

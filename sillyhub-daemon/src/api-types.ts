@@ -6601,6 +6601,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/git-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Git Diff
+         * @description 会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。
+         *
+         *     git 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/
+         *     已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``
+         *     RPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``
+         *     模块 docstring（组件复用 git_status.py）。
+         */
+        get: operations["get_session_git_diff_api_daemon_sessions__session_id__git_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/fork": {
         parameters: {
             query?: never;
@@ -26431,6 +26456,45 @@ export interface components {
             tier: "native" | "seed";
             lineage: components["schemas"]["SessionForkLineage"];
         };
+        /**
+         * SessionGitDiffResponse
+         * @description 单文件 diff 响应（schema 在本文件定义——design 数据模型节）。
+         */
+        SessionGitDiffResponse: {
+            /**
+             * Git Mode
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git" | "no_root";
+            /** Root */
+            root?: string | null;
+            /**
+             * Root Source
+             * @default none
+             * @enum {string}
+             */
+            root_source: "worktree" | "cwd" | "workspace_root" | "none";
+            /** Path */
+            path?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Head Short */
+            head_short?: string | null;
+            /** Diff */
+            diff?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Binary
+             * @default false
+             */
+            binary: boolean;
+            /** Synced At */
+            synced_at: string;
+        };
         /** SessionGitStatusResponse */
         SessionGitStatusResponse: {
             /**
@@ -30051,6 +30115,10 @@ export interface components {
         /**
          * VectorSearchOut
          * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
+         *
+         *     index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
+         *     已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
+         *     不受影响，字段供观测与测试断言。
          */
         VectorSearchOut: {
             /**
@@ -30067,6 +30135,8 @@ export interface components {
             model_ready: boolean;
             /** Reason */
             reason?: string | null;
+            /** Index Sync */
+            index_sync?: string | null;
         };
         /**
          * VectorSearchResultItem
@@ -41871,6 +41941,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionGitStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_git_diff_api_daemon_sessions__session_id__git_diff_get: {
+        parameters: {
+            query: {
+                /** @description 工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底） */
+                path: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionGitDiffResponse"];
                 };
             };
             /** @description Validation Error */

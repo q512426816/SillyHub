@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-session-git-approval",
+  "appliedAt": "2026-11-07T02:14:55.540Z",
+  "baseHash": "36f8f4d9fa2ad27ff2ba73f470f2b07a7ca85968",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "77cd61db803269fda9c8b103666a8b56c4503ee7de26fb37ecbbf1de98fd34ee"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_crud.py",
+      "sha256": "1785f80483220759acb119217ad155ffea28b2877db8069a46d9b96fd906e38e"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/git_diff.py",
+      "sha256": "e0abd45c6cd72d83fbdb52019908565f0904306cce3d7ab37204b4579dcebb52"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "47c632005e10e306c2a2ed4e8bd0650bd18be8406cd103507ca4f9548a903aed"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/git-approval-card.test.tsx",
+      "sha256": "9ad0b73e379ce0bcca7b8293e09074775ee1fe9789e7dfd4f95fab064859046b"
+    },
+    {
+      "path": "frontend/src/components/daemon/git-approval-card.tsx",
+      "sha256": "b78e38091f630be8c012a0a99e02fda4cd0e598f9468950f6e075df6f4f86cf4"
+    },
+    {
+      "path": "frontend/src/components/daemon/pending-dialog-dock.tsx",
+      "sha256": "6c15473c780cc7d1df197499f3f880c4636d1cdc6e1d8bdf71df4376a8599a75"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "bf6d10d1e5f55191223dc0b9b8c9855ae2d5239f0cba9279ea3bd471285a5938"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "bf6d10d1e5f55191223dc0b9b8c9855ae2d5239f0cba9279ea3bd471285a5938"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/git-approval-collector.ts",
+      "sha256": "7524004717ade983747dba95d2ce8706fe49dfd52394f836ef2ad3a94fee4e49"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/git-command-guard.ts",
+      "sha256": "c0496a1d65ecc7212596fc504d3a92d88b4c4f931a85c1b3f5701e61594ff248"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/git-executor.ts",
+      "sha256": "fb0d755d8db694255ed57786fa783cee60e2b341ec484790d7c72fecc5ecc25d"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+      "sha256": "a226665812e01917b93852a993c742319b71167fde0a1094790df9152e59f62a"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/permission.ts",
+      "sha256": "cda39b32d15a1e3c635f1ba894bb604564b50cdfdd557517bb6bbdb8adff9c42"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts",
+      "sha256": "b176944979cf486bed5c64d4dd87aa3e38491a1bed78377e7673baebc749010c"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/git-approval-collector.test.ts",
+      "sha256": "54c132e12dcca2226ccc8f509368e7822a417b8b1896c0c361261778ef149cf0"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/git-command-guard.test.ts",
+      "sha256": "95eccbc6e600af553790c6c24e1acba862f6e9c2f95d965a43953141e190a177"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/git-executor.test.ts",
+      "sha256": "a27968c3589cacdba230db5254c8d9e874fcfa5f8bf17c656dbf53101df6ac8b"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/session-manager-permission.test.ts",
+      "sha256": "d27bda59fd3c894a98a7c70a7cdd8a42405488c8c4c885c0ed02d688ea5d8e12"
+    },
+    {
+      "path": "frontend/src/components/prototype/git-approval-view.tsx",
+      "sha256": "049a7da39c227b1dcb5bc0cc9b9de74a70bf3c782d7ab35efa27a3c6e7b44c72"
+    }
+  ]
+}

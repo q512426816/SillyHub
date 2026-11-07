@@ -66,6 +66,12 @@ from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.network_context import NetworkContextBlock
 from app.modules.daemon.session.service.compact import compact_session as _compact_session_svc
 from app.modules.daemon.session.service.fork import fork_session as _fork_session_svc
+from app.modules.daemon.session.service.git_diff import (
+    SessionGitDiffResponse,
+)
+from app.modules.daemon.session.service.git_diff import (
+    get_session_git_diff as _get_session_git_diff_svc,
+)
 from app.modules.daemon.session.service.git_status import (
     get_session_git_status as _get_session_git_status_svc,
 )
@@ -657,6 +663,29 @@ async def get_session_git_status(
     """
     svc = DaemonService(session)
     return await _get_session_git_status_svc(svc, session_id, user.id)
+
+
+@router.get(
+    "/sessions/{session_id}/git-diff",
+    response_model=SessionGitDiffResponse,
+)
+async def get_session_git_diff(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+    path: str = Query(
+        ..., description="工作区相对路径（原样透传 daemon，白名单与 pathspec 校验在 daemon 侧兜底）"
+    ),
+) -> SessionGitDiffResponse:
+    """会话工作区单文件 diff（2026-11-06-session-git-approval task-09 / FR-02）。
+
+    git 审批确认卡「单文件可查看 diff」取数端：工作区 vs HEAD 口径（含未暂存/
+    已暂存/未跟踪，untracked 走 no-index 分流），经 daemon ``git_worktree_diff``
+    RPC 现场采集。root 决策链与错误映射见 ``session/service/git_diff.py``
+    模块 docstring（组件复用 git_status.py）。
+    """
+    svc = DaemonService(session)
+    return await _get_session_git_diff_svc(svc, session_id, path, user.id)
 
 
 @router.post(

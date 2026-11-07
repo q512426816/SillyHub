@@ -8,7 +8,7 @@
 //
 // 依据文档：C:\Users\qinyi\.claude\plans\generic-wibbling-whisper.md 改造点 C/D
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type {
   Query,
   SDKMessage,
@@ -16,6 +16,18 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { SessionManager } from '../../src/interactive/session-manager.js';
+
+// git 写操作拦截测试（2026-11-06-session-git-approval task-03）：mock 采集器——
+// handler 的采集面在 git-approval-collector.test.ts 已覆盖，这里只测拦截分支语义。
+vi.mock('../../src/interactive/git-approval-collector.js', () => ({
+  collectGitApprovalPayload: vi.fn(),
+}));
+// task-06 分发测试：mock executor（不起真 git 子进程；断言恰被调/零调用）。
+vi.mock('../../src/interactive/git-executor.js', () => ({
+  executeGitApproval: vi.fn(),
+}));
+import { collectGitApprovalPayload as collectGitApprovalPayloadRef } from '../../src/interactive/git-approval-collector.js';
+import { executeGitApproval as executeGitApprovalRef } from '../../src/interactive/git-executor.js';
 import type {
   ClaudeSdkDriver,
   InteractiveDriverCallbacks,
@@ -558,4 +570,234 @@ describe('onUserDialog 路由（AskUserQuestion → PERMISSION_REQUEST 带 dialo
     );
     expect(r).toEqual({ behavior: 'cancelled' });
   });
+});
+
+// ── git 写操作拦截（2026-11-06-session-git-approval task-03 / D-017 先序）──────
+
+describe('git 写操作拦截（dialog_kind=git_approval）', () => {
+  const collectMock = vi.mocked(collectGitApprovalPayloadRef);
+  const execMock = vi.mocked(executeGitApprovalRef);
+
+  // mock 调用计数/Once 队列跨用例隔离（vi.fn 全局单例，不重置会累积）。
+  beforeEach(() => {
+    collectMock.mockReset();
+    execMock.mockReset();
+  });
+
+  /** 采集成功 fixture payload。 */
+  function okPayload(op) {
+    return {
+      operation: op,
+      command: op === 'commit' ? 'git commit -m x' : 'git push',
+      worktree: 'C:\\work',
+      branch: 'main',
+      message: op === 'commit' ? 'x' : '',
+      files: [{ path: 'a.py', status: 'modified', staged: true, addLines: 1, delLines: 2 }],
+      defaultSelected: ['a.py'],
+    };
+  }
+
+  /** 构造 askUserOnly 会话并取 canUseTool（D-017 场景：门户「只问不审」）。 */
+  async function makeGitSession() {
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sendMock = vi.fn(() => true);
+    const sm = new SessionManager({ driver, ...noopDeps }, {
+      manualApproval: true,
+      permissionWsClient: { send: sendMock },
+    });
+    await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
+    const canUseTool = getOpts()?.canUseTool;
+    expect(canUseTool).toBeTypeOf('function');
+    return { canUseTool: canUseTool, sendMock, sm };
+  }
+
+  /** 发起 git 调用（等 handler 走到 register 长驻挂起）并返回 promise。 */
+  async function startGitCall(canUseTool, command) {
+    const p = canUseTool('Bash', { command }, { signal: undefined });
+    // 等 handler 走完 collect（mock 微任务）→ register → send（同步）；200ms 足够。
+    await new Promise((r) => setTimeout(r, 200));
+    // 包对象返回：async 函数 return 裸 promise 会被展开——await 调用点等价于
+    // 等 handler 长驻 promise settle（永挂）；{p} 切断展开，调用方拿引用自行 await。
+    return { p };
+  }
+
+  /** 从 sendMock 取 dialog 消息。 */
+  function sentDialog(sendMock) {
+    return sendMock.mock.calls[0][0];
+  }
+
+  it('git commit 命中 → register 发 dialog_kind=git_approval（payload 采集结构），askUserOnly 会话不漏拦（D-017）', async () => {
+    collectMock.mockResolvedValueOnce(okPayload('commit'));
+    const { canUseTool, sendMock, sm } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'git commit -m x');
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const sent = sentDialog(sendMock);
+    expect(sent.type).toBe('daemon:permission_request');
+    expect(sent.payload.dialog_kind).toBe('git_approval');
+    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'commit', branch: 'main' });
+    // 采集 cwd 取会话固定 cwd。
+    expect(collectMock).toHaveBeenCalledTimes(1);
+    expect(collectMock.mock.calls[0][1].cwd).toBe(BASE_INPUT.cwd);
+    // 手动 allow + approve dialog_result → executor 代执行，执行文本经 deny.message
+    // 回喂（task-06 / D-002——原命令被 deny 阻止不经 agent 重跑）。
+    execMock.mockResolvedValueOnce({ ok: true, text: '✅ 已提交 abc1234：x（1 个文件）' });
+    const requestId = sent.payload.request_id;
+    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
+      {
+        session_id: BASE_INPUT.sessionId,
+        request_id: requestId,
+        decision: 'allow',
+        dialog_result: { action: 'approve', message: '用户改写 msg', selectedFiles: ['a.py'] },
+      },
+      BASE_INPUT.sessionId,
+    );
+    const decision = await p;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('✅ 已提交 abc1234');
+    expect(execMock).toHaveBeenCalledTimes(1);
+    expect(execMock.mock.calls[0][1]).toMatchObject({
+      action: 'approve',
+      message: '用户改写 msg',
+      selectedFiles: ['a.py'],
+    });
+  });
+
+  it('复合命令段命中（git add . && git commit，R-01）+ deny 带原因回喂（D-007）', async () => {
+    collectMock.mockResolvedValueOnce(okPayload('commit'));
+    const { canUseTool, sendMock, sm } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'git add . && git commit -m "feat: x"');
+    const sent = sentDialog(sendMock);
+    expect(sent.payload.dialog_kind).toBe('git_approval');
+    const requestId = sent.payload.request_id;
+    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
+      {
+        session_id: BASE_INPUT.sessionId,
+        request_id: requestId,
+        decision: 'deny',
+        message: '提交信息不符合规范',
+      },
+      BASE_INPUT.sessionId,
+    );
+    const decision = await p;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('用户拒绝了本次提交');
+    expect(decision.message).toContain('提交信息不符合规范');
+    expect(execMock).not.toHaveBeenCalled(); // D-007：拒绝零 git 调用
+  });
+
+  it('sillyspec push 命中（runner=sillyspec，D-013）', async () => {
+    collectMock.mockResolvedValueOnce({ ...okPayload('push'), runner: 'sillyspec' });
+    const { canUseTool, sendMock } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'sillyspec push');
+    const sent = sentDialog(sendMock);
+    expect(sent.payload.dialog_kind).toBe('git_approval');
+    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'push', runner: 'sillyspec' });
+    void p;
+  });
+
+  it('git status / git add 等未命中命令 → askUserOnly 原路径 allow-through（零影响）', async () => {
+    const { canUseTool, sendMock } = await makeGitSession();
+    const decision = await canUseTool('Bash', { command: 'git status' }, { signal: undefined });
+    expect(decision.behavior).toBe('allow');
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(collectMock).not.toHaveBeenCalled();
+  });
+
+  it('SILLYHUB_GIT_APPROVAL=off → 不拦（逃生阀，仅精确 off 关闭）', async () => {
+    const prev = process.env.SILLYHUB_GIT_APPROVAL;
+    process.env.SILLYHUB_GIT_APPROVAL = 'off';
+    try {
+      const { canUseTool, sendMock } = await makeGitSession();
+      const decision = await canUseTool('Bash', { command: 'git commit -m x' }, {
+        signal: undefined,
+      });
+      expect(decision.behavior).toBe('allow');
+      expect(sendMock).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.SILLYHUB_GIT_APPROVAL;
+      else process.env.SILLYHUB_GIT_APPROVAL = prev;
+    }
+  });
+
+  it('采集失败 → 最小 payload 继续弹卡（fail-closed 禁止放行裸 git 命令）', async () => {
+    collectMock.mockRejectedValueOnce(new Error('collect boom'));
+    const { canUseTool, sendMock } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'git commit -m x');
+    const sent = sentDialog(sendMock);
+    expect(sent.payload.dialog_kind).toBe('git_approval');
+    expect(sent.payload.dialog_payload).toMatchObject({ operation: 'commit', files: [] });
+    expect(String(sent.payload.dialog_payload.collectError)).toContain('采集失败');
+    void p;
+  });
+
+  it('resolver.register 抛异常 → deny 带原因不上抛（wrapper 异常防御）', async () => {
+    collectMock.mockResolvedValueOnce(okPayload('commit'));
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const badResolver = {
+      register: vi.fn(() => {
+        throw new Error('resolver boom');
+      }),
+    };
+    const sm = new SessionManager(
+      { driver, ...noopDeps },
+      {
+        manualApproval: true,
+        permissionResolver: badResolver,
+        permissionWsClient: { send: vi.fn(() => true) },
+      },
+    );
+    await sm.create({ ...BASE_INPUT, manualApproval: true, askUserOnly: true });
+    const canUseTool = getOpts()?.canUseTool;
+    expect(canUseTool).toBeTypeOf('function');
+    const decision = await canUseTool('Bash', { command: 'git push' }, {
+      signal: undefined,
+    });
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('Git 审批通道异常');
+    expect(decision.message).toContain('boom');
+  });
+
+  it('task-06 分发：allow 但 dialog_result 畸形（缺 action）→ 按拒绝兜底，executor 零调用（fail-safe）', async () => {
+    collectMock.mockResolvedValueOnce(okPayload('commit'));
+    const { canUseTool, sendMock, sm } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'git commit -m x');
+    const sent = sentDialog(sendMock);
+    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
+      {
+        session_id: BASE_INPUT.sessionId,
+        request_id: sent.payload.request_id,
+        decision: 'allow',
+        dialog_result: { foo: 'bar' }, // 畸形：无 action
+      },
+      BASE_INPUT.sessionId,
+    );
+    const decision = await p;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('用户拒绝了本次提交');
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it('task-06 分发：allow + reject action → 拒绝路径（executor 零调用，reason 优先 dialog_result）', async () => {
+    collectMock.mockResolvedValueOnce(okPayload('commit'));
+    const { canUseTool, sendMock, sm } = await makeGitSession();
+    const { p } = await startGitCall(canUseTool, 'git commit -m x');
+    const sent = sentDialog(sendMock);
+    sm.getPermissionResolver(BASE_INPUT.sessionId).resolve(
+      {
+        session_id: BASE_INPUT.sessionId,
+        request_id: sent.payload.request_id,
+        decision: 'allow',
+        dialog_result: { action: 'reject', reason: '文件范围不对' },
+      },
+      BASE_INPUT.sessionId,
+    );
+    const decision = await p;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('文件范围不对');
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  // backgroundTask 锚点态标记（FR-06/D-019）：backgroundTaskFlag 透传与 AskUserQuestion
+  // 分支同一行代码（permission.ts backgroundTaskFlag(state, mgr)），resolver 层语义已有
+  // 既有测试覆盖；端到端锚点态（5min 兜底 deny 回喂）由 task-14 联调三场景验证。
 });
