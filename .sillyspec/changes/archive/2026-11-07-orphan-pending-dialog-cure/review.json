@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-07-orphan-pending-dialog-cure",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ad23bae698ea8b8a43517d17936dc9e759ca7c09",
+  "findings": [
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "FR-01 三个主动 kill 挂点中 end_session 与会话删除收口无专测",
+      "evidence": "requirements FR-01 场景声称覆盖 cancel_lease/end_session/会话删除三条 kill 路径，但测试绑定仅端到端实证 cancel_lease 一条（test_cancel_lease_kill_cancels_pending_dialog）；control.py:548-553 与 session_lifecycle.py:433-440 两挂点与已测挂点同模式（同 helper、同事务 commit 前调用），代码核实行为一致，唯缺直接回归锚点。",
+      "location": "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py:193"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "hasPendingDialogs() 真实现与 register 的 dialogKind 写入路径零直测",
+      "evidence": "FR-03 两用例均以 `{ hasPendingDialogs: () => true }` mock resolver，豁免分支经 mock 绕过 PermissionResolver 本体；hasPendingDialogs（permission-resolver.ts:314-319）与 register 存入 dialogKind（:208）的真实现无任何直接单测。逻辑简单（8 行遍历 + _settle 先删 Map:333 的等价性声明），风险低但豁免判据地基本体无独立验证。",
+      "location": "sillyhub-daemon/src/interactive/permission-resolver.ts:314"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "承诺枚举外的 run 终态化写点未挂清理且未在 design 披露为边界",
+      "evidence": "change/dispatch.py:363 reconcile_stale_runs（stage run killed）、lease/service.py:1039 handle_lease_expiry（batch run failed）等写点可将携 pending dialog 的 run 终态化而不联动取消——「run 终态化后禁止遗留 pending」总则在 4 挂点枚举外不闭合。缓解：这些路径生产的 dialog 面（stage/后台任务/background_task）daemon 侧有 5min fallback，且全部读侧（列表/详情/审批中心）均已带 run 活性 join 兜底不显示孤儿，仅 DB 行状态停留 pending；生产实证 11 条全落在承诺路径上。",
+      "location": "backend/app/modules/change/dispatch.py:363"
+    },
+    {
+      "severity": "P3",
+      "status": "open",
+      "title": "design 文件清单测试文件名笔误（复数 s）",
+      "evidence": "design.md 文件变更清单写 test_run_close_cancels_pending_dialogs.py（复数），实际落盘与 requirements 绑定均为 test_run_close_cancels_pending_dialog.py（单数），纯文档笔误无功能影响。",
+      "location": ".sillyspec/changes/2026-11-07-orphan-pending-dialog-cure/design.md:55"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-11-07T22:10:30+08:00"
+}

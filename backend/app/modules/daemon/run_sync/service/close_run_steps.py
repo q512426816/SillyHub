@@ -387,6 +387,16 @@ async def close_interactive_run(
         daemon_version=daemon_version,
     )
     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
+    # 2026-11-07-orphan-pending-dialog-cure（FR-01）：run 终态化 ⇒ 其挂起提问
+    # 必然无人消费（引擎已不在等待），随收口事务联动作废——孤儿 pending 行是
+    # 列表问号与详情待答卡口径分裂的源头（生产实证：会话 e07c1209 等 11 条，
+    # daemon turn_activity_timeout 判死等待回答的轮后提问行永停 pending）。
+    # cancel_pending_dialogs_for_run 幂等（WHERE status='pending' 不覆盖
+    # answered）、不自带 commit，随下方收口 commit 一并提交；迟到二次上报走
+    # already_terminal no-op 分支不经此处，无重复清理面。
+    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
+    await cancel_pending_dialogs_for_run(svc._session, agent_run.id)
     # 2026-10-11-task-sweep-daemon-truth：run 收口瞬间不判任务死活（后台任务
     # 跨轮存活——立即收会误伤）；该 run 有非终态候选时 fire 60s 后的延迟确认
     # 清扫（问 daemon 注册表，见 _delayed_task_resweep），无候选零开销。

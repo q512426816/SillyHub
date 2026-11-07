@@ -334,6 +334,11 @@ async def list_sessions(
     # 对话题；窗口函数取每会话 created_at 最新一条（连续提问时显示最新）。
     # 前端行首状态槽据此显示问号「等待你回答」（压过 run running 转圈）；
     # 无 pending 对话的会话保持 None（零回归）。
+    # 2026-11-07-orphan-pending-dialog-cure（FR-02）：join AgentRun 限定提问
+    # 所属 run 仍活跃（ACTIVE_RUN_STATUSES，与详情读侧 list_pending_dialogs
+    # 的 ql-20260815-003 兜底同口径）——run 已终态的孤儿 pending 行不再点亮
+    # 问号（生产实证：列表?常亮而详情页无待答卡的口径分裂）；过滤在窗口
+    # 函数取「每会话最新一条」之前生效，死 run 旧行不占位。
     if items:
         from app.modules.daemon.model import SessionDialogRequest
 
@@ -351,9 +356,11 @@ async def list_sessions(
                 SessionDialogRequest.dialog_kind.label("dialog_kind"),
                 dialog_rn,
             )
+            .join(AgentRun, AgentRun.id == SessionDialogRequest.run_id)
             .where(
                 SessionDialogRequest.session_id.in_([item.id for item in items]),
                 SessionDialogRequest.status == "pending",
+                AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
             )
             .subquery()
         )

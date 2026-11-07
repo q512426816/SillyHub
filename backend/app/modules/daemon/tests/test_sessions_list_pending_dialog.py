@@ -149,6 +149,57 @@ class TestPendingDialogKind:
         item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
         assert item["pending_dialog_kind"] is None
 
+    async def test_orphan_pending_dialog_on_terminal_run_not_injected(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """2026-11-07-orphan-pending-dialog-cure FR-02：pending 行挂已终态 run
+        （孤儿）→ 不注入（列表问号与详情待答卡口径一致，不再常亮）。"""
+        admin = await _get_admin(db_session)
+        s = await _make_session(db_session, admin.id)
+        run = await _make_run(db_session, s.id, status="failed")
+        await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
+        assert item["pending_dialog_kind"] is None
+
+    async def test_orphan_old_plus_active_new_yields_active_latest(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """FR-02：同会话旧 pending（run 已死）+ 新 pending（run running）→ 注入
+        新行 kind（窗口函数在活跃行集合内取最新，死 run 旧行不占位）。"""
+        admin = await _get_admin(db_session)
+        s = await _make_session(db_session, admin.id)
+        dead_run = await _make_run(db_session, s.id, status="failed")
+        live_run = await _make_run(db_session, s.id, status="running")
+        base = datetime.now(UTC)
+        await _make_dialog(
+            db_session,
+            agent_session_id=s.id,
+            run_id=dead_run.id,
+            dialog_kind="plan_approval",
+            created_at=base - timedelta(minutes=5),
+        )
+        await _make_dialog(
+            db_session,
+            agent_session_id=s.id,
+            run_id=live_run.id,
+            dialog_kind="AskUserQuestion",
+            created_at=base,
+        )
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
+        assert item["pending_dialog_kind"] == "AskUserQuestion"
+
     async def test_session_without_dialog_yields_null(
         self,
         client: AsyncClient,

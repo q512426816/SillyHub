@@ -29,6 +29,7 @@ import type {
   SessionStatus,
 } from '../../src/interactive/types.js';
 import { onResult, onMessage } from '../../src/interactive/session-manager/events.js';
+import type { PermissionResolver } from '../../src/interactive/permission-resolver.js';
 
 /** 活动看门狗 Map 的测试取用口（私有成员 cast，turn-start-watchdog 测试同款）。 */
 function activityWatchdogMap(
@@ -109,6 +110,21 @@ function seed(sm: SessionManager, state: SessionState): void {
 /** mgr core 桥（onMessage/onResult 模块函数第一参数）。 */
 function core(sm: SessionManager): never {
   return (sm as unknown as { _core(): never })._core();
+}
+
+/** 往 core 的 resolver 注册表塞 fake（豁免用例的挂起 dialog 注入口）。 */
+function seedPendingDialogResolver(
+  sm: SessionManager,
+  sessionId: string,
+  hasPending: () => boolean,
+): void {
+  (
+    core(sm) as unknown as {
+      _resolversBySession: Map<string, PermissionResolver>;
+    }
+  )._resolversBySession.set(sessionId, {
+    hasPendingDialogs: hasPending,
+  } as unknown as PermissionResolver);
 }
 
 describe('2026-11-04-turn-activity-watchdog：轮活动看门狗', () => {
@@ -192,6 +208,63 @@ describe('2026-11-04-turn-activity-watchdog：轮活动看门狗', () => {
     // 再静默满 30min 才触发。
     await vi.advanceTimersByTimeAsync(60_000 + 1);
     expect(onTurnActivityTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  // ── 2026-11-07-orphan-pending-dialog-cure（FR-03）：挂起 dialog 豁免 ──────
+
+  it('挂起 dialog 豁免：fire 时不判死改为续防（等待用户回答≠引擎卡死）', async () => {
+    vi.useFakeTimers();
+    const onTurnActivityTimeout = vi.fn(async () => {});
+    const { sm, interruptSpy } = createSessionManager(onTurnActivityTimeout);
+    const state = makeState('sess-1', 'active');
+    seed(sm, state);
+    // 挂起 AskUserQuestion：resolver 注册表报告存在未 settle 的 dialog 请求。
+    seedPendingDialogResolver(sm, 'sess-1', () => true);
+
+    await sm.inject('sess-1', 'hello', 'run-1');
+    await onMessage(core(sm), state, { events: [] });
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+
+    // 豁免：不 interrupt、不复位 running、不上报失败，看门狗同窗续防。
+    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(sm.get('sess-1')!.status).toBe('running');
+    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
+    const rearmed = activityWatchdogMap(sm).get('sess-1');
+    expect(rearmed).toBeDefined();
+    expect(rearmed!.runId).toBe('run-1');
+
+    // 续防窗口再到期、dialog 仍挂起 → 再次豁免续防（用户决策可无限等）。
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+    expect(interruptSpy).not.toHaveBeenCalled();
+    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
+    expect(activityWatchdogMap(sm).get('sess-1')).toBeDefined();
+  });
+
+  it('dialog settle 后豁免解除：续防窗口到期照常判死（豁免非永久盲区）', async () => {
+    vi.useFakeTimers();
+    const onTurnActivityTimeout = vi.fn(async () => {});
+    const { sm, interruptSpy } = createSessionManager(onTurnActivityTimeout);
+    const state = makeState('sess-1', 'active');
+    seed(sm, state);
+    let dialogPending = true;
+    seedPendingDialogResolver(sm, 'sess-1', () => dialogPending);
+
+    await sm.inject('sess-1', 'hello', 'run-1');
+    await onMessage(core(sm), state, { events: [] });
+
+    // 第一个窗口：dialog 挂起 → 豁免续防。
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
+
+    // dialog settle（用户已答）且引擎拿到答案后挂死（无后续活动）。
+    dialogPending = false;
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+
+    // 下一窗口不命中豁免：照常判死（interrupt + 复位 + 上报 + 撤防）。
+    expect(interruptSpy).toHaveBeenCalledTimes(1);
+    expect(sm.get('sess-1')!.status).toBe('active');
+    expect(onTurnActivityTimeout).toHaveBeenCalledTimes(1);
+    expect(activityWatchdogMap(sm).has('sess-1')).toBe(false);
   });
 
   it('心跳续防：onHeartbeat 到达窗口重挂（生成期引擎活证据）', async () => {

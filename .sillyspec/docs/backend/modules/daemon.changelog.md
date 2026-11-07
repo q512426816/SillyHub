@@ -100,3 +100,4 @@ created_at: 2026-08-29 22:56:30
 | 2026-11-02 | 2026-11-02-daemon-resume-gate-fix | 根治恢复刷新时间戳致会话闸误拒新建 |
 | 2026-11-02 | 2026-11-02-group-member-footer-config | 群成员配置块对齐会话底部四选口径 |
 | 2026-11-06 | 2026-11-06-fork-empty-prompt-boot | 生产事故：会话分叉（native 档）后分叉会话引擎进程从未建立，前端永久转圈（生产实证 2026-… |
+| 2026-11-07 | 2026-11-07-orphan-pending-dialog-cure | 生产实证（会话 e07c1209 等全库 11 条孤儿记录）：AskUserQuestion 挂起等… |

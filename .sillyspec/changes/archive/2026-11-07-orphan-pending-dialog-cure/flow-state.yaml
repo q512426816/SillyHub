@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  生产实证（会话 e07c1209 等全库 11 条孤儿记录）：AskUserQuestion 挂起等待用户回答期间，daemon 30min 轮活动看门狗判死上报 failed，该收尾路径不清理挂起提问行；会话列表
+  pending_dialog_kind 注入也不看 run 活性——造成「列表显示问号、详情页却无待答卡」的矛盾显示。治本三修：终态收尾联动清理 + 列表注入口径对齐 + 看门狗对等待用户回答豁免。
+
+
+  成功标准：
+
+  - backend 收 daemon run 终态上报收尾路径（failed/killed/completed 等任一终态）联动将挂起 pending SessionDialogRequest 置 cancelled（复用既有
+  cancel_pending_dialogs_for_run，不新造语义）
+
+  - 会话列表 pending_dialog_kind 注入与详情读侧口径对齐：仅统计 run 处于活跃态（pending/running/pending_approval）的 pending 行，run 终态的孤儿行不再点亮问号
+
+  - daemon 轮活动看门狗对挂起 dialog 等待用户回答豁免：fire 时发现该会话有未 settle 的 dialog 请求则不判死改为续防重新布防，dialog settle 后下一活动点恢复常规看门狗语义
+
+  - 三点各配回归测试并通过；既有相关测试（dialog/watchdog/sessions list 域）零回归
+autopilot: false
+prestage_ack: false
+baseline_commit: 05a9218efb9b78e5a640a46f9a2e00501b0735b1
+updatedAt: '2026-11-07T14:10:27.872Z'
+cross_baselines:
+  sillyspec: fc553fa4118f954bb4df14ae974107e8eca7cfc1
+baseline_sha256: 59ca669938c9c0dd42d79165ec935cb3a62c0b68f766ecd6551ce83b458295ac
+spec_approved: true
+spec_approved_at: '2026-11-07T13:38:05.500Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py2+jsx2)（20.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261107140224\test-result.json｜lint:
+  skipped — 跳过原因：local.yaml 未配置 commands.lint（或标记 unavailable）。｜门文件 34 个
+

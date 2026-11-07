@@ -1,0 +1,171 @@
+{
+  "change": "2026-11-07-orphan-pending-dialog-cure",
+  "baseline": "05a9218efb9b78e5a640a46f9a2e00501b0735b1",
+  "head": "ad23bae698ea8b8a43517d17936dc9e759ca7c09",
+  "files": [
+    "backend/app/modules/daemon/lease_service.py",
+    "backend/app/modules/daemon/router/session_crud.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/session/service/control.py",
+    "backend/app/modules/daemon/session/service/session_lifecycle.py",
+    "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py",
+    "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+    "sillyhub-daemon/src/interactive/permission-resolver.ts",
+    "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+    "sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 469,
+    "deletions": 0
+  },
+  "savedAt": "2026-11-07T14:03:04.586Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 10,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 22,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "05a9218efb9b78e5a640a46f9a2e00501b0735b1",
+    "totals": {
+      "files": 11,
+      "additions": 469,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/lease_service.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_crud.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/control.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/session_lifecycle.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py",
+        "additions": 274,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py",
+        "additions": 51,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/permission-resolver.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialogs.py",
+        "planned": "新增",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "21345592e94dae31eb6a804c2c9a186a84163452a4b47c3ac45ca5a5dda83ff2",
+  "patchStatus": "ok"
+}

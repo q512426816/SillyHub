@@ -117,6 +117,12 @@ interface PendingEntry {
   signal?: AbortSignal;
   /** 已 settle 标记，防重复 settle。 */
   settled: boolean;
+  /**
+   * 2026-11-07-orphan-pending-dialog-cure（FR-03）：dialog 类请求种类
+   * （register 入参 dialogKind 原样存入，普通 canUseTool 为 undefined）——
+   * hasPendingDialogs() 据此区分「等待用户决策」与「普通审批」。
+   */
+  dialogKind?: string;
 }
 
 /**
@@ -199,6 +205,7 @@ export class PermissionResolver {
       fallbackTimer: undefined as unknown as ReturnType<typeof setTimeout>,
       settled: false,
       signal: input.signal,
+      dialogKind: input.dialogKind,
     };
 
     // 兜底定时器：仅普通审批（dialogKind 未定义）启 5min 兜底——防 WS 丢消息永久 hang。
@@ -291,6 +298,24 @@ export class PermissionResolver {
   /** 测试用：当前 pending 数量。 */
   get pendingCount(): number {
     return this._pending.size;
+  }
+
+  /**
+   * 2026-11-07-orphan-pending-dialog-cure（FR-03）：是否存在未 settle 的
+   * dialog 类请求（dialogKind 非空，如 AskUserQuestion——「必须无限等待用户
+   * 决策」的注册项）。
+   *
+   * 消费方：turn-control 轮活动看门狗 fire 时的豁免判据——等待用户回答不是
+   * 引擎卡死（生产实证：腾讯云会话 e07c1209 等待回答期间被 30min 看门狗判死
+   * 上报 failed，backend 收口后提问行成孤儿）。settle（resolve/超时兜底/
+   * abort/abortAll）均先从 _pending 删除，故「Map 中存在 dialogKind 条目」
+   * 与「未 settle」等价。
+   */
+  hasPendingDialogs(): boolean {
+    for (const entry of this._pending.values()) {
+      if (entry.dialogKind !== undefined) return true;
+    }
+    return false;
   }
 
   /**

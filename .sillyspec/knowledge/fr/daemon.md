@@ -10746,3 +10746,67 @@
   confirmed_at: null
   source_change: 2026-11-06-session-reopen-no-cwd
   status: active
+
+## FR-daemon-394 backend 收 daemon run 终态上报收尾路径（failed/killed/completed 等任一终态）联动将挂起 pending SessionDialogRequest 置 cancelled（复用既有 cancel_pending_dialogs_for_run，不新造语义）
+变更：2026-11-07-orphan-pending-dialog-cure
+状态：active
+摘要：daemon 上报失败（生产主复现路径）；daemon 上报完成（生产已有孤儿实证）；backend 主动 kill（cancel_lease / end_session / 会话删除）；幂等与不覆盖
+全文：.sillyspec/changes/archive/2026-11-07-orphan-pending-dialog-cure/requirements.md#FR-01
+最近确认：ad23bae698ea8b8a43517d17936dc9e759ca7c09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py「answered 行不被联动清理覆盖」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-07-orphan-pending-dialog-cure
+  status: active
+
+## FR-daemon-395 会话列表 pending_dialog_kind 注入与详情读侧口径对齐：仅统计 run 处于活跃态（pending/running/pending_approval）的 pending 行，run 终态的孤儿行不再点亮问号
+变更：2026-11-07-orphan-pending-dialog-cure
+状态：active
+摘要：孤儿行不注入；同会话多 pending 取活跃 run 的最新
+全文：.sillyspec/changes/archive/2026-11-07-orphan-pending-dialog-cure/requirements.md#FR-02
+最近确认：ad23bae698ea8b8a43517d17936dc9e759ca7c09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py「同会话死活并存取活跃 run 最新 pending」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-07-orphan-pending-dialog-cure
+  status: active
+
+## FR-daemon-396 daemon 轮活动看门狗对挂起 dialog 等待用户回答豁免：fire 时发现该会话有未 settle 的 dialog 请求则不判死改为续防重新布防，dialog settle 后下一活动点恢复常规看门狗语义
+变更：2026-11-07-orphan-pending-dialog-cure
+状态：active
+摘要：豁免续防（生产主复现路径）；豁免解除后恢复判死；无挂起 dialog 零回归
+全文：.sillyspec/changes/archive/2026-11-07-orphan-pending-dialog-cure/requirements.md#FR-03
+最近确认：ad23bae698ea8b8a43517d17936dc9e759ca7c09
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts「dialog settle 后豁免解除照常判死」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-07-orphan-pending-dialog-cure
+  status: active
+
+## FR-daemon-397 三点各配回归测试并通过；既有相关测试（dialog/watchdog/sessions list 域）零回归
+变更：2026-11-07-orphan-pending-dialog-cure
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-11-07-orphan-pending-dialog-cure/requirements.md#FR-04
+最近确认：ad23bae698ea8b8a43517d17936dc9e759ca7c09

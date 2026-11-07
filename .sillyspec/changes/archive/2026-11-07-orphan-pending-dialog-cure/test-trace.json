@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-07-orphan-pending-dialog-cure",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py「daemon 上报失败收口联动取消挂起提问」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py「daemon 上报完成收口联动取消挂起提问」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py「cancel_lease 主动 kill 联动取消挂起提问」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py「answered 行不被联动清理覆盖」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py「孤儿 pending 行（run 已终态）不注入问号」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py「同会话死活并存取活跃 run 最新 pending」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts「挂起 dialog 豁免判死改为续防」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-11-07-orphan-pending-dialog-cure:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts「dialog settle 后豁免解除照常判死」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-11-07-orphan-pending-dialog-cure"
+    }
+  ]
+}

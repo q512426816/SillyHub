@@ -540,6 +540,12 @@ class DaemonLeaseService:
         if ar.exit_code is None:
             ar.exit_code = -1
         self._session.add(ar)
+        # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：run 主动
+        # kill 终态化 ⇒ 其挂起提问必然无人消费，同事务联动作废（生产实证
+        # killed 孤儿 4 条）。幂等（WHERE status='pending'），随本 commit 提交。
+        from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
+        await cancel_pending_dialogs_for_run(self._session, ar.id)
         await self._session.commit()
         log.info(
             "agent_run_killed_by_cancel",

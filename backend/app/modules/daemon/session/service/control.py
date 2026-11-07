@@ -542,6 +542,16 @@ async def end_session(
         # commit），队列表不再有永远 pending 的死条目。
         await svc._fail_pending_queued_messages(session.id, "会话已结束，排队消息未发送。")
 
+        # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：会话结束
+        # kill 当前 run ⇒ 同事务作废其挂起提问（幂等，WHERE status='pending'），
+        # 随本 commit 提交——run 终态后禁止遗留 pending 提问行。
+        if run is not None and run.status == "killed":
+            from app.modules.daemon.permission_service import (
+                cancel_pending_dialogs_for_run,
+            )
+
+            await cancel_pending_dialogs_for_run(svc._session, run.id)
+
         await svc._session.commit()
         await svc._session.refresh(session)
 

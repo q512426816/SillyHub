@@ -1,0 +1,610 @@
+diff --git a/backend/app/modules/daemon/lease_service.py b/backend/app/modules/daemon/lease_service.py
+index e093e3388..d5b0a607b 100644
+--- a/backend/app/modules/daemon/lease_service.py
++++ b/backend/app/modules/daemon/lease_service.py
+@@ -540,6 +540,12 @@ class DaemonLeaseService:
+         if ar.exit_code is None:
+             ar.exit_code = -1
+         self._session.add(ar)
++        # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：run 主动
++        # kill 终态化 ⇒ 其挂起提问必然无人消费，同事务联动作废（生产实证
++        # killed 孤儿 4 条）。幂等（WHERE status='pending'），随本 commit 提交。
++        from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
++
++        await cancel_pending_dialogs_for_run(self._session, ar.id)
+         await self._session.commit()
+         log.info(
+             "agent_run_killed_by_cancel",
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index 2a2f36f22..a3bded600 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -334,6 +334,11 @@ async def list_sessions(
+     # 对话题；窗口函数取每会话 created_at 最新一条（连续提问时显示最新）。
+     # 前端行首状态槽据此显示问号「等待你回答」（压过 run running 转圈）；
+     # 无 pending 对话的会话保持 None（零回归）。
++    # 2026-11-07-orphan-pending-dialog-cure（FR-02）：join AgentRun 限定提问
++    # 所属 run 仍活跃（ACTIVE_RUN_STATUSES，与详情读侧 list_pending_dialogs
++    # 的 ql-20260815-003 兜底同口径）——run 已终态的孤儿 pending 行不再点亮
++    # 问号（生产实证：列表?常亮而详情页无待答卡的口径分裂）；过滤在窗口
++    # 函数取「每会话最新一条」之前生效，死 run 旧行不占位。
+     if items:
+         from app.modules.daemon.model import SessionDialogRequest
+ 
+@@ -351,9 +356,11 @@ async def list_sessions(
+                 SessionDialogRequest.dialog_kind.label("dialog_kind"),
+                 dialog_rn,
+             )
++            .join(AgentRun, AgentRun.id == SessionDialogRequest.run_id)
+             .where(
+                 SessionDialogRequest.session_id.in_([item.id for item in items]),
+                 SessionDialogRequest.status == "pending",
++                AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+             )
+             .subquery()
+         )
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 0c8ba5832..0685b107d 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -387,6 +387,16 @@ async def close_interactive_run(
+         daemon_version=daemon_version,
+     )
+     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
++    # 2026-11-07-orphan-pending-dialog-cure（FR-01）：run 终态化 ⇒ 其挂起提问
++    # 必然无人消费（引擎已不在等待），随收口事务联动作废——孤儿 pending 行是
++    # 列表问号与详情待答卡口径分裂的源头（生产实证：会话 e07c1209 等 11 条，
++    # daemon turn_activity_timeout 判死等待回答的轮后提问行永停 pending）。
++    # cancel_pending_dialogs_for_run 幂等（WHERE status='pending' 不覆盖
++    # answered）、不自带 commit，随下方收口 commit 一并提交；迟到二次上报走
++    # already_terminal no-op 分支不经此处，无重复清理面。
++    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
++
++    await cancel_pending_dialogs_for_run(svc._session, agent_run.id)
+     # 2026-10-11-task-sweep-daemon-truth：run 收口瞬间不判任务死活（后台任务
+     # 跨轮存活——立即收会误伤）；该 run 有非终态候选时 fire 60s 后的延迟确认
+     # 清扫（问 daemon 注册表，见 _delayed_task_resweep），无候选零开销。
+diff --git a/backend/app/modules/daemon/session/service/control.py b/backend/app/modules/daemon/session/service/control.py
+index cf1940b50..b27884b6c 100644
+--- a/backend/app/modules/daemon/session/service/control.py
++++ b/backend/app/modules/daemon/session/service/control.py
+@@ -542,6 +542,16 @@ async def end_session(
+         # commit），队列表不再有永远 pending 的死条目。
+         await svc._fail_pending_queued_messages(session.id, "会话已结束，排队消息未发送。")
+ 
++        # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：会话结束
++        # kill 当前 run ⇒ 同事务作废其挂起提问（幂等，WHERE status='pending'），
++        # 随本 commit 提交——run 终态后禁止遗留 pending 提问行。
++        if run is not None and run.status == "killed":
++            from app.modules.daemon.permission_service import (
++                cancel_pending_dialogs_for_run,
++            )
++
++            await cancel_pending_dialogs_for_run(svc._session, run.id)
++
+         await svc._session.commit()
+         await svc._session.refresh(session)
+ 
+diff --git a/backend/app/modules/daemon/session/service/session_lifecycle.py b/backend/app/modules/daemon/session/service/session_lifecycle.py
+index 9f8f5a0d5..b7452fe88 100644
+--- a/backend/app/modules/daemon/session/service/session_lifecycle.py
++++ b/backend/app/modules/daemon/session/service/session_lifecycle.py
+@@ -427,11 +427,17 @@ async def _end_session_for_delete(svc, session: AgentSession) -> None:
+         .scalars()
+         .all()
+     )
++    # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：删除会话收口
++    # kill 全部活跃 run ⇒ 同事务作废其挂起提问（幂等，WHERE status='pending'），
++    # 随下方 commit 提交——run 终态后禁止遗留 pending 提问行。
++    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
++
+     for run in runs:
+         run.status = "killed"
+         run.finished_at = now
+         run.exit_code = -1
+         svc._session.add(run)
++        await cancel_pending_dialogs_for_run(svc._session, run.id)
+ 
+     # Complete the bound interactive lease (if any).
+     if session.lease_id is not None:
+diff --git a/backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py b/backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py
+new file mode 100644
+index 000000000..aae02aa62
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_run_close_cancels_pending_dialog.py
+@@ -0,0 +1,274 @@
++"""2026-11-07-orphan-pending-dialog-cure FR-01：run 终态收口联动取消挂起提问。
++
++生产根因（会话 e07c1209，2026-11-07）：AskUserQuestion 挂起等待用户回答期间
++daemon 30min 轮活动看门狗判死上报 failed，close_interactive_run 收口不清理
++挂起提问行 → 孤儿 pending 行永停「等待回答」→ 列表问号常亮而详情页（读侧
++run 活性兜底）无待答卡，两侧口径分裂。全库止血时实证 11 条孤儿（failed 8、
++completed 1、killed 4——kill 路径缺口由同 FR 其余挂点覆盖，本文件覆盖主路径
++与 cancel_lease 代理用例）。
++
++覆盖：
++- daemon 上报失败（turn_activity_timeout 主复现路径）→ 收口事务后提问行 cancelled
++- daemon 上报成功（completed 孤儿实证）→ 同款联动取消
++- cancel_lease 主动 kill（_mark_agent_run_killed_if_pending）→ 同款联动取消
++- 幂等不覆盖：提问行已 answered → 收口后保持 answered
++
++范式参照 test_close_interactive_run_session_status.py（RunPlacementService 建
++真实 lease + DaemonService facade + mocked_redis）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, patch
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.agent.placement import RunPlacementService
++from app.modules.daemon.model import DaemonRuntime, SessionDialogRequest
++from app.modules.daemon.service import DaemonService
++
++# ── Fixtures（范式照抄 test_close_interactive_run_session_status.py）────────
++
++
++async def _create_user(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    session.add(
++        User(
++            id=uid,
++            email=f"orphan-cure-{uid}@example.com",
++            password_hash="x",
++            display_name="T",
++            status="active",
++        )
++    )
++    await session.commit()
++    return uid
++
++
++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    await session.commit()
++    await session.refresh(rt)
++    return rt
++
++
++@pytest.fixture()
++def mocked_redis():
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    with (
++        patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis),
++        patch("app.modules.daemon.session.service.get_redis", return_value=redis),
++    ):
++        yield redis
++
++
++async def _seed_session_run_and_dialog(
++    db_session: AsyncSession,
++    *,
++    dialog_status: str = "pending",
++) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
++    """构造 session + lease + running run + 一条挂起提问行。
++
++    返回 (lease_id, run_id, claim_token, dialog_row_id)。dialog_status 控制
++    提问行初始态（幂等用例给 answered）。
++    """
++    uid = await _create_user(db_session)
++    rt = await _create_runtime(db_session, uid)
++    placement = RunPlacementService(db_session)
++    session_id = uuid.uuid4()
++    run_id = uuid.uuid4()
++    dispatch = await placement.prepare_interactive_dispatch(
++        agent_session_id=session_id,
++        agent_run_id=run_id,
++        user_id=uid,
++        provider="claude",
++        prompt="hi",
++        model=None,
++    )
++    session = AgentSession(
++        id=session_id,
++        user_id=uid,
++        provider="claude",
++        status="active",
++        config={},
++        turn_count=1,
++        runtime_id=rt.id,
++        lease_id=dispatch.lease_id,
++        last_active_at=datetime.now(UTC),
++        created_at=datetime.now(UTC),
++    )
++    run = AgentRun(
++        id=run_id,
++        agent_type="claude_code",
++        provider="claude",
++        status="running",
++        spec_strategy="interactive",
++        agent_session_id=session_id,
++    )
++    db_session.add_all([session, run])
++    await db_session.flush()
++    dialog = SessionDialogRequest(
++        id=uuid.uuid4(),
++        session_id=session_id,
++        run_id=run_id,
++        request_id=f"req-{uuid.uuid4().hex[:12]}",
++        tool_name="AskUserQuestion",
++        dialog_kind="AskUserQuestion",
++        status=dialog_status,
++        created_at=datetime.now(UTC),
++    )
++    db_session.add(dialog)
++    await db_session.commit()
++    return dispatch.lease_id, run_id, dispatch.claim_token, dialog.id
++
++
++async def _dialog_status(db_session: AsyncSession, dialog_id: uuid.UUID) -> str:
++    """重读提问行状态（populate_existing 规避 identity map 缓存）。"""
++    row = await db_session.get(SessionDialogRequest, dialog_id, populate_existing=True)
++    assert row is not None
++    return row.status
++
++
++# ── 主路径：daemon 上报失败（生产主复现）────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_failed_close_cancels_pending_dialog(db_session: AsyncSession, mocked_redis) -> None:
++    """daemon 上报失败（turn_activity_timeout 主复现路径）→ 提问行翻 cancelled。"""
++    lease_id, run_id, token, dialog_id = await _seed_session_run_and_dialog(db_session)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="turn_activity_timeout",
++        is_error=True,
++    )
++    assert run.status == "failed"
++    assert await _dialog_status(db_session, dialog_id) == "cancelled"
++
++
++# ── 主路径：daemon 上报成功（completed 孤儿实证）───────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_completed_close_cancels_pending_dialog(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """daemon 上报成功（生产实证 fba80225：completed run 挂 pending 孤儿）→ 同款取消。"""
++    lease_id, run_id, token, dialog_id = await _seed_session_run_and_dialog(db_session)
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        subtype="success",
++    )
++    assert run.status == "completed"
++    assert await _dialog_status(db_session, dialog_id) == "cancelled"
++
++
++# ── 主动 kill：cancel_lease → _mark_agent_run_killed_if_pending ─────────────
++
++
++@pytest.mark.asyncio
++async def test_cancel_lease_kill_cancels_pending_dialog(
++    db_session: AsyncSession, mocked_redis, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """cancel_lease 主动 kill run（生产 killed 孤儿来源之一）→ 同事务联动取消。
++
++    走 DaemonLeaseService.cancel_lease 端到端路径（lease 取消 → run killed →
++    提问行 cancelled）；WS 下送为 best-effort，patch 空 hub 只关心 DB 收口
++    （对齐 test_cancel_lease_session.py _patch_ws_hub 范式）。
++    """
++    from app.modules.daemon import ws_hub as ws_hub_mod
++    from app.modules.daemon.lease_service import DaemonLeaseService
++
++    class _FakeHub:
++        async def send_session_control(self, daemon_id, msg_type, payload):
++            return True
++
++    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
++
++    _lease_id, run_id, _token, dialog_id = await _seed_session_run_and_dialog(db_session)
++    lease_svc = DaemonLeaseService(db_session)
++    await lease_svc.cancel_lease(run_id)
++
++    killed = await db_session.get(AgentRun, run_id, populate_existing=True)
++    assert killed is not None and killed.status == "killed"
++    assert await _dialog_status(db_session, dialog_id) == "cancelled"
++
++
++# ── 幂等不覆盖：answered 行保持 ────────────────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_answered_dialog_not_overwritten_by_close(
++    db_session: AsyncSession, mocked_redis
++) -> None:
++    """提问行已 answered → 收口清理不覆盖（UPDATE 限定 status='pending'）。"""
++    lease_id, run_id, token, dialog_id = await _seed_session_run_and_dialog(
++        db_session, dialog_status="answered"
++    )
++    svc = DaemonService(db_session)
++    await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="turn_activity_timeout",
++        is_error=True,
++    )
++    assert await _dialog_status(db_session, dialog_id) == "answered"
++
++
++# ── 无挂起提问零副作用（brownfield 不崩）──────────────────────────────────
++
++
++@pytest.mark.asyncio
++async def test_close_without_dialog_rows_is_noop(db_session: AsyncSession, mocked_redis) -> None:
++    """run 名下无任何提问行 → 收口正常完成、无异常（既有会话零回归）。"""
++    lease_id, run_id, token, dialog_id = await _seed_session_run_and_dialog(db_session)
++    # 删掉提问行模拟无 dialog 的既有会话
++    row = await db_session.get(SessionDialogRequest, dialog_id)
++    assert row is not None
++    await db_session.delete(row)
++    await db_session.commit()
++
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        subtype="success",
++    )
++    assert run.status == "completed"
++    remaining = (
++        (
++            await db_session.execute(
++                select(SessionDialogRequest).where(SessionDialogRequest.run_id == run_id)
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert remaining == []
+diff --git a/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+index c063fc7d0..1268b4f7f 100644
+--- a/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
++++ b/backend/app/modules/daemon/tests/test_sessions_list_pending_dialog.py
+@@ -149,6 +149,57 @@ class TestPendingDialogKind:
+         item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
+         assert item["pending_dialog_kind"] is None
+ 
++    async def test_orphan_pending_dialog_on_terminal_run_not_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """2026-11-07-orphan-pending-dialog-cure FR-02：pending 行挂已终态 run
++        （孤儿）→ 不注入（列表问号与详情待答卡口径一致，不再常亮）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        run = await _make_run(db_session, s.id, status="failed")
++        await _make_dialog(db_session, agent_session_id=s.id, run_id=run.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] is None
++
++    async def test_orphan_old_plus_active_new_yields_active_latest(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """FR-02：同会话旧 pending（run 已死）+ 新 pending（run running）→ 注入
++        新行 kind（窗口函数在活跃行集合内取最新，死 run 旧行不占位）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        dead_run = await _make_run(db_session, s.id, status="failed")
++        live_run = await _make_run(db_session, s.id, status="running")
++        base = datetime.now(UTC)
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=dead_run.id,
++            dialog_kind="plan_approval",
++            created_at=base - timedelta(minutes=5),
++        )
++        await _make_dialog(
++            db_session,
++            agent_session_id=s.id,
++            run_id=live_run.id,
++            dialog_kind="AskUserQuestion",
++            created_at=base,
++        )
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["pending_dialog_kind"] == "AskUserQuestion"
++
+     async def test_session_without_dialog_yields_null(
+         self,
+         client: AsyncClient,
+diff --git a/sillyhub-daemon/src/interactive/permission-resolver.ts b/sillyhub-daemon/src/interactive/permission-resolver.ts
+index 5180c61de..5e6d790dc 100644
+--- a/sillyhub-daemon/src/interactive/permission-resolver.ts
++++ b/sillyhub-daemon/src/interactive/permission-resolver.ts
+@@ -117,6 +117,12 @@ interface PendingEntry {
+   signal?: AbortSignal;
+   /** 已 settle 标记，防重复 settle。 */
+   settled: boolean;
++  /**
++   * 2026-11-07-orphan-pending-dialog-cure（FR-03）：dialog 类请求种类
++   * （register 入参 dialogKind 原样存入，普通 canUseTool 为 undefined）——
++   * hasPendingDialogs() 据此区分「等待用户决策」与「普通审批」。
++   */
++  dialogKind?: string;
+ }
+ 
+ /**
+@@ -199,6 +205,7 @@ export class PermissionResolver {
+       fallbackTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+       settled: false,
+       signal: input.signal,
++      dialogKind: input.dialogKind,
+     };
+ 
+     // 兜底定时器：仅普通审批（dialogKind 未定义）启 5min 兜底——防 WS 丢消息永久 hang。
+@@ -293,6 +300,24 @@ export class PermissionResolver {
+     return this._pending.size;
+   }
+ 
++  /**
++   * 2026-11-07-orphan-pending-dialog-cure（FR-03）：是否存在未 settle 的
++   * dialog 类请求（dialogKind 非空，如 AskUserQuestion——「必须无限等待用户
++   * 决策」的注册项）。
++   *
++   * 消费方：turn-control 轮活动看门狗 fire 时的豁免判据——等待用户回答不是
++   * 引擎卡死（生产实证：腾讯云会话 e07c1209 等待回答期间被 30min 看门狗判死
++   * 上报 failed，backend 收口后提问行成孤儿）。settle（resolve/超时兜底/
++   * abort/abortAll）均先从 _pending 删除，故「Map 中存在 dialogKind 条目」
++   * 与「未 settle」等价。
++   */
++  hasPendingDialogs(): boolean {
++    for (const entry of this._pending.values()) {
++      if (entry.dialogKind !== undefined) return true;
++    }
++    return false;
++  }
++
+   /**
+    * settle 单个 entry（幂等）。返回是否本次实际 settle。
+    *
+diff --git a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+index d7ece8747..e3fa0aed0 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/turn-control.ts
+@@ -783,6 +783,24 @@ async function fireTurnActivityWatchdog(
+   const state = mgr._store.get(sessionId);
+   if (!state) return;
+   if (state.status !== 'running' || state.currentRunId !== runId) return;
++  // 2026-11-07-orphan-pending-dialog-cure（FR-03）：挂起 dialog（如
++  // AskUserQuestion）等待用户回答期间豁免判死——等待用户决策不是引擎卡死
++  // （permission-resolver 既有语义：dialog 不启 5min 兜底、必须无限等待）。
++  // 生产实证：腾讯云会话 e07c1209 提问挂起 30min 被看门狗判死上报 failed，
++  // backend 收口后提问行成孤儿（列表问号常亮而详情页无待答卡）。
++  // 续防式豁免：不判死（不 interrupt/不复位/不上报），按同窗口重新布防——
++  // 每个窗口到期自查，dialog settle 后引擎若无后续活动，下一窗口不再命中
++  // 豁免、照常判死，豁免不会变成永久盲区。
++  if (state.permissionResolver?.hasPendingDialogs()) {
++    // eslint-disable-next-line no-console
++    console.warn(
++      '[session-manager] turn activity watchdog deferred: dialog pending, ' +
++        'waiting for user answer. Re-arming watchdog.',
++      { sessionId, runId, windowMs: turnActivityWatchdogMs() },
++    );
++    refreshTurnActivityWatchdog(mgr, sessionId, runId);
++    return;
++  }
+   await interrupt(mgr, sessionId).catch(() => false);
+   // interrupt 的 await 窗口内可能有事件/result 到达（引擎存活证据，评审 P2）——
+   // 复核双守卫：已流转则静默跳过，不给活轮误报 failed。
+diff --git a/sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts b/sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts
+index 67577873e..58dc64a82 100644
+--- a/sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-activity-watchdog.test.ts
+@@ -29,6 +29,7 @@ import type {
+   SessionStatus,
+ } from '../../src/interactive/types.js';
+ import { onResult, onMessage } from '../../src/interactive/session-manager/events.js';
++import type { PermissionResolver } from '../../src/interactive/permission-resolver.js';
+ 
+ /** 活动看门狗 Map 的测试取用口（私有成员 cast，turn-start-watchdog 测试同款）。 */
+ function activityWatchdogMap(
+@@ -194,6 +195,67 @@ describe('2026-11-04-turn-activity-watchdog：轮活动看门狗', () => {
+     expect(onTurnActivityTimeout).toHaveBeenCalledTimes(1);
+   });
+ 
++  // ── 2026-11-07-orphan-pending-dialog-cure（FR-03）：挂起 dialog 豁免 ──────
++
++  it('挂起 dialog 豁免：fire 时不判死改为续防（等待用户回答≠引擎卡死）', async () => {
++    vi.useFakeTimers();
++    const onTurnActivityTimeout = vi.fn(async () => {});
++    const { sm, interruptSpy } = createSessionManager(onTurnActivityTimeout);
++    const state = makeState('sess-1', 'active');
++    // 挂起 AskUserQuestion：resolver 报告存在未 settle 的 dialog 请求。
++    state.permissionResolver = {
++      hasPendingDialogs: () => true,
++    } as unknown as PermissionResolver;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'hello', 'run-1');
++    await onMessage(core(sm), state, { events: [] });
++    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
++
++    // 豁免：不 interrupt、不复位 running、不上报失败，看门狗同窗续防。
++    expect(interruptSpy).not.toHaveBeenCalled();
++    expect(sm.get('sess-1')!.status).toBe('running');
++    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
++    const rearmed = activityWatchdogMap(sm).get('sess-1');
++    expect(rearmed).toBeDefined();
++    expect(rearmed!.runId).toBe('run-1');
++
++    // 续防窗口再到期、dialog 仍挂起 → 再次豁免续防（用户决策可无限等）。
++    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
++    expect(interruptSpy).not.toHaveBeenCalled();
++    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
++    expect(activityWatchdogMap(sm).get('sess-1')).toBeDefined();
++  });
++
++  it('dialog settle 后豁免解除：续防窗口到期照常判死（豁免非永久盲区）', async () => {
++    vi.useFakeTimers();
++    const onTurnActivityTimeout = vi.fn(async () => {});
++    const { sm, interruptSpy } = createSessionManager(onTurnActivityTimeout);
++    const state = makeState('sess-1', 'active');
++    let dialogPending = true;
++    state.permissionResolver = {
++      hasPendingDialogs: () => dialogPending,
++    } as unknown as PermissionResolver;
++    seed(sm, state);
++
++    await sm.inject('sess-1', 'hello', 'run-1');
++    await onMessage(core(sm), state, { events: [] });
++
++    // 第一个窗口：dialog 挂起 → 豁免续防。
++    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
++    expect(onTurnActivityTimeout).not.toHaveBeenCalled();
++
++    // dialog settle（用户已答）且引擎拿到答案后挂死（无后续活动）。
++    dialogPending = false;
++    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
++
++    // 下一窗口不命中豁免：照常判死（interrupt + 复位 + 上报 + 撤防）。
++    expect(interruptSpy).toHaveBeenCalledTimes(1);
++    expect(sm.get('sess-1')!.status).toBe('active');
++    expect(onTurnActivityTimeout).toHaveBeenCalledTimes(1);
++    expect(activityWatchdogMap(sm).has('sess-1')).toBe(false);
++  });
++
+   it('心跳续防：onHeartbeat 到达窗口重挂（生成期引擎活证据）', async () => {
+     vi.useFakeTimers();
+     const onTurnActivityTimeout = vi.fn(async () => {});

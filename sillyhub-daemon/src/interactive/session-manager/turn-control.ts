@@ -783,6 +783,24 @@ async function fireTurnActivityWatchdog(
   const state = mgr._store.get(sessionId);
   if (!state) return;
   if (state.status !== 'running' || state.currentRunId !== runId) return;
+  // 2026-11-07-orphan-pending-dialog-cure（FR-03）：挂起 dialog（如
+  // AskUserQuestion）等待用户回答期间豁免判死——等待用户决策不是引擎卡死
+  // （permission-resolver 既有语义：dialog 不启 5min 兜底、必须无限等待）。
+  // 生产实证：腾讯云会话 e07c1209 提问挂起 30min 被看门狗判死上报 failed，
+  // backend 收口后提问行成孤儿（列表问号常亮而详情页无待答卡）。
+  // 续防式豁免：不判死（不 interrupt/不复位/不上报），按同窗口重新布防——
+  // 每个窗口到期自查，dialog settle 后引擎若无后续活动，下一窗口不再命中
+  // 豁免、照常判死，豁免不会变成永久盲区。
+  if (mgr.getPermissionResolver(sessionId)?.hasPendingDialogs()) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[session-manager] turn activity watchdog deferred: dialog pending, ' +
+        'waiting for user answer. Re-arming watchdog.',
+      { sessionId, runId, windowMs: turnActivityWatchdogMs() },
+    );
+    refreshTurnActivityWatchdog(mgr, sessionId, runId);
+    return;
+  }
   await interrupt(mgr, sessionId).catch(() => false);
   // interrupt 的 await 窗口内可能有事件/result 到达（引擎存活证据，评审 P2）——
   // 复核双守卫：已流转则静默跳过，不给活轮误报 failed。

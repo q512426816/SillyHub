@@ -427,11 +427,17 @@ async def _end_session_for_delete(svc, session: AgentSession) -> None:
         .scalars()
         .all()
     )
+    # 2026-11-07-orphan-pending-dialog-cure（FR-01 kill 路径）：删除会话收口
+    # kill 全部活跃 run ⇒ 同事务作废其挂起提问（幂等，WHERE status='pending'），
+    # 随下方 commit 提交——run 终态后禁止遗留 pending 提问行。
+    from app.modules.daemon.permission_service import cancel_pending_dialogs_for_run
+
     for run in runs:
         run.status = "killed"
         run.finished_at = now
         run.exit_code = -1
         svc._session.add(run)
+        await cancel_pending_dialogs_for_run(svc._session, run.id)
 
     # Complete the bound interactive lease (if any).
     if session.lease_id is not None:
