@@ -413,23 +413,6 @@ supersedes：D-005@v1
 故障面：老 daemon（未升级）无这两个 RPC → method_not_found；需在 backend 映射 422 + 前端升级提示
 退役判据：若未来 host_fs RPC 支持按约定 key 寻址 + tail 参数，可考虑合并回通用文件读通道
 
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-08-backend-dockerfile-apt-mirror-sjtu
-锚点：未记录
-文件：.sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/design.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/flow-state.yaml, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/proposal.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/requirements.md, .sillyspec/changes/2026-10-08-backend-dockerfile-apt-mirror-sjtu/tasks.md, backend/Dockerfile
-最近确认：d304aefe57ac5e79cc74c094f21d1760d3e5ac5f
-理由：最大风险：sjtu 源将来同样故障/限速（镜像站轮流抽风的先例：aliyun 2026-07-17、tuna 2026-10-08）——已在 Dockerfile 注释里留下完整的换源史与实测数据，下次故障按同模式 5 分钟内可再换。放弃的方案：① 原样重试（已试，两次死同层，tuna 服务端故障非瞬时抖动）；② 换 aliyun/ustc/huawei/http 官方源/deb.debian.org（实测同慢 ≈80KB/s，9.6MB 索引在 apt 超时内下不完）；③ 走本机 Clash 代理（7897 实测 2MB/33s 无改善）；④ 增大 apt 重试次数（传输中断形态重试无效，且要改同一行不如换源）。
-
-## D-unmapped-006@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-15-deploy-records-unicode-tolerance
-原编号：D-001@v1
-锚点：未记录
-文件：.sillyspec/docs/frontend/modules/components-shared.md, .sillyspec/docs/frontend/modules/lib-api.md, .sillyspec/docs/frontend/modules/lib-health.md, .sillyspec/docs/frontend/modules/lib-menu-permissions.md, backend/app/modules/deploy_records/service.py, backend/app/modules/deploy_records/tests/test_service.py
-最近确认：95d37f93be47e223ffc6a1f405535b13f7de5d20
-理由：最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
-
 ## D-backend-001@v1 检索端点新建（平台用户侧），不复用 CLI 的 shpsync_ 端点
 状态：implemented
 变更：2026-10-15-platform-knowledge-search
@@ -1255,3 +1238,58 @@ supersedes：D-006@v1
 文件：backend/app/modules/daemon/run_sync/service/close_run_steps.py, backend/app/modules/daemon/tests/test_close_interactive_run_quota_log_fallback.py, backend/migrations/versions/20261030160000_grant_business_member_change_read.py, backend/tests/modules/auth/test_business_member_change_read_migration.py, backend/tests/test_align_platform_change_events_migration.py, frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-timeline.tsx
 最近确认：未记录
 理由：`business_member` 是 `is_system=true` 的系统内置角色，管理后台 `roles_service.update` 明确抛 `RoleSystemProtected`，界面上改不了；系统角色的权限集由迁移定义。因此新增一条 独立 alembic 迁移 `20261030160000_grant_business_member_change_read.py`（down_revision 接当前 head `20261023090100`），用可移植 SQL 幂等插入 `(business_member, change:read)`， 并提供 downgrade 删除该行。不改历史迁移 `202607251600`（已部署不会再跑），也不在应用 启动时动态补权限（隐式、不可审计）。线上先以同一 SQL 落库并清缓存，使当前部署立即生效； 下次镜像重建时该迁移会正常记录 revision 并保持幂等。
+
+## D-unmapped-329@v1 同步架构选 A1——后台同步 + 立回存量索引（stale-while-revalidate）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/search.py
+文件：backend/app/modules/knowledge/search.py
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：用户回复「继续」确认按上一轮汇报推荐项 A1 推进（汇报明示 A1 为推荐；选项 A1 后台同步+立回旧索引 / A2 daemon 事件预建 / A3 维持内联）。复潮裁决：D-backend-023@v1（后台常驻同步协程）与 D-backend-024@v1（首查触发+周期刷新混合）否决于小内存时代（防周期空转与双路径复杂度，见 knowledge/decisions/backend.md，变更 2026-10-15-knowledge-search-pgvector）；现复潮条件成立——生产已 8G 宿主/3500m 容器限额（2026-11-03-knowledge-search-hardening），且内联同步实证受损（63-81s 阻塞 + worker OOM 打断重头再来）；A1 为事件驱动（搜索触发、无周期空转、无持久化队列、单一路径），与被否决的「常驻轮询空转」有本质区别。A2（daemon 事件预建）落选：跨 daemon/backend 两仓联动周期长，平台无法兜底 daemon 离线；A3 落选：不改架构则首搜阻塞永存且随语料增长恶化。
+故障面：后台同步任务随进程重启丢失（自愈：下次搜索重触发）；后台嵌入与前台服务共享容器内存（3500m 限额内，嵌入 worker 闲置自灭机制沿用）。
+退役判据：若 A2（daemon spec-sync 后预建端点）未来落地且覆盖全部同步触发场景，事件驱动后台同步可简化移除。
+
+## D-unmapped-330@v1 无索引工作区首搜统一后台化（含全量建库）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-002@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：统一后台化——首搜（及一切同步触发态）请求不等待建库，立即返回词面降级结果（reason 用可区分值，如 index_building），后台任务执行全量/差量同步；同步完成后下次搜索走正常向量路。与 2026-10-19-knowledge-search-build-switch 的「禁建库降级」语义兼容：server_build=False 保持只读不调度。
+
+## D-unmapped-331@v1 后台任务生命周期——进程内 task + 懒触发自愈，不做持久化队列
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-003@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：进程内 asyncio task（沿用 per-workspace single-flight 锁防并发重复同步）；不做持久化队列、不设定时器重试——进程重启丢任务由下次搜索重触发自愈（懒触发语义保留），失败后同样等下次搜索再触发。此取舍刻意对齐 D-backend-023 否决理由（防周期空转），并在 design 风险登记为 R-xx。
+故障面：长期无搜索的静默工作区索引不刷新（可接受：无搜索即无读方；updated_at 可观测）。
+退役判据：出现「搜索少但索引新鲜度要求高」的消费方（如定时报告）时引入显式触发端点。
+
+## D-unmapped-332@v1 响应契约增量可选字段 index_sync 告知新鲜度
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-004@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断：KnowledgeSearchOut 增加可选字段 index_sync（"fresh" | "scheduled" | "building"），additive 向后兼容（旧客户端忽略）；前端可在搜索框下方展示轻提示（轻于现有降级徽标的口径）。API 响应形态变化随本变更走契约文档与 api-types 再生成。
+
+## D-unmapped-333@v1 后台同步的实现结构——检索函数内联调度（asyncio.create_task），不新建调度器模块
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-005@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：我的判断（按 brainstorm 分层规则：两方案用户可见行为完全一致，不改变产物，属工程取舍）：方案 1 内联调度——search_sync 检测指纹失配/无 state 行时 `asyncio.create_task` 拉起同步协程后立即走只读查询。依据：①单一消费方（知识搜索）为它建调度器模块属过度设计；②per-ws single-flight 锁 + 「在途任务注册表」已覆盖去重（方案 2 的 dedupe 能力方案 1 同样具备）；③改动面最小、懒触发语义与既有代码位置一脉相承。方案 2（应用级队列）落选理由：新增基础设施面（生命周期/背压/可观测）只为单一 caller 服务，与 D-backend-023 否决理由同源的复杂度顾虑。
+故障面：create_task 的强引用需自行持有（asyncio 只持弱引用——任务注册表同时充当强引用集，任务完成时移除，防 GC 静默吞任务）。
+退役判据：出现第二个需要 spec 同步的后台消费方时，再抽应用级调度器。
+
+## D-unmapped-334@v1 差量 UPDATE 路径必须同步 title/anchor（存量数据正确性 bug 修复）
+状态：implemented
+变更：2026-11-03-knowledge-search-async-refresh
+原编号：D-006@v1
+锚点：未记录
+最近确认：a966fb1bd92daed114eb83e52a68d00c648a70b0
+理由：执行期隔离复现实证（2026-11-03，最小复现两次 _ensure_synced 直调）：`_sync_delta` 的 UPDATE 路径只更新 text/kind/content_hash/embedding/start_line，**漏更 title/anchor**——文本已新而标题/锚点恒旧，且 state 指纹已推进不再重试，属静默永久陈旧（标题词面打分与展示面持续失真）。修复：UPDATE 路径补 `row.title = c.title; row.anchor = c.anchor`。该 bug 自 2026-10-15-knowledge-search-pgvector 引入 delta 起即存在（既有测试只覆盖 INSERT 路径，UPDATE 路径零覆盖），与调度化改造无关，但被本变更的新用例首次暴露。

@@ -193,3 +193,18 @@ SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（t
 SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` 会 expire 会话内全部 ORM 对象——异常处理路径里再访问 `obj.attr`（哪怕记日志 `str(agent_run.id)`）会触发同步 lazy load → `MissingGreenlet: greenlet_spawn has not been called`，且该异常常发生在 except 块自身，把原异常吞成误导性的 greenlet 报错（2026-10-12-session-defects task-08 实证：auto_resume 压缩失败分支 rollback 后记日志访问 agent_run.id 连环爆）。修法：进入可能 rollback 的 try 前把异常路径需要的标量先捕获（`co_run_id = str(agent_run.id)`），rollback 后需要对象时经 `await session.get(Model, pk)` 异步重载再操作。来源：task-08（commit 954cb88f 修正过程）。
 
 - 状态（2026-10-19 归类核实，原【待确认】已裁决）：修法已随 2026-10-12-session-defects task-08 落地（commit 954cb88f），事故闭环；本条保留为同类 async ORM 代码的通用模式。
+
+## 慢搜索等待文案与降级徽标分离——文案讲机制口径、徽标按 reason 路由
+
+## 问题
+知识搜索页在每次慢搜索都显示「首次搜索需建立索引」等待文案——实际慢搜索多数是增量同步而非首次建索引，文案制造错误归因；降级徽标对 index_not_built 场景的提示也不准确（该 reason 来自 2026-10-19-knowledge-search-build-switch 的禁建库开关，语义是索引未预建而非模型不可用）。
+
+## 解法
+等待文案改「增量同步」机制口径：描述正在发生什么，不对首次/非首次下断言。降级徽标用后端结构化 reason 路由文案：model_ready=false 且 reason=index_not_built 提示索引未预建，其余 reason 提示模型不可用。可复用模式：慢路径文案描述机制，降级态文案由结构化 reason 驱动，前端不猜场景、不在文案里写死机制断言。
+
+## 证据
+- frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx（两处文案字符串）
+- 提交 97e84e47c；纯前端文案按约定未写测试（记不适用，验收靠规范与人工）
+
+## 适用条件
+一切带慢路径与降级态的搜索、同步、生成类前端功能。

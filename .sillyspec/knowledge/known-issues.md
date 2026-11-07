@@ -385,3 +385,62 @@ Windows PowerShell 5.1 向原生命令传参时裸 `--` 会被剥掉，`sillyspe
 - 状态：观察
 
 2026-10-21 本机（desktop-hj0am09）探针链实证（2026-10-21-precommit-sandbox-entries 归档件；5bbb1a830 / 8fc3178d3 提交留痕互证）：agent 会话进程树内 python.exe 的子树被沙箱驱动把 Mandatory Label 降为 Low（S-1-16-4096；嵌套 token 仍为同用户 qinyi，但**无 CodexSandboxUsers 组**、Administrators deny-only）。三个后果：① python 发起的 msys（Git Bash）进程打不开 Medium 标签的 `\BaseNamedObjects\msys-2.0S5-*` 对象目录 → `NtCreateDirectoryObject ... 0xC0000022` 必崩（bash→bash、node→bash 均正常，唯独 python 子树中招）；② profile 路径写入被拒（`~/.cache/pre-commit`、uv 默认缓存 AppData、pnpm store）——拒绝发生在驱动白名单层而非 DACL，**icacls 授权修复无效，勿再尝试**（嵌套 token 根本不在 CodexSandboxUsers 组，给该组授权是无效动作）；③ **WSL bash 误解析坑**：python 子进程 `spawn('bash', ...)` 按 Windows PATH 解析命中 `C:\Windows\System32\bash.exe`（WSL）而非 Git Bash，本机 WSL 自身 E_ACCESSDENIED 起不来，报错是 GBK/UTF-16 乱码——见到含「WSL/issues」字样的乱码 stderr 即是它，不是 msys 崩溃。处置：工具链入口**去 msys 化**（2026-10-21-precommit-sandbox-entries：pre-commit 三条 pre-commit entry 直连 + uv `--cache-dir .tmp/uv-cache` 重定向）；agent 会话内跑官方 runner 前 `export PRE_COMMIT_HOME="$PWD/.tmp/pre-commit-home"`；确需 bash 用绝对路径 `C:\Program Files\Git\usr\bin\bash.exe`。node 子树不受影响（Medium）——sillyspec CLI 自身的实测/lint 链都经 node 树，所以 CLI 能跑而 hook 链不能跑。
+
+## knowledge propose 的 --body 含反引号或美元符时双引号传参静默损坏——单引号包裹
+
+> 2026-11-07 勘误更新：`--body-file <路径>` 文件通道已落地（sillyspec 变更 2026-11-06-knowledge-propose-body-file）——含反引号/美元符/「斜杠+中文标点」连写形态的长正文一律优先 `--body-file`（同时绕开 Runtime Policy 对命令行文本的分词误杀）；下述单引号包裹为无文件可用时的兜底手段。
+
+## 问题
+sillyspec knowledge propose 此前仅支持命令行传 body（2026-11-06 前无 --body-file 或 stdin 通道）。提炼类 Markdown 正文几乎必含行内代码与路径：在 Git Bash 双引号串内，反引号触发命令替换、美元符触发变量展开、双引号直接截断参数——正文静默损坏落库，全程无报错。
+
+## 解法
+--body 一律用单引号包裹（单引号内反引号、美元符、双引号均为字面量）；正文确需 ASCII 单引号时按标准三段法（闭引号、转义引号、再开引号）处理或改写避开；中文正文天然低风险。写完可 head 落盘文件与原文比对抽查。
+
+## 证据
+- 本会话（2026-11-03）对知识沉淀提示词的评审结论；CLI 源码 knowledge 命令参数面（sillyspec 仓 v3.34.0）
+- 本机实证：本批 5 条全部按单引号传参落盘成功（含反引号、美元符字样正文）
+
+## 适用条件
+POSIX shell / Git Bash 环境；PowerShell 转义规则不同需另行验证。
+
+## 时间戳列只配 default 不配 onupdate——同步成功时间恒显示建行时间误导排障
+
+## 问题
+KnowledgeSearchState.updated_at 原来只有 default_factory：差量同步成功也不刷新，DB 恒显示建行时间。2026-11-03 知识搜索排障时被该假象误导（以为索引从未同步成功过，浪费排障轮次）。
+
+## 解法
+给列补 onupdate（SQLAlchemy 客户端侧刷新器）：不改列 DDL、无需 alembic 迁移，行为仅为「该行 UPDATE 时刷新该列」；与 state 指纹写入同一事务同一 commit，无半态可见；快路径零 UPDATE，不会出现未同步却刷新的假信号。通用规则：一切「最后成功时间」语义的时间戳列必须 default 与 onupdate 成对配置，并配「刷新发生 + 快路径冻结」双向测试断言。
+
+## 证据
+- backend/app/modules/knowledge/search.py（onupdate 写法对齐 mcp_registry/model.py 先例）
+- backend/app/modules/knowledge/tests/test_knowledge_search.py 新增刷新与快路径冻结用例
+- 提交 97e84e47c；验证 12.1s 全绿（.sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/verify-result.md）
+
+## 适用条件
+SQLAlchemy 声明式 ORM 的一切 updated_at 类列；凡以 UPDATE 表示状态推进的表都适用。
+
+## 知识索引差量同步 worker 周期性 cgroup OOM——2500m 限额标定偏紧，3500m 止血与排障序
+
+## 问题
+2026-11-03 生产诊断（宿主 dmesg）：backend mem_limit 2500m 下，嵌入/翻译 worker 子进程周期性被 cgroup OOM kill（10 月 40 次、11-02 2 次），打断知识索引差量同步，搜索侧表现为变慢/降级。这是知识搜索 OOM 谱系新章节：1100m 时代死的是容器内全量嵌入（见 2026-10-15 条目，容器内嵌入已禁、建库走外部预建），本次是差量同步 inline 嵌入在 2500m 下仍被杀（victim oom_score_adj=0、anon-rss 约 2.4G；服务本体约 460M + 嵌入/翻译双 worker 并存峰值超出限额）。
+
+## 解法
+mem_limit 2500m 提至 3500m（实测双 worker 峰值约 2.56G 加余量；宿主 7.5G、全栈限额总和约 4.25G 仍充裕）。直接提 4G 方案被否：挤压同宿主 ppdmq 系容器安全边际且无必要证据。排障序：搜索慢/降级 → 宿主 dmesg 查 cgroup OOM（victim 常为模型 worker 子进程）→ knowledge_search_state 核同步时刻（注意 updated_at 假象坑，见配套条目）。架构性根治（把差量嵌入移出请求路径）另立项头脑风暴，复活独立嵌入容器决策前须对照 D-deploy-001@v1 与 D-backend-023/024/021 的否决语境。
+
+## 证据
+- 提交 97e84e47c（2026-11-03-knowledge-search-hardening，验证 12.1s 全绿、评审 P1=0）
+- deploy/docker-compose.yml backend mem_limit 注释；.zcode/skills/deploy-to-server/SKILL.md 内存与 OOM 排障段（已同步 3500m 口径）
+- .sillyspec/changes/archive/2026-11-03-knowledge-search-hardening/design.md
+
+## 适用条件
+单机 7.5G 宿主、compose 全栈、单 uvicorn worker 拓扑；扩 workers、加容器或换宿主前重算限额总和与双 worker 峰值。
+
+## 非工作区会话结束后无法重新开启（409 NO_CWD）
+
+现象：不挂工作区创建的会话（平台直接聊天），结束或超时回收后点「重新开启」必报 HTTP_409_DAEMON_SESSION_NO_CWD「该会话无关联工作目录，无法恢复对话记录」，历史可看但会话永久不可续。
+
+根因：非工作区会话创建时不写 cwd 字段（backend inject_gates.py 仅在传 workspace_id 时才落 cwd=workspace.root_path）；reopen 的 SDK resume 依赖 cwd 去 Claude transcript 存档目录定位记录（transcript 按 encoded-cwd 编码目录归档），cwd 为空则必然失败，2026-08-21-session-reopen-resume 设计决策 DS-7 提前以 409 拒绝（session_lifecycle.py reopen 前置校验）。当时语境认定无 cwd 会话等于 scan/bootstrap 一次性会话，普通闲聊场景撞上该墙。
+
+会话「自动结束」属正常生命周期：空闲回收、daemon 重启 suspend、reconnecting 超 180 秒巡检收敛（RECONNECTING_RETRY_WINDOW_SEC）。
+
+规避：需长期续聊的会话建在工作区下。根治方向（未立项）：一是创建时给非工作区会话分配平台托管默认目录作 cwd；二是 reopen 时从 daemon 运行记录自愈回填（参考 _heal_agent_session_id_from_runs 先例）。

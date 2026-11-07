@@ -21,38 +21,6 @@
 故障面：WHERE 裸 ts 过滤与 run 块序排序键不对齐是既有已接受局限（跨 run 时间交叠时 ts 游标可跳行）——顺序会话（一会话一活跃轮）不受影响，本变更不扩大该局限（复合过滤仅在块内收紧）
 退役判据：若未来日志查询改为全局 (ts,id) 序的专用分页端点或换 cursor token 协议，before_id 参数随 before 一并退役
 
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-07-provider-agent-kinds-followup
-锚点：未记录
-文件：.sillyspec/changes/2026-10-07-provider-agent-kinds-followup/design.md, .sillyspec/changes/2026-10-07-provider-agent-kinds-followup/flow-state.yaml, .sillyspec/changes/2026-10-07-provider-agent-kinds-followup/proposal.md, .sillyspec/changes/2026-10-07-provider-agent-kinds-followup/requirements.md, .sillyspec/changes/2026-10-07-provider-agent-kinds-followup/tasks.md, backend/app/modules/llm_provider/service.py, backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py, frontend/src/lib/api/__tests__/llm-providers.test.ts, frontend/src/lib/api/llm-providers.ts
-最近确认：fcefa0890fbce6927826cf9e1fff813f0ed642e9
-理由：最大风险：FR-01 修复后 `agent_kinds` 键出现在所有编辑提交 body 里，既有表单/apiformat 测试若存在对 PATCH body 的全量精确匹配断言（toEqual）会因新增键挂掉——处置：跑定向测试，按新契约补断言键（补字段属契约演进，非改测试凑绿）。试过放弃：①schema 层禁 null（`agent_kinds: list[...]` 去掉 `| None`）——把契约上合法的显式 null 变成 422，第三方调用方行为被动变化，且与同 DTO 其它 nullable 字段风格不一致；②前端映射器发 `agent_kinds: v.agent_kinds ?? null`——引入 null 与缺省两种「不动」歧义表达，无收益。
-
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-08-menu-permissions-page-audit
-锚点：未记录
-文件：.sillyspec/changes/2026-10-08-menu-permissions-page-audit/design.md, .sillyspec/changes/2026-10-08-menu-permissions-page-audit/flow-state.yaml, .sillyspec/changes/2026-10-08-menu-permissions-page-audit/proposal.md, .sillyspec/changes/2026-10-08-menu-permissions-page-audit/requirements.md, .sillyspec/changes/2026-10-08-menu-permissions-page-audit/tasks.md, .sillyspec/docs/frontend/modules/lib-menu-permissions.md, frontend/src/lib/__tests__/menu-permissions.test.ts, frontend/src/lib/menu-permissions.ts
-最近确认：efb2d687031517958ef5e09ff49c697137b6363f
-理由：最大风险：可见性放宽面（workspace:read 持有者见组件菜单等）——评估可接受，这些用户对页面真实可用，且菜单可见≠数据可见（端点仍按鉴权矩阵）。次要：audit 卡保留零消费的 platform:audit:read 可能继续误导——保留理由是不删存量 key（存量角色已勾配置依赖它维持可见），其死目录属性在代码注释中言明。 试过但放弃的方案：① 移除各卡上零消费的既有 key（component:read / platform:audit:read / task:approve）——放弃：会让这些 key 在勾选器不可配（彻底死掉），且存量角色可见性可能缩；本变更聚焦补齐而非清理，死目录清理应走独立变更评审。② 后端把 component:read 接进列表端点鉴权——放弃：动后端鉴权影响存量角色（developer 只有 workspace:read+task:run_agent，会 403），远超本变更诉求。
-
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-08-rbac-dead-permissions-cleanup
-锚点：未记录
-文件：.claude/skills/sillyspec-quick/SKILL.md, .sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/design.md, .sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/flow-state.yaml, .sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/proposal.md, .sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/requirements.md, .sillyspec/changes/2026-10-08-rbac-dead-permissions-cleanup/tasks.md, .sillyspec/docs/frontend/modules/lib-menu-permissions.md, backend/app/modules/auth/permissions.py, backend/migrations/versions/202605280900_create_auth_and_rbac.py, backend/migrations/versions/20261008100000_drop_dead_rbac_permissions.py, backend/openapi.json, backend/tests/modules/admin/test_roles_router.py, backend/tests/modules/auth/test_business_member_role.py, backend/tests/modules/auth/test_permissions.py, backend/tests/modules/test_permission_cache.py, backend/tests/modules/workspace/test_members_service_business_member.py, frontend/src/app/(dashboard)/admin/roles/page.tsx, frontend/src/lib/__tests__/menu-permissions.test.ts, frontend/src/lib/api-types.ts, frontend/src/lib/menu-permissions.ts
-最近确认：765f4e7b684aa63c7d98653aa6b3e89af1057321
-理由：最大风险：线上（crrcdt）存量角色持有死键的行被删——零功能影响（无端点消费），角色列表显示权限数变少属预期收敛；PPM 角色不涉任何删除键（PPM 18 键全保留）。次要风险：种子迁移编辑只影响新环境（已应用环境不重跑），存量靠清理迁移收敛，两路径已在 ppm-permission-simplify 先例验证。 试过但放弃的方案：① 给 code:* / tool:* 接消费端点（代码评审流 / 工具 RBAC 门控）——放弃：属新功能立项不是清理，且会话 canUseTool 审批已是现行机制；② 只隐藏不删（卡片摘掉、枚举保留）——放弃：枚举残留仍进 OpenAPI 契约与角色校验域，"配了没用"的混乱只是换个形态；③ 顺带删 PermissionGroup（后端零消费）——放弃：与权限键删除耦合扩散测试面，留待独立清理。
-
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-08-sessions-menu-permissions
-锚点：未记录
-文件：.sillyspec/changes/2026-10-08-sessions-menu-permissions/design.md, .sillyspec/changes/2026-10-08-sessions-menu-permissions/flow-state.yaml, .sillyspec/changes/2026-10-08-sessions-menu-permissions/proposal.md, .sillyspec/changes/2026-10-08-sessions-menu-permissions/requirements.md, .sillyspec/changes/2026-10-08-sessions-menu-permissions/tasks.md, frontend/src/components/__tests__/admin-role-permission-picker-tree.test.tsx, frontend/src/lib/__tests__/menu-permissions.test.ts, frontend/src/lib/menu-permissions.ts
-最近确认：086033da03918b7d38e93ce425e9e555073e43e6
-理由：最大风险：可见性放宽面超预期（如某些仅持 runtime:admin 的运维角色会新增看到会话菜单）——评估为可接受，因为页面本就是这些权限的主消费面，且菜单可见≠数据可见（会话列表后端仍按 user_id 隔离、写操作仍按权限矩阵）。次要风险：runtime:admin 同时挂在 runtimes 菜单（config 组「守护进程运行时管理」）与 sessions 菜单（名不同：守护进程机器查看），勾选器两卡控制同一 key、计数联动——change:approve 双卡先例同形态，非新问题。 试过但放弃的方案：① 后端新增 agent_session:* 细分权限族（create/update/delete…）替代 task:run_agent——放弃：动鉴权矩阵影响全部 daemon 端点与既有角色，远超「菜单补齐」诉求；② 勾选器增加「未挂菜单权限」兜底桶——放弃：改组件语义面大，且把权限挂到正确的菜单卡片本身就是本来的建模意图。
-
 ## D-002@v1 实现架构=方案 A（注册表直读 + 指令通道复用）
 状态：implemented
 变更：2026-10-09-tombstone-conflict-root-fix
@@ -96,29 +64,4 @@
 理由：用户裁决原话「skill步骤 加 agent 写 md 文件不行吗？平台直接读md，每次发布生成一个新 md」：skill 末尾 agent 在仓库 docs/releases/ 写一个新 md（frontmatter 放元数据 + 正文放变化总结）；平台后端只读扫描该目录，解析 frontmatter + 渲染正文，不建表、不做写端点
 故障面：① 依赖容器挂载能读到宿主仓库（平台与项目不在同一宿主机时读不到——当前本机部署场景成立）；② frontmatter 写坏（yaml 解析失败）需容错跳过或标记异常；③ 记录目录是约定，agent 忘写就缺记录（同方案A固有劣势）
 退役判据：若出现多机部署/平台与项目分离部署，读不到文件，届时升级为 API 上报 + 落库
-
-## D-001@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-14-logout-localstorage-user-data-cleanup
-锚点：未记录
-文件：docs/sillyspec/tests-redomain-from-prefix-doubling.md, frontend/src/app/m/account/page.test.tsx, frontend/src/app/m/account/page.tsx, frontend/src/components/__tests__/app-shell.test.tsx, frontend/src/components/app-shell.tsx, frontend/src/lib/__tests__/logout-storage.test.ts, frontend/src/lib/api.ts, frontend/src/lib/logout-storage.ts
-最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
-理由：最大风险：前缀注册表漏掉未来新增的用户域键（枚举式固有的漏网风险——与上变更放弃方案 A 同型）。缓解：键清单集中一处且有本测试钉住存量 6 前缀，新增键时注册表是唯一需要动的地方；已知取舍是接受「未来键需自觉登记」而非引入命名空间强约束（改造全部读写点收益/成本倒挂）。放弃方案 B：统一用户域键命名空间前缀（如 `sillyhub:user.*`）——需改 6 个文件的全部读写点+旧键迁移清理，收益只是「前缀扫描永不漏」，且改键会导致现有用户草稿/未读状态丢失，不值；放弃方案 C：在 logout-storage 里顺带清 session persist 键——session store 的 clear() 已负责（persist 落盘空值），双份清理引入「谁是真的清空者」歧义，不碰。
-
-## D-unmapped-013@v1 设计期风险与放弃方案（底稿）
-状态：implemented
-变更：2026-10-15-assets-graph-narrow-typecheck
-原编号：D-001@v1
-锚点：未记录
-文件：frontend/src/components/changes/detail/change-assets-graph.tsx, frontend/src/lib/__tests__/knowledge-graph-guard.test.ts, frontend/src/lib/knowledge.ts
-最近确认：521896de37666e5ddf6af4a00875769d02917025
-理由：最大风险：未来 TS 升级改变 `in` 收窄行为，使守卫显得冗余——守卫语义自包含（谓词显式声明判定结果），行为不随编译器版本漂移，可接受且可随时简化。已试并放弃的方案：① 探断链污点用标注洗净（`const dataA2: GraphQueryOut["data"] = dataA`）——探针实测仍 TS2339，推断链污点标注洗不掉；② 组件内 `as GraphNeighborsData` 断言——绕过判型丢类型安全，违反仓库禁手写类型精神；③ 把组件收窄重构成 page.tsx 同款参数化路径——扩大爆炸半径，page.tsx 现路径编译健康，不动。
-
-## D-unmapped-007@v1 风险与死路（design 槽4 收割）
-状态：implemented
-变更：2026-10-15-fix-ci-red
-原编号：D-001@v1
-锚点：未记录
-文件：frontend/src/lib/__tests__/menu-permissions.test.ts, frontend/src/lib/__tests__/permission.test.ts, sillyhub-daemon/src/api-types.ts, sillyhub-daemon/tests/event-wire.test.ts
-最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
-理由：最大风险：CI 的 daemon 测试/构建消费新类型暴露未知类型错——已本地跑 `pnpm -C sillyhub-daemon typecheck` 零错兜住。试过但放弃：无（未尝试其它方案，直接对齐是既定成功标准）。
+

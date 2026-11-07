@@ -29,6 +29,7 @@
 - @modelcontextprotocol/sdk|registerTool|mcp sdk 1.29|zod raw shape|工具注册 → [@modelcontextprotocol/sdk 1.29 高级 API 是 registerTool（tool() 旧三参形状已不兼容）](conventions.md#modelcontextprotocolsdk-129-高级-api-是-registertooltool-旧三参形状已不兼容)
 - mcp-server|MCP_SERVER_BACKEND_URL|MCP_TOOLSET|env 契约|X-API-Key|fail-closed → [daemon mcp-server 的 env 契约：MCP_SERVER_BACKEND_URL + MCP_TOOLSET（file/mission_worker 两档）](conventions.md#daemon-mcp-server-的-env-契约mcp_server_backend_url--mcp_toolsetfilemission_worker-两档)
 - porcelain|v2|条目|path|分隔符|git → [conventions.md#porcelain v2 `1` 条目 path 分隔符：git 2.45.1 实证是空格不是 \t](conventions.md#porcelain v2 `1` 条目 path 分隔符：git 2.45.1 实证是空格不是 \t)
+- 知识沉淀回流链路|propose|零同步|流程外落库须显式|platform|sync → [conventions.md#知识沉淀回流链路——propose 零同步，流程外落库须显式 platform sync 兜底](conventions.md#知识沉淀回流链路——propose 零同步，流程外落库须显式 platform sync 兜底)
 
 ## Patterns
 
@@ -50,6 +51,7 @@
 - token|计费|上下文窗口|ctx_tokens|usage|口径|cache_read → [2026-08-27 — 会话 token 两套口径：计费量（跨调用可加）vs 上下文量（瞬时，取最近一次调用）](patterns.md#2026-08-27--会话-token-两套口径计费量跨调用可加vs-上下文量瞬时取最近一次调用)
 - antd|v6|App|useApp|AntdApp|provider → [patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp](patterns.md#antd v6 App.useApp() 无 <AntdApp> provider 时 message 为 undefined——组件测试须包 AntdApp)
 - rollback|MissingGreenlet|SQLAlchemy async|expire_on_commit|greenlet|标量先捕获 → [async session rollback 后访问 ORM 对象属性触发 MissingGreenlet（异常路径标量先捕获）](patterns.md#async-session-rollback-后访问-orm-对象属性触发-missinggreenlet异常路径标量先捕获)
+- 慢搜索等待文案与降级徽标分离|文案讲机制口径|徽标按|reason|路由 → [patterns.md#慢搜索等待文案与降级徽标分离——文案讲机制口径、徽标按 reason 路由](patterns.md#慢搜索等待文案与降级徽标分离——文案讲机制口径、徽标按 reason 路由)
 
 ## Known Issues
 - 导出|乱码|GBK|控制台码页|PYTHONIOENCODING|TOOL_RESULT|替换字符 → [会话日志 TOOL_RESULT 中文乱码（Windows 控制台码页，落库即坏不可导出还原）](known-issues.md#会话日志-tool_result-中文乱码windows-控制台码页落库即坏不可导出还原)
@@ -100,6 +102,10 @@
 - amcheck|唯一索引损坏|spec_file_manifest|REINDEX|归档显示进行中|spec-sync 422|bt_index_check → [🟢 平台 spec 清单唯一索引静默损坏（容器反复被杀后遗症）——归档后平台仍显示「进行中」+ spec-sync 恒 422（已修复）](known-issues.md#-平台-spec-清单唯一索引静默损坏容器反复被杀后遗症归档后平台仍显示进行中-spec-sync-恒-422已修复)
 - amcheck|pg_am|btree|GIN 误报|last_used_at|断档|墓碑|REINDEX → [🟢 本地 docker 平台同款索引静默损坏复发——免去重 REINDEX 分叉 + amcheck 必须 JOIN pg_am 过滤 btree + 同步静默断档信号（已修复；遗留：本地墓碑处置待拍板）](known-issues.md#-本地-docker-平台同款索引静默损坏复发免去重-reindex-分叉--amcheck-必须-join-pg_am-过滤-btree--同步静默断档信号已修复遗留本地墓碑处置待拍板)
 - 知识搜索|首搜建库|超时|504|KNOWLEDGE_SEARCH_SERVER_BUILD|懒同步|预建索引 → [🟡 平台知识搜索「首搜建库地雷」——未建索引工作区的第一次搜索必超时（大语料 OOM 整栈停摆）](known-issues.md#-平台知识搜索首搜建库地雷未建索引工作区的第一次搜索必超时大语料-oom-整栈停摆)
+- knowledge|propose|body|含反引号或美元符时双引号传参静默损坏|单引号包裹 → [known-issues.md#knowledge propose 的 --body 含反引号或美元符时双引号传参静默损坏——单引号包裹](known-issues.md#knowledge propose 的 --body 含反引号或美元符时双引号传参静默损坏——单引号包裹)
+- 时间戳列只配|default|不配|onupdate|同步成功时间恒显示建行时间误导排障 → [known-issues.md#时间戳列只配 default 不配 onupdate——同步成功时间恒显示建行时间误导排障](known-issues.md#时间戳列只配 default 不配 onupdate——同步成功时间恒显示建行时间误导排障)
+- 知识索引差量同步|worker|周期性|cgroup|OOM|2500m → [known-issues.md#知识索引差量同步 worker 周期性 cgroup OOM——2500m 限额标定偏紧，3500m 止血与排障序](known-issues.md#知识索引差量同步 worker 周期性 cgroup OOM——2500m 限额标定偏紧，3500m 止血与排障序)
+- 非工作区会话结束后无法重新开启|409|NO|CWD → [known-issues.md#非工作区会话结束后无法重新开启（409 NO_CWD）](known-issues.md#非工作区会话结束后无法重新开启（409 NO_CWD）)
 
 ## SillySpec Gotchas
 
