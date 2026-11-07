@@ -914,12 +914,14 @@ class SessionService(BackgroundTaskMixin):
         *,
         runtime_id: uuid.UUID,
         lease_id: uuid.UUID | None = None,
+        cwd: str | None = None,
     ) -> str:
         return await _recovery.confirm_session_reconnected(
             self,
             session_id=session_id,
             runtime_id=runtime_id,
             lease_id=lease_id,
+            cwd=cwd,
         )
 
     async def mark_session_recovery_failed(

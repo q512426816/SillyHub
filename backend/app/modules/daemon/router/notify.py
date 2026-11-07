@@ -84,11 +84,30 @@ class SessionRuntimeRequest(BaseModel):
     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
+
+    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon
+    恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库
+    ``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本
+    模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略
+    （独立审查已确认非缺口）。
     """
 
     runtime_id: uuid.UUID
     lease_id: uuid.UUID | None = None
     reason: str | None = Field(default=None, max_length=128)
+    cwd: str | None = Field(default=None, max_length=1024)
+
+
+class SessionReadyRequest(BaseModel):
+    """Body for POST /sessions/{session_id}/ready（可选）.
+
+    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报
+    捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；
+    recover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不
+    发 body（端点参数可选 ``None``）零影响；空串 no-op。
+    """
+
+    cwd: str | None = Field(default=None, max_length=1024)
 
 
 class SessionRecoveryResponse(BaseModel):
@@ -155,6 +174,7 @@ async def confirm_session_reconnected(
         session_id,
         runtime_id=data.runtime_id,
         lease_id=data.lease_id,
+        cwd=data.cwd,
     )
     return SessionRecoveryResponse(session_id=session_id, status=result_status)
 
@@ -249,6 +269,7 @@ async def notify_session_ready(
     session_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
+    data: SessionReadyRequest | None = None,
 ) -> dict[str, bool]:
     """Receive daemon session-ready report (task-06 / D-001@v1).
 
@@ -259,14 +280,38 @@ async def notify_session_ready(
 
     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
-    发现）。daemon 不上报 payload，故无 body 模型。
+    发现）。
+
+    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发
+    body → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库
+    ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串
+    no-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，
+    cwd 属最终一致增强项，reopen 兜底链覆盖）。
 
     越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
     主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
     伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。
     """
+    from sqlalchemy import update
+
+    from app.modules.agent.model import AgentSession as _AgentSession
+
     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     _router.get_session_readiness().mark_ready(session_id)
+    if data is not None and data.cwd:
+        try:
+            await session.execute(
+                update(_AgentSession).where(_AgentSession.id == session_id).values(cwd=data.cwd)
+            )
+            await session.commit()
+        except Exception:
+            # cwd 落库 best-effort：ready 语义（mark_ready）不受影响，rollback
+            # 防污染请求级会话（对齐 confirm 端点既有 try 隔离风格）。
+            await session.rollback()
+            log.warning(
+                "daemon.session_ready_cwd_persist_failed",
+                session_id=str(session_id),
+            )
     log.info("daemon.session_ready_reported", session_id=str(session_id))
     return {"ok": True}
 

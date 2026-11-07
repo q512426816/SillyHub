@@ -29,7 +29,6 @@ from .errors import (
     DaemonOffline,
     DaemonSessionInvariantViolation,
     DaemonSessionNoAgentSession,
-    DaemonSessionNoCwd,
     DaemonSessionNotActive,
     DaemonSessionNotFound,
     DaemonSessionResumeUnsupported,
@@ -58,9 +57,10 @@ async def reopen_session(
            :meth:`_heal_agent_session_id_from_runs`）；恢复不到（D-004:
            create-time handshake 从未产出 SDK session id）才抛
            :class:`DaemonSessionNoAgentSession`
-         - cwd empty → :class:`DaemonSessionNoCwd` (DS-7: scan/bootstrap
-           sessions have no cwd; SDK resume needs it to locate the
-           transcript — reject up front, session NOT mutated)
+         - cwd 为空不再提前拒绝（2026-11-06-session-reopen-no-cwd /
+           D-002@v2 取代 DS-7）：daemon 侧三级同源兜底链解析真实 cwd
+           （payload → 本地快照 → workspace_dir），resume 失败由既有
+           markRecoveryFailed 链收敛——非工作区闲聊会话可重开续聊。
          - status in _svc.ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
            (caller should use inject, not reopen), EXCEPT (DS-5): status
            == "reconnecting" with ``last_active_at`` older than
@@ -129,13 +129,6 @@ async def reopen_session(
             "session_sdk_id_healed_from_runs",
             session_id=str(session_id),
             agent_session_id=healed_id,
-        )
-    if not session.cwd:
-        # DS-7：scan/bootstrap 会话不写 cwd，空 cwd 的 SDK resume 必然失败
-        # （claude transcript 按 projects/<encoded-cwd>/ 定位），提前拒绝。
-        raise DaemonSessionNoCwd(
-            "该会话无关联工作目录，无法恢复对话记录",
-            details={"session_id": str(session_id)},
         )
     if session.status in _svc.ACTIVE_SESSION_STATUSES:
         # DS-5：仅 reconnecting 超窗是 _svc.ACTIVE_SESSION_STATUSES 例外（手动
@@ -297,10 +290,16 @@ async def reopen_session(
         "session_id": str(session.id),
         "lease_id": str(new_lease.id),
         "agent_session_id": session.agent_session_id,
-        "cwd": session.cwd,
         "provider": session.provider,
         "runtime_id": str(target_runtime_id),
     }
+    # 2026-11-06-session-reopen-no-cwd（D-002@v2/FR-01）：cwd 改条件键——非空
+    # 才入键、空/None 省略整键（不发 null）。daemon 侧三级链（payload 非空串 →
+    # 本地快照 → workspace_dir）对缺键/空串同判空接管；工作区会话（cwd 非空）
+    # payload 与历史行为逐字节一致（FR-05）。对齐同函数 provider_config 条件
+    # 入键先例（下方 if 块）。
+    if session.cwd:
+        resume_payload["cwd"] = session.cwd
     if resume_provider_config is not None:
         # R-02：明文 api_key 仅进 WS payload（服务端→daemon 下发通道），不入
         # 日志/ORM；daemon 侧同样不落日志（record.providerConfig 快照语义）。

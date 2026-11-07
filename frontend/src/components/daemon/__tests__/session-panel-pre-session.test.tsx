@@ -188,7 +188,10 @@ vi.mock("@/lib/api/llm-providers", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
     "@/lib/api/llm-providers",
   );
-  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+  // 2026-11-06 存量红适配（cascade 后组件数据源改 listUsableProviders）——
+  // 两键指向同一 fn，下方用例经 vi.mocked(listProviders) 注入对两者同效。
+  const listProviders = vi.fn().mockResolvedValue([]);
+  return { ...actual, listProviders, listUsableProviders: listProviders };
 });
 
 /* ----- fixture ----- */

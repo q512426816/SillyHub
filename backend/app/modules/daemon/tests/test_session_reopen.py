@@ -1105,13 +1105,15 @@ class TestReopenReconnectingRetryWindow:
 
 
 class TestReopenEmptyCwd:
-    """DS-7：cwd 为空（NULL/空串）→ 409 专用错误码 HTTP_409_DAEMON_SESSION_NO_CWD
-    + 中文文案；不新建 lease、不发 SESSION_RESUME。scan/bootstrap 会话不写 cwd
-    （agent/service.py、spec_workspace/bootstrap.py），空 cwd 的 SDK resume 必然
-    失败，提前拒绝优于让 daemon 报错。"""
+    """空 cwd 放行（2026-11-06-session-reopen-no-cwd / D-002@v2，取代 DS-7）：
+    cwd 为空（NULL/空串）且 agent_session_id 可用 → 不再 409，正常走 reopen
+    流程（200 reconnecting + 新建 lease + 下发 SESSION_RESUME）——daemon 侧
+    三级同源兜底链解析真实 cwd（payload → 本地快照 → workspace_dir），resume
+    失败由既有 markRecoveryFailed 链收敛。放行口径不按会话来源（origin）区分
+    （D-004/D-006：scan/bootstrap 会话顺带可重开，无破坏性）。"""
 
     @staticmethod
-    async def _assert_rejected_no_side_effects(
+    async def _assert_allowed_with_resume_effects(
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
@@ -1132,16 +1134,15 @@ class TestReopenEmptyCwd:
         monkeypatch.setattr(hub, "send_session_control", _capture)
 
         resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
-        assert resp.status_code == 409
-        body = resp.json()
-        assert body["code"] == "HTTP_409_DAEMON_SESSION_NO_CWD"
-        assert body["message"] == "该会话无关联工作目录，无法恢复对话记录"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "reconnecting"
 
-        # 无副作用：状态不变、不新建 lease、不下发 SESSION_RESUME。
+        # 副作用与正常 reopen 一致：状态翻 reconnecting、新建 lease、下发
+        # SESSION_RESUME（cwd 键形态断言归 task-04 条件键改造）。
         status_row = (
             await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
         ).scalar_one()
-        assert status_row == "ended"
+        assert status_row == "reconnecting"
         lease_count = (
             await db_session.execute(
                 select(func.count())
@@ -1149,10 +1150,15 @@ class TestReopenEmptyCwd:
                 .where(DaemonTaskLease.runtime_id == rt.id)
             )
         ).scalar_one()
-        assert lease_count == 0
-        assert sent == []
+        assert lease_count == 1
+        assert len(sent) == 1
+        assert sent[0]["session_id"] == str(sess.id)
+        assert sent[0]["agent_session_id"] == sess.agent_session_id
+        # task-04（D-002@v2）：空 cwd 会话 payload 省略整键（不发 null）——
+        # daemon 三级链对缺键接管。对照：工作区会话 cwd 键照发（:563 既有断言）。
+        assert "cwd" not in sent[0]
 
-    async def test_reopen_null_cwd_409(
+    async def test_reopen_null_cwd_allowed(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
@@ -1169,11 +1175,11 @@ class TestReopenEmptyCwd:
             agent_session_id="sdk-ncwd-1",
             cwd=None,
         )
-        await self._assert_rejected_no_side_effects(
+        await self._assert_allowed_with_resume_effects(
             client, auth_headers, db_session, monkeypatch, sess, rt
         )
 
-    async def test_reopen_empty_string_cwd_409(
+    async def test_reopen_empty_string_cwd_allowed(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
@@ -1190,7 +1196,8 @@ class TestReopenEmptyCwd:
             agent_session_id="sdk-ncwd-2",
             cwd="",
         )
-        await self._assert_rejected_no_side_effects(
+        # agent_session_id 与共用 helper 断言值对齐（同值复用断言面）。
+        await self._assert_allowed_with_resume_effects(
             client, auth_headers, db_session, monkeypatch, sess, rt
         )
 
@@ -1453,3 +1460,218 @@ class TestReopenConfirmLinkage:
 
 async def _async_true() -> bool:
     return True
+
+
+class TestCwdReporting:
+    """cwd 回报落库（2026-11-06-session-reopen-no-cwd / D-007/FR-03）。
+
+    confirm-reconnected 与 ready 两端点解析可选 ``cwd`` 键：非空字符串才写
+    ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值以回报覆写）；缺键
+    /空串 no-op；老 daemon 空 body（ready）零影响。"""
+
+    @staticmethod
+    async def _reopen_captured(
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+        *,
+        agent_session_id: str,
+        cwd: str | None = None,
+    ) -> tuple[AgentSession, uuid.UUID]:
+        from app.modules.daemon import ws_hub
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        sess = await _make_session(
+            db_session,
+            admin.id,
+            rt.id,
+            status="ended",
+            agent_session_id=agent_session_id,
+            cwd=cwd,
+        )
+        hub = ws_hub.get_daemon_ws_hub()
+        monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
+
+        async def _capture(_daemon_id, _msg, payload):
+            return True
+
+        monkeypatch.setattr(hub, "send_session_control", _capture)
+        resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        # 当前 lease_id 取自 DB（reopen 新建租约行）。
+        lease_id = (
+            await db_session.execute(
+                select(AgentSession.lease_id).where(AgentSession.id == sess.id)
+            )
+        ).scalar_one()
+        db_session.expunge_all()
+        return sess, lease_id
+
+    @staticmethod
+    async def _cwd_of(db_session: AsyncSession, session_id: uuid.UUID) -> str | None:
+        return (
+            await db_session.execute(select(AgentSession.cwd).where(AgentSession.id == session_id))
+        ).scalar_one()
+
+    async def test_confirm_with_cwd_persists(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """confirm 携非空 cwd → 翻 active 同时落库（daemon 真相源覆写语义）。"""
+        sess, lease_id = await self._reopen_captured(
+            client,
+            auth_headers,
+            db_session,
+            monkeypatch,
+            agent_session_id="sdk-cwd-conf",
+            cwd=None,
+        )
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
+            headers=auth_headers,
+            json={
+                "runtime_id": str(sess.runtime_id),
+                "lease_id": str(lease_id),
+                "cwd": "/tmp/daemon-resolved",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "active"
+        assert await self._cwd_of(db_session, sess.id) == "/tmp/daemon-resolved"
+
+    async def test_confirm_without_cwd_key_noop(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """confirm 不带 cwd 键 → cwd 保持原值（既有行为零变化）。"""
+        sess, lease_id = await self._reopen_captured(
+            client,
+            auth_headers,
+            db_session,
+            monkeypatch,
+            agent_session_id="sdk-cwd-nokey",
+            cwd="/ws/keep",
+        )
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
+            headers=auth_headers,
+            json={"runtime_id": str(sess.runtime_id), "lease_id": str(lease_id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) == "/ws/keep"
+
+    async def test_confirm_empty_string_cwd_noop(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """confirm cwd 空串 → no-op（值不变）。"""
+        sess, lease_id = await self._reopen_captured(
+            client,
+            auth_headers,
+            db_session,
+            monkeypatch,
+            agent_session_id="sdk-cwd-emptyconf",
+            cwd="/ws/keep2",
+        )
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
+            headers=auth_headers,
+            json={
+                "runtime_id": str(sess.runtime_id),
+                "lease_id": str(lease_id),
+                "cwd": "",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) == "/ws/keep2"
+
+    async def test_ready_with_cwd_persists_and_empty_body_noop(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """ready 携 cwd 落库；老 daemon 空 body（不发 json）200 零影响。"""
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        sess = await _make_session(
+            db_session,
+            admin.id,
+            rt.id,
+            status="active",
+            agent_session_id="sdk-cwd-ready",
+            cwd=None,
+        )
+        db_session.expunge_all()
+
+        # 空 body（老 daemon 形态）：200 且 cwd 不变。
+        resp = await client.post(f"/api/daemon/sessions/{sess.id}/ready", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"ok": True}
+        assert await self._cwd_of(db_session, sess.id) is None
+
+        # 空 json 对象（新 daemon 不传 cwd 键形态）同样零影响。
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/ready", headers=auth_headers, json={}
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) is None
+
+        # 携非空 cwd → 落库（原样透传）。
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/ready",
+            headers=auth_headers,
+            json={"cwd": "C:/Work/Dir/"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) == "C:/Work/Dir/"
+
+    async def test_ready_and_confirm_out_of_order_idempotent(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """乱序幂等（盲区 #2）：confirm 与 ready 先后到达（create 后 ready 慢于
+        reopen 后 confirm）→ 各自独立落库，最终值为 daemon 最新回报，无部分写。"""
+        sess, lease_id = await self._reopen_captured(
+            client,
+            auth_headers,
+            db_session,
+            monkeypatch,
+            agent_session_id="sdk-cwd-order",
+            cwd=None,
+        )
+        # confirm（reopen 链）先到，携三级链结果 A。
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
+            headers=auth_headers,
+            json={
+                "runtime_id": str(sess.runtime_id),
+                "lease_id": str(lease_id),
+                "cwd": "/tmp/order-a",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) == "/tmp/order-a"
+
+        # ready（create 链迟到）后到，携实际运行目录 B → 覆写为最新值。
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/ready",
+            headers=auth_headers,
+            json={"cwd": "/tmp/order-b"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert await self._cwd_of(db_session, sess.id) == "/tmp/order-b"

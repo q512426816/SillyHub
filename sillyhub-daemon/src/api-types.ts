@@ -6014,7 +6014,13 @@ export interface paths {
          *
          *     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
          *     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
-         *     发现）。daemon 不上报 payload，故无 body 模型。
+         *     发现）。
+         *
+         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发
+         *     body → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库
+         *     ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串
+         *     no-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，
+         *     cwd 属最终一致增强项，reopen 兜底链覆盖）。
          *
          *     越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
          *     主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
@@ -26713,6 +26719,19 @@ export interface components {
             items?: components["schemas"]["SessionQueueEntry"][];
         };
         /**
+         * SessionReadyRequest
+         * @description Body for POST /sessions/{session_id}/ready（可选）.
+         *
+         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报
+         *     捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；
+         *     recover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不
+         *     发 body（端点参数可选 ``None``）零影响；空串 no-op。
+         */
+        SessionReadyRequest: {
+            /** Cwd */
+            cwd?: string | null;
+        };
+        /**
          * SessionRecoverRequest
          * @description Body for POST /sessions/{session_id}/recover (gap-8.1).
          *
@@ -26896,6 +26915,12 @@ export interface components {
          *     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
          *     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
          *     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
+         *
+         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon
+         *     恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库
+         *     ``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本
+         *     模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略
+         *     （独立审查已确认非缺口）。
          */
         SessionRuntimeRequest: {
             /**
@@ -26907,6 +26932,8 @@ export interface components {
             lease_id?: string | null;
             /** Reason */
             reason?: string | null;
+            /** Cwd */
+            cwd?: string | null;
         };
         /**
          * SessionSuspendBatchRequest
@@ -41149,7 +41176,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SessionReadyRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

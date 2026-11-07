@@ -303,15 +303,20 @@ describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume /
 
     // FR-03：恢复成功必须真实发出 confirm（携 payload 的 leaseId/runtimeId，
     // 不依赖 _recoveryRuntimeBySession 映射——reopen 路径从未写映射）。
+    // 2026-11-06-session-reopen-no-cwd（D-007）：confirm/ready 均捎带 cwd
+    //（=record.cwd，payload 第一级命中值）——断言随新契约更新。
     expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
     expect(client.confirmReconnected).toHaveBeenCalledWith('sess-confirm-1', {
       leaseId: 'lease-confirm-1',
       runtimeId: 'runtime-from-payload',
+      cwd: '/tmp/p',
     });
     // 失败端点不应被触碰。
     expect(client.markRecoveryFailed).not.toHaveBeenCalled();
     // notifySessionReady 保持在其后（仍执行，不被 confirm 阻断）。
-    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-confirm-1');
+    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-confirm-1', {
+      cwd: '/tmp/p',
+    });
     expect(
       client.confirmReconnected.mock.invocationCallOrder[0]!,
     ).toBeLessThan(client.notifySessionReady.mock.invocationCallOrder[0]!);
@@ -404,10 +409,12 @@ describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume /
     await new Promise((r) => setTimeout(r, 5));
 
     // confirm HTTP 失败仅 warn：本地已恢复 active 不回滚，ready 上报继续
-    //（backend 180s sweeper 兜底收敛）。
+    //（backend 180s sweeper 兜底收敛）。ready 现捎带 cwd（D-007，=record.cwd）。
     expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
     expect(sm.markReconnected).toHaveBeenCalledWith('sess-502');
-    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-502');
+    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-502', {
+      cwd: '/tmp/502',
+    });
     expect(client.markRecoveryFailed).not.toHaveBeenCalled();
   });
 });
@@ -662,5 +669,250 @@ describe('daemon SESSION_RESUME 恢复不续命 lastActiveAt（FR-01 / 2026-11-0
     expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
     const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
     expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
+  });
+});
+
+// FR-01/FR-04（2026-11-06-session-reopen-no-cwd / D-002@v2）：SESSION_RESUME
+// 恢复记录的 cwd 三级同源兜底链——payload 非空串 → 本地 sessions.json 快照 →
+// config.workspace_dir（与 create 兜底同一条规则）。空 cwd 会话（非工作区，
+// backend DS-7 放行后 payload 省略 cwd 键）不再得空串必败；键缺省/null/空串
+// 三者同判空；cwd 原样透传不归一化。
+describe('daemon SESSION_RESUME cwd 三级同源兜底链（D-002@v2 / 2026-11-06-session-reopen-no-cwd）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  function createFakePersistence(records: unknown[]) {
+    return {
+      load: vi.fn(async () => records),
+      save: vi.fn(async () => {}),
+    };
+  }
+
+  function buildDaemonWithPersistence(
+    persistence: ReturnType<typeof createFakePersistence>,
+  ): {
+    daemon: Daemon;
+    sm: SessionManager;
+  } {
+    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
+    const client = createMockClient();
+    const sm = createMockSessionManager();
+    const daemon = new Daemon(
+      mockConfig,
+      client as never,
+      createMockTaskRunner() as never,
+      { detector, sessionManager: sm, persistence } as never,
+    );
+    return { daemon, sm: sm as SessionManager };
+  }
+
+  function snapshotRecord(sessionId: string, cwd: string): unknown {
+    return {
+      sessionId,
+      leaseId: 'lease-snap',
+      agentSessionId: `agent-sid-${sessionId}`,
+      cwd,
+      provider: 'claude',
+      turnCount: 1,
+      lastActiveAt: 1700000000000,
+    };
+  }
+
+  it('payload cwd 非空 → 第一级命中（快照异值不覆盖，工作区会话零变化）', async () => {
+    const persistence = createFakePersistence([
+      snapshotRecord('sess-cwd-ws', '/tmp/snap-wrong'),
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-ws',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-sess-cwd-ws',
+        cwd: '/tmp/proj-ws',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('/tmp/proj-ws');
+  });
+
+  it('payload 缺 cwd 键（非工作区会话 DS-7 放行形态）→ 快照 cwd 兜底', async () => {
+    const persistence = createFakePersistence([
+      snapshotRecord('sess-cwd-snap', '/tmp/snap-cwd'),
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-snap',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-sess-cwd-snap',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('/tmp/snap-cwd');
+  });
+
+  it('payload cwd 为 null（旧 backend 显式 null）→ 跳过 null 落快照级', async () => {
+    const persistence = createFakePersistence([
+      snapshotRecord('sess-cwd-null', '/tmp/snap-null'),
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-null',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-sess-cwd-null',
+        cwd: null,
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('/tmp/snap-null');
+  });
+
+  it('payload cwd 为空串（工作区 root_path 历史脏数据）→ 跳过空串落快照级', async () => {
+    const persistence = createFakePersistence([
+      snapshotRecord('sess-cwd-empty', '/tmp/snap-empty'),
+    ]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-empty',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-sess-cwd-empty',
+        cwd: '',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('/tmp/snap-empty');
+  });
+
+  it('payload 缺 cwd 且快照无记录 → workspace_dir 兜底（与 create 同源）', async () => {
+    const persistence = createFakePersistence([]);
+    const { daemon, sm } = buildDaemonWithPersistence(persistence);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-fallback',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-fallback',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    // mockConfig.workspace_dir = '/tmp/ws'——第三级与 create 兜底同一条规则。
+    expect(record.cwd).toBe('/tmp/ws');
+  });
+
+  it('无 persistence 注入（生产前形态）→ workspace_dir 兜底恒非空', async () => {
+    const { daemon, sm } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-nopersist',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-nopersist',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('/tmp/ws');
+  });
+
+  it('cwd 值原样透传不归一化（尾斜杠/大小写保真）', async () => {
+    const { daemon, sm } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-raw',
+        lease_id: 'lease-new',
+        agent_session_id: 'agent-sid-raw',
+        cwd: 'C:/Work/Dir/',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.cwd).toBe('C:/Work/Dir/');
+  });
+
+  it('resume 成功后 confirm 与 ready 均捎带 cwd（=record.cwd 三级链结果，D-007）', async () => {
+    const persistence = createFakePersistence([
+      snapshotRecord('sess-cwd-report', '/tmp/snap-report'),
+    ]);
+    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
+    const client = createMockClient();
+    const sm = createMockSessionManager();
+    const daemon = new Daemon(
+      mockConfig,
+      client as never,
+      createMockTaskRunner() as never,
+      { detector, sessionManager: sm, persistence } as never,
+    );
+    daemons.push(daemon);
+
+    // payload 无 cwd（非工作区形态）→ 三级链落快照值，confirm/ready 携同值。
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-cwd-report',
+        lease_id: 'lease-report',
+        agent_session_id: 'agent-sid-sess-cwd-report',
+        runtime_id: 'runtime-uuid-123',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(client.confirmReconnected).toHaveBeenCalledWith('sess-cwd-report', {
+      leaseId: 'lease-report',
+      runtimeId: 'runtime-uuid-123',
+      cwd: '/tmp/snap-report',
+    });
+    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-cwd-report', {
+      cwd: '/tmp/snap-report',
+    });
   });
 });

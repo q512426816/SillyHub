@@ -208,6 +208,43 @@ async def test_recovers_suspended_main_session_when_runtime_back_online(
     assert payload["runtime_id"] == str(rt.id)
     assert payload["lease_id"] == str(lease.id)
     assert payload["provider"] == "claude"
+    # task-04（D-002@v2/FR-05）：cwd 非空（fixture 默认 /workspace/proj）→ 键照发，
+    # 工作区会话 payload 行为不变。
+    assert payload["cwd"] == "/workspace/proj"
+
+
+async def test_recovers_empty_cwd_session_payload_omits_cwd_key(
+    db_session: AsyncSession,
+) -> None:
+    """task-04（2026-11-06-session-reopen-no-cwd / D-002@v2）：空 cwd 会话（非工作区
+    闲聊形态）auto-recover 下发的 session_resume payload 省略 cwd 整键（不发
+    null）——daemon 三级同源兜底链接管。"""
+    user = await _make_user(db_session)
+    rt = await _make_runtime(db_session, user.id, status="online")
+    lease = await _make_lease(db_session, rt.id)
+    suspended_at = datetime.now(UTC) - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC + 60)
+    sess = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        lease.id,
+        status="suspended",
+        last_active_at=suspended_at,
+    )
+    # 覆写 cwd 为空（fixture 默认非空）——非工作区会话落库形态。
+    sess.cwd = None
+    db_session.add(sess)
+    await db_session.commit()
+
+    recovered = await session_auto_recover_sweep_once(db_session)
+
+    assert recovered == 1
+    assert await _session_status(db_session, sess.id) == "reconnecting"
+    commands = await _resume_commands(db_session)
+    assert len(commands) == 1
+    payload = commands[0].payload
+    assert payload is not None
+    assert "cwd" not in payload
 
 
 async def test_skips_when_runtime_offline_or_stale_heartbeat(db_session: AsyncSession) -> None:

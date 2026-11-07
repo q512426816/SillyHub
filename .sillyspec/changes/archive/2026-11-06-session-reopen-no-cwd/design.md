@@ -75,12 +75,15 @@ backend：test_session_reopen.py DS-7 用例改写（空 cwd + agent_session_id 
 | 修改 | backend/app/modules/daemon/sweep.py | 恢复路径 resume payload 同步 cwd 条件键（:611-755 内构造处） |
 | 修改 | backend/app/modules/daemon/session/service/errors.py | `DaemonSessionNoCwd` 错误类退役删除 |
 | 修改 | backend/app/modules/daemon/router/notify.py | confirm（:140）与 ready（:248）端点解析可选 cwd 键落 session.cwd。数据流：producer=daemon daemon.ts 三处发送点（cwd=实际生效目录）→ HTTP body（可选键，snake_case `cwd`）→ consumer=backend 两端点写 agent_sessions.cwd |
-| 修改 | backend/app/modules/daemon/schema.py | SessionRuntimeRequest（及 ready 端点 body schema，按现状落位）加可选 `cwd` 字段——producer=daemon hub-client → OpenAPI → consumer=前端/daemon 双端 gen:types 产物 |
+| 修改 | backend/app/modules/daemon/service.py | DaemonService 门面 confirm_session_reconnected 加 cwd 透传（execute 期定位修正：confirm 走 daemon/service.py → session/service/__init__.py → recovery.py 三层门面） |
+| 修改 | backend/app/modules/daemon/session/service/recovery.py | confirm 成功翻转分支同事务落库 session.cwd（daemon 真相源覆写；stale-skip/非 reconnecting 分支不落库） |
+| 修改 | backend/app/modules/daemon/session/service/__init__.py | SessionService 门面 confirm 方法加 cwd 透传（三层门面中转层） |
 | 修改 | backend/app/modules/daemon/tests/test_session_reopen.py | DS-7 用例改写 + 回报落库/放行用例 |
-| 修改 | backend/app/modules/daemon/tests/test_session_reconnect_sweep.py | sweep 恢复路径 payload 条件键用例（plan 阶段对齐补充） |
+| 修改 | backend/app/modules/daemon/tests/test_session_sweep_recover.py | sweep 恢复路径 payload 条件键用例（plan 阶段对齐补充；execute 期定位修正——payload 下发用例在此文件而非 reconnect_sweep） |
 | 修改 | sillyhub-daemon/src/daemon.ts | record.cwd 三级链（:9503）；三处发送点携带 cwd（:9567/:9581/:10782）。数据流：三级链解析（payload→快照→workspace_dir）→ 发送点携带 → backend 落库 |
 | 修改 | sillyhub-daemon/src/hub-client.ts | `notifySessionReady`/`confirmReconnected` 加可选 cwd 参数（不传不发键） |
 | 修改 | sillyhub-daemon/tests/daemon-session-resume-route.test.ts | 三级链用例 + 回报携带用例 |
+| 修改 | sillyhub-daemon/tests/hub-client.test.ts | cwd 捎带键序列化契约 6 用例（执行期定位补充——用例按测试归属落 hub-client 测试文件） |
 | 生成 | frontend/src/lib/api-types.ts | `pnpm gen:types` 产物（schema 加可选字段联动） |
 | 生成 | sillyhub-daemon/src/api-types.ts | `pnpm -C sillyhub-daemon gen:types` 产物（同上） |
 | 生成 | backend/openapi.json | OpenAPI 导出产物（同上） |

@@ -101,21 +101,6 @@ class DaemonSessionNoAgentSession(AppError):
     http_status = 409
 
 
-class DaemonSessionNoCwd(AppError):
-    """Session has an empty ``cwd`` — SDK resume cannot locate the transcript
-    (DS-7, 2026-08-21-session-reopen-resume).
-
-    Scan/bootstrap sessions are created without a ``cwd``
-    (``agent/service.py`` scan path / ``spec_workspace/bootstrap.py``), and
-    Claude transcripts live under ``projects/<encoded-cwd>/`` — an empty cwd
-    can never resume. Reject reopen up front instead of letting the
-    daemon-side SDK resume fail. The session is NOT mutated.
-    """
-
-    code = "HTTP_409_DAEMON_SESSION_NO_CWD"
-    http_status = 409
-
-
 class DaemonOffline(AppError):
     """Target runtime has no active WS connection — reopen needs a live daemon.
 

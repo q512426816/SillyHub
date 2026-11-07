@@ -1,0 +1,1450 @@
+diff --git a/backend/app/modules/daemon/router/notify.py b/backend/app/modules/daemon/router/notify.py
+index b8ae4cf64..788c0d9c4 100644
+--- a/backend/app/modules/daemon/router/notify.py
++++ b/backend/app/modules/daemon/router/notify.py
+@@ -84,11 +84,30 @@ class SessionRuntimeRequest(BaseModel):
+     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
+     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
+     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
++
++    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon
++    恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库
++    ``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本
++    模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略
++    （独立审查已确认非缺口）。
+     """
+ 
+     runtime_id: uuid.UUID
+     lease_id: uuid.UUID | None = None
+     reason: str | None = Field(default=None, max_length=128)
++    cwd: str | None = Field(default=None, max_length=1024)
++
++
++class SessionReadyRequest(BaseModel):
++    """Body for POST /sessions/{session_id}/ready（可选）.
++
++    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报
++    捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；
++    recover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不
++    发 body（端点参数可选 ``None``）零影响；空串 no-op。
++    """
++
++    cwd: str | None = Field(default=None, max_length=1024)
+ 
+ 
+ class SessionRecoveryResponse(BaseModel):
+@@ -155,6 +174,7 @@ async def confirm_session_reconnected(
+         session_id,
+         runtime_id=data.runtime_id,
+         lease_id=data.lease_id,
++        cwd=data.cwd,
+     )
+     return SessionRecoveryResponse(session_id=session_id, status=result_status)
+ 
+@@ -249,6 +269,7 @@ async def notify_session_ready(
+     session_id: uuid.UUID,
+     session: SessionDep,
+     user: Annotated[User, Depends(get_current_principal)],
++    data: SessionReadyRequest | None = None,
+ ) -> dict[str, bool]:
+     """Receive daemon session-ready report (task-06 / D-001@v1).
+ 
+@@ -259,14 +280,38 @@ async def notify_session_ready(
+ 
+     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+-    发现）。daemon 不上报 payload，故无 body 模型。
++    发现）。
++
++    2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发
++    body → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库
++    ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串
++    no-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，
++    cwd 属最终一致增强项，reopen 兜底链覆盖）。
+ 
+     越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
+     主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
+     伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。
+     """
++    from sqlalchemy import update
++
++    from app.modules.agent.model import AgentSession as _AgentSession
++
+     await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
+     _router.get_session_readiness().mark_ready(session_id)
++    if data is not None and data.cwd:
++        try:
++            await session.execute(
++                update(_AgentSession).where(_AgentSession.id == session_id).values(cwd=data.cwd)
++            )
++            await session.commit()
++        except Exception:
++            # cwd 落库 best-effort：ready 语义（mark_ready）不受影响，rollback
++            # 防污染请求级会话（对齐 confirm 端点既有 try 隔离风格）。
++            await session.rollback()
++            log.warning(
++                "daemon.session_ready_cwd_persist_failed",
++                session_id=str(session_id),
++            )
+     log.info("daemon.session_ready_reported", session_id=str(session_id))
+     return {"ok": True}
+ 
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index a9253e4fc..f019de048 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -949,9 +949,10 @@ class DaemonService:
+         *,
+         runtime_id: uuid.UUID,
+         lease_id: uuid.UUID | None = None,
++        cwd: str | None = None,
+     ) -> str:
+         return await self._sess.confirm_session_reconnected(
+-            session_id, runtime_id=runtime_id, lease_id=lease_id
++            session_id, runtime_id=runtime_id, lease_id=lease_id, cwd=cwd
+         )
+ 
+     async def mark_session_recovery_failed(
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index 67c1f3042..58c12aa66 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -914,12 +914,14 @@ class SessionService(BackgroundTaskMixin):
+         *,
+         runtime_id: uuid.UUID,
+         lease_id: uuid.UUID | None = None,
++        cwd: str | None = None,
+     ) -> str:
+         return await _recovery.confirm_session_reconnected(
+             self,
+             session_id=session_id,
+             runtime_id=runtime_id,
+             lease_id=lease_id,
++            cwd=cwd,
+         )
+ 
+     async def mark_session_recovery_failed(
+diff --git a/backend/app/modules/daemon/session/service/errors.py b/backend/app/modules/daemon/session/service/errors.py
+index d7940a08a..4ad8dcdfe 100644
+--- a/backend/app/modules/daemon/session/service/errors.py
++++ b/backend/app/modules/daemon/session/service/errors.py
+@@ -101,21 +101,6 @@ class DaemonSessionNoAgentSession(AppError):
+     http_status = 409
+ 
+ 
+-class DaemonSessionNoCwd(AppError):
+-    """Session has an empty ``cwd`` — SDK resume cannot locate the transcript
+-    (DS-7, 2026-08-21-session-reopen-resume).
+-
+-    Scan/bootstrap sessions are created without a ``cwd``
+-    (``agent/service.py`` scan path / ``spec_workspace/bootstrap.py``), and
+-    Claude transcripts live under ``projects/<encoded-cwd>/`` — an empty cwd
+-    can never resume. Reject reopen up front instead of letting the
+-    daemon-side SDK resume fail. The session is NOT mutated.
+-    """
+-
+-    code = "HTTP_409_DAEMON_SESSION_NO_CWD"
+-    http_status = 409
+-
+-
+ class DaemonOffline(AppError):
+     """Target runtime has no active WS connection — reopen needs a live daemon.
+ 
+diff --git a/backend/app/modules/daemon/session/service/recovery.py b/backend/app/modules/daemon/session/service/recovery.py
+index b194fb3a3..ed08fb43a 100644
+--- a/backend/app/modules/daemon/session/service/recovery.py
++++ b/backend/app/modules/daemon/session/service/recovery.py
+@@ -491,6 +491,7 @@ async def confirm_session_reconnected(
+     *,
+     runtime_id: uuid.UUID,
+     lease_id: uuid.UUID | None = None,
++    cwd: str | None = None,
+ ) -> str:
+     """Flip a reconnecting session to active after daemon resume succeeds.
+ 
+@@ -555,6 +556,13 @@ async def confirm_session_reconnected(
+ 
+         session.status = "active"
+         session.last_active_at = datetime.now(UTC)
++        # 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：捎带可选 cwd 落库
++        # （daemon 三级链解析结果）。daemon 为目录真相源（D-003）——非空回报
++        # 覆写既有值（工作区会话同值幂等；异值以 daemon 实际为准）；空/缺省
++        # no-op。随本翻转事务同 commit。stale-skip / 非 reconnecting 分支
++        # （上方早退 rollback）不落库——迟到回报不写第二次 reopen 的会话。
++        if cwd:
++            session.cwd = cwd
+         svc._session.add(session)
+         await svc._session.commit()
+         await svc._session.refresh(session)
+diff --git a/backend/app/modules/daemon/session/service/session_lifecycle.py b/backend/app/modules/daemon/session/service/session_lifecycle.py
+index d3fe90016..9f8f5a0d5 100644
+--- a/backend/app/modules/daemon/session/service/session_lifecycle.py
++++ b/backend/app/modules/daemon/session/service/session_lifecycle.py
+@@ -29,7 +29,6 @@ from .errors import (
+     DaemonOffline,
+     DaemonSessionInvariantViolation,
+     DaemonSessionNoAgentSession,
+-    DaemonSessionNoCwd,
+     DaemonSessionNotActive,
+     DaemonSessionNotFound,
+     DaemonSessionResumeUnsupported,
+@@ -58,9 +57,10 @@ async def reopen_session(
+            :meth:`_heal_agent_session_id_from_runs`）；恢复不到（D-004:
+            create-time handshake 从未产出 SDK session id）才抛
+            :class:`DaemonSessionNoAgentSession`
+-         - cwd empty → :class:`DaemonSessionNoCwd` (DS-7: scan/bootstrap
+-           sessions have no cwd; SDK resume needs it to locate the
+-           transcript — reject up front, session NOT mutated)
++         - cwd 为空不再提前拒绝（2026-11-06-session-reopen-no-cwd /
++           D-002@v2 取代 DS-7）：daemon 侧三级同源兜底链解析真实 cwd
++           （payload → 本地快照 → workspace_dir），resume 失败由既有
++           markRecoveryFailed 链收敛——非工作区闲聊会话可重开续聊。
+          - status in _svc.ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
+            (caller should use inject, not reopen), EXCEPT (DS-5): status
+            == "reconnecting" with ``last_active_at`` older than
+@@ -130,13 +130,6 @@ async def reopen_session(
+             session_id=str(session_id),
+             agent_session_id=healed_id,
+         )
+-    if not session.cwd:
+-        # DS-7：scan/bootstrap 会话不写 cwd，空 cwd 的 SDK resume 必然失败
+-        # （claude transcript 按 projects/<encoded-cwd>/ 定位），提前拒绝。
+-        raise DaemonSessionNoCwd(
+-            "该会话无关联工作目录，无法恢复对话记录",
+-            details={"session_id": str(session_id)},
+-        )
+     if session.status in _svc.ACTIVE_SESSION_STATUSES:
+         # DS-5：仅 reconnecting 超窗是 _svc.ACTIVE_SESSION_STATUSES 例外（手动
+         # 重试兜底）；窗口内 / last_active_at 为 NULL（保守）/ pending /
+@@ -297,10 +290,16 @@ async def reopen_session(
+         "session_id": str(session.id),
+         "lease_id": str(new_lease.id),
+         "agent_session_id": session.agent_session_id,
+-        "cwd": session.cwd,
+         "provider": session.provider,
+         "runtime_id": str(target_runtime_id),
+     }
++    # 2026-11-06-session-reopen-no-cwd（D-002@v2/FR-01）：cwd 改条件键——非空
++    # 才入键、空/None 省略整键（不发 null）。daemon 侧三级链（payload 非空串 →
++    # 本地快照 → workspace_dir）对缺键/空串同判空接管；工作区会话（cwd 非空）
++    # payload 与历史行为逐字节一致（FR-05）。对齐同函数 provider_config 条件
++    # 入键先例（下方 if 块）。
++    if session.cwd:
++        resume_payload["cwd"] = session.cwd
+     if resume_provider_config is not None:
+         # R-02：明文 api_key 仅进 WS payload（服务端→daemon 下发通道），不入
+         # 日志/ORM；daemon 侧同样不落日志（record.providerConfig 快照语义）。
+diff --git a/backend/app/modules/daemon/sweep.py b/backend/app/modules/daemon/sweep.py
+index 795479786..76a87c8ac 100644
+--- a/backend/app/modules/daemon/sweep.py
++++ b/backend/app/modules/daemon/sweep.py
+@@ -717,10 +717,13 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
+             "session_id": str(row.id),
+             "lease_id": str(row.lease_id) if row.lease_id is not None else None,
+             "agent_session_id": sess.agent_session_id,
+-            "cwd": sess.cwd,
+             "provider": sess.provider,
+             "runtime_id": str(row.runtime_id),
+         }
++        # 2026-11-06-session-reopen-no-cwd（D-002@v2）：cwd 条件键——非空才入键
++        # （与 reopen 主路径 session_lifecycle.py 同款），daemon 三级链接管空值。
++        if sess.cwd:
++            payload["cwd"] = sess.cwd
+         if row.llm_provider_id is not None:
+             try:
+                 provider_config = await resolve_bound_provider_config(
+diff --git a/backend/app/modules/daemon/tests/test_session_reopen.py b/backend/app/modules/daemon/tests/test_session_reopen.py
+index 89119b392..45dd95b06 100644
+--- a/backend/app/modules/daemon/tests/test_session_reopen.py
++++ b/backend/app/modules/daemon/tests/test_session_reopen.py
+@@ -1105,13 +1105,15 @@ class TestReopenReconnectingRetryWindow:
+ 
+ 
+ class TestReopenEmptyCwd:
+-    """DS-7：cwd 为空（NULL/空串）→ 409 专用错误码 HTTP_409_DAEMON_SESSION_NO_CWD
+-    + 中文文案；不新建 lease、不发 SESSION_RESUME。scan/bootstrap 会话不写 cwd
+-    （agent/service.py、spec_workspace/bootstrap.py），空 cwd 的 SDK resume 必然
+-    失败，提前拒绝优于让 daemon 报错。"""
++    """空 cwd 放行（2026-11-06-session-reopen-no-cwd / D-002@v2，取代 DS-7）：
++    cwd 为空（NULL/空串）且 agent_session_id 可用 → 不再 409，正常走 reopen
++    流程（200 reconnecting + 新建 lease + 下发 SESSION_RESUME）——daemon 侧
++    三级同源兜底链解析真实 cwd（payload → 本地快照 → workspace_dir），resume
++    失败由既有 markRecoveryFailed 链收敛。放行口径不按会话来源（origin）区分
++    （D-004/D-006：scan/bootstrap 会话顺带可重开，无破坏性）。"""
+ 
+     @staticmethod
+-    async def _assert_rejected_no_side_effects(
++    async def _assert_allowed_with_resume_effects(
+         client: AsyncClient,
+         auth_headers: dict[str, str],
+         db_session: AsyncSession,
+@@ -1132,16 +1134,15 @@ class TestReopenEmptyCwd:
+         monkeypatch.setattr(hub, "send_session_control", _capture)
+ 
+         resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
+-        assert resp.status_code == 409
+-        body = resp.json()
+-        assert body["code"] == "HTTP_409_DAEMON_SESSION_NO_CWD"
+-        assert body["message"] == "该会话无关联工作目录，无法恢复对话记录"
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["status"] == "reconnecting"
+ 
+-        # 无副作用：状态不变、不新建 lease、不下发 SESSION_RESUME。
++        # 副作用与正常 reopen 一致：状态翻 reconnecting、新建 lease、下发
++        # SESSION_RESUME（cwd 键形态断言归 task-04 条件键改造）。
+         status_row = (
+             await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+         ).scalar_one()
+-        assert status_row == "ended"
++        assert status_row == "reconnecting"
+         lease_count = (
+             await db_session.execute(
+                 select(func.count())
+@@ -1149,10 +1150,15 @@ class TestReopenEmptyCwd:
+                 .where(DaemonTaskLease.runtime_id == rt.id)
+             )
+         ).scalar_one()
+-        assert lease_count == 0
+-        assert sent == []
++        assert lease_count == 1
++        assert len(sent) == 1
++        assert sent[0]["session_id"] == str(sess.id)
++        assert sent[0]["agent_session_id"] == sess.agent_session_id
++        # task-04（D-002@v2）：空 cwd 会话 payload 省略整键（不发 null）——
++        # daemon 三级链对缺键接管。对照：工作区会话 cwd 键照发（:563 既有断言）。
++        assert "cwd" not in sent[0]
+ 
+-    async def test_reopen_null_cwd_409(
++    async def test_reopen_null_cwd_allowed(
+         self,
+         client: AsyncClient,
+         auth_headers: dict[str, str],
+@@ -1169,11 +1175,11 @@ class TestReopenEmptyCwd:
+             agent_session_id="sdk-ncwd-1",
+             cwd=None,
+         )
+-        await self._assert_rejected_no_side_effects(
++        await self._assert_allowed_with_resume_effects(
+             client, auth_headers, db_session, monkeypatch, sess, rt
+         )
+ 
+-    async def test_reopen_empty_string_cwd_409(
++    async def test_reopen_empty_string_cwd_allowed(
+         self,
+         client: AsyncClient,
+         auth_headers: dict[str, str],
+@@ -1190,7 +1196,8 @@ class TestReopenEmptyCwd:
+             agent_session_id="sdk-ncwd-2",
+             cwd="",
+         )
+-        await self._assert_rejected_no_side_effects(
++        # agent_session_id 与共用 helper 断言值对齐（同值复用断言面）。
++        await self._assert_allowed_with_resume_effects(
+             client, auth_headers, db_session, monkeypatch, sess, rt
+         )
+ 
+@@ -1453,3 +1460,218 @@ class TestReopenConfirmLinkage:
+ 
+ async def _async_true() -> bool:
+     return True
++
++
++class TestCwdReporting:
++    """cwd 回报落库（2026-11-06-session-reopen-no-cwd / D-007/FR-03）。
++
++    confirm-reconnected 与 ready 两端点解析可选 ``cwd`` 键：非空字符串才写
++    ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值以回报覆写）；缺键
++    /空串 no-op；老 daemon 空 body（ready）零影响。"""
++
++    @staticmethod
++    async def _reopen_captured(
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        monkeypatch,
++        *,
++        agent_session_id: str,
++        cwd: str | None = None,
++    ) -> tuple[AgentSession, uuid.UUID]:
++        from app.modules.daemon import ws_hub
++
++        admin = await _admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        sess = await _make_session(
++            db_session,
++            admin.id,
++            rt.id,
++            status="ended",
++            agent_session_id=agent_session_id,
++            cwd=cwd,
++        )
++        hub = ws_hub.get_daemon_ws_hub()
++        monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
++
++        async def _capture(_daemon_id, _msg, payload):
++            return True
++
++        monkeypatch.setattr(hub, "send_session_control", _capture)
++        resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        # 当前 lease_id 取自 DB（reopen 新建租约行）。
++        lease_id = (
++            await db_session.execute(
++                select(AgentSession.lease_id).where(AgentSession.id == sess.id)
++            )
++        ).scalar_one()
++        db_session.expunge_all()
++        return sess, lease_id
++
++    @staticmethod
++    async def _cwd_of(db_session: AsyncSession, session_id: uuid.UUID) -> str | None:
++        return (
++            await db_session.execute(select(AgentSession.cwd).where(AgentSession.id == session_id))
++        ).scalar_one()
++
++    async def test_confirm_with_cwd_persists(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        monkeypatch,
++    ) -> None:
++        """confirm 携非空 cwd → 翻 active 同时落库（daemon 真相源覆写语义）。"""
++        sess, lease_id = await self._reopen_captured(
++            client,
++            auth_headers,
++            db_session,
++            monkeypatch,
++            agent_session_id="sdk-cwd-conf",
++            cwd=None,
++        )
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
++            headers=auth_headers,
++            json={
++                "runtime_id": str(sess.runtime_id),
++                "lease_id": str(lease_id),
++                "cwd": "/tmp/daemon-resolved",
++            },
++        )
++        assert resp.status_code == 200, resp.text
++        assert resp.json()["status"] == "active"
++        assert await self._cwd_of(db_session, sess.id) == "/tmp/daemon-resolved"
++
++    async def test_confirm_without_cwd_key_noop(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        monkeypatch,
++    ) -> None:
++        """confirm 不带 cwd 键 → cwd 保持原值（既有行为零变化）。"""
++        sess, lease_id = await self._reopen_captured(
++            client,
++            auth_headers,
++            db_session,
++            monkeypatch,
++            agent_session_id="sdk-cwd-nokey",
++            cwd="/ws/keep",
++        )
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
++            headers=auth_headers,
++            json={"runtime_id": str(sess.runtime_id), "lease_id": str(lease_id)},
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) == "/ws/keep"
++
++    async def test_confirm_empty_string_cwd_noop(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        monkeypatch,
++    ) -> None:
++        """confirm cwd 空串 → no-op（值不变）。"""
++        sess, lease_id = await self._reopen_captured(
++            client,
++            auth_headers,
++            db_session,
++            monkeypatch,
++            agent_session_id="sdk-cwd-emptyconf",
++            cwd="/ws/keep2",
++        )
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
++            headers=auth_headers,
++            json={
++                "runtime_id": str(sess.runtime_id),
++                "lease_id": str(lease_id),
++                "cwd": "",
++            },
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) == "/ws/keep2"
++
++    async def test_ready_with_cwd_persists_and_empty_body_noop(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """ready 携 cwd 落库；老 daemon 空 body（不发 json）200 零影响。"""
++        admin = await _admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        sess = await _make_session(
++            db_session,
++            admin.id,
++            rt.id,
++            status="active",
++            agent_session_id="sdk-cwd-ready",
++            cwd=None,
++        )
++        db_session.expunge_all()
++
++        # 空 body（老 daemon 形态）：200 且 cwd 不变。
++        resp = await client.post(f"/api/daemon/sessions/{sess.id}/ready", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        assert resp.json() == {"ok": True}
++        assert await self._cwd_of(db_session, sess.id) is None
++
++        # 空 json 对象（新 daemon 不传 cwd 键形态）同样零影响。
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/ready", headers=auth_headers, json={}
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) is None
++
++        # 携非空 cwd → 落库（原样透传）。
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/ready",
++            headers=auth_headers,
++            json={"cwd": "C:/Work/Dir/"},
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) == "C:/Work/Dir/"
++
++    async def test_ready_and_confirm_out_of_order_idempotent(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        monkeypatch,
++    ) -> None:
++        """乱序幂等（盲区 #2）：confirm 与 ready 先后到达（create 后 ready 慢于
++        reopen 后 confirm）→ 各自独立落库，最终值为 daemon 最新回报，无部分写。"""
++        sess, lease_id = await self._reopen_captured(
++            client,
++            auth_headers,
++            db_session,
++            monkeypatch,
++            agent_session_id="sdk-cwd-order",
++            cwd=None,
++        )
++        # confirm（reopen 链）先到，携三级链结果 A。
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/confirm-reconnected",
++            headers=auth_headers,
++            json={
++                "runtime_id": str(sess.runtime_id),
++                "lease_id": str(lease_id),
++                "cwd": "/tmp/order-a",
++            },
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) == "/tmp/order-a"
++
++        # ready（create 链迟到）后到，携实际运行目录 B → 覆写为最新值。
++        resp = await client.post(
++            f"/api/daemon/sessions/{sess.id}/ready",
++            headers=auth_headers,
++            json={"cwd": "/tmp/order-b"},
++        )
++        assert resp.status_code == 200, resp.text
++        assert await self._cwd_of(db_session, sess.id) == "/tmp/order-b"
+diff --git a/backend/app/modules/daemon/tests/test_session_sweep_recover.py b/backend/app/modules/daemon/tests/test_session_sweep_recover.py
+index 0f9441ecc..b7131e833 100644
+--- a/backend/app/modules/daemon/tests/test_session_sweep_recover.py
++++ b/backend/app/modules/daemon/tests/test_session_sweep_recover.py
+@@ -208,6 +208,43 @@ async def test_recovers_suspended_main_session_when_runtime_back_online(
+     assert payload["runtime_id"] == str(rt.id)
+     assert payload["lease_id"] == str(lease.id)
+     assert payload["provider"] == "claude"
++    # task-04（D-002@v2/FR-05）：cwd 非空（fixture 默认 /workspace/proj）→ 键照发，
++    # 工作区会话 payload 行为不变。
++    assert payload["cwd"] == "/workspace/proj"
++
++
++async def test_recovers_empty_cwd_session_payload_omits_cwd_key(
++    db_session: AsyncSession,
++) -> None:
++    """task-04（2026-11-06-session-reopen-no-cwd / D-002@v2）：空 cwd 会话（非工作区
++    闲聊形态）auto-recover 下发的 session_resume payload 省略 cwd 整键（不发
++    null）——daemon 三级同源兜底链接管。"""
++    user = await _make_user(db_session)
++    rt = await _make_runtime(db_session, user.id, status="online")
++    lease = await _make_lease(db_session, rt.id)
++    suspended_at = datetime.now(UTC) - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC + 60)
++    sess = await _make_session(
++        db_session,
++        user.id,
++        rt.id,
++        lease.id,
++        status="suspended",
++        last_active_at=suspended_at,
++    )
++    # 覆写 cwd 为空（fixture 默认非空）——非工作区会话落库形态。
++    sess.cwd = None
++    db_session.add(sess)
++    await db_session.commit()
++
++    recovered = await session_auto_recover_sweep_once(db_session)
++
++    assert recovered == 1
++    assert await _session_status(db_session, sess.id) == "reconnecting"
++    commands = await _resume_commands(db_session)
++    assert len(commands) == 1
++    payload = commands[0].payload
++    assert payload is not None
++    assert "cwd" not in payload
+ 
+ 
+ async def test_skips_when_runtime_offline_or_stale_heartbeat(db_session: AsyncSession) -> None:
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 0bb15116d..0a1f88131 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -15758,7 +15758,7 @@
+           "daemon"
+         ],
+         "summary": "Notify Session Ready",
+-        "description": "Receive daemon session-ready report (task-06 / D-001@v1).\n\ndaemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``\n（recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调\n:func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中\n等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。\n\n返回 200 + JSON ``{\"ok\": true}``（**非 204**）：daemon hub-client ``_request``\n固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01\n发现）。daemon 不上报 payload，故无 body 模型。\n\n越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前\n主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话\n伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。",
++        "description": "Receive daemon session-ready report (task-06 / D-001@v1).\n\ndaemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``\n（recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调\n:func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中\n等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。\n\n返回 200 + JSON ``{\"ok\": true}``（**非 204**）：daemon hub-client ``_request``\n固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01\n发现）。\n\n2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发\nbody → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库\n``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串\nno-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，\ncwd 属最终一致增强项，reopen 兜底链覆盖）。\n\n越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前\n主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话\n伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。",
+         "operationId": "notify_session_ready_api_daemon_sessions__session_id__ready_post",
+         "parameters": [
+           {
+@@ -15772,6 +15772,23 @@
+             }
+           }
+         ],
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "anyOf": [
++                  {
++                    "$ref": "#/components/schemas/SessionReadyRequest"
++                  },
++                  {
++                    "type": "null"
++                  }
++                ],
++                "title": "Data"
++              }
++            }
++          }
++        },
+         "responses": {
+           "200": {
+             "description": "Successful Response",
+@@ -72710,6 +72727,25 @@
+         ],
+         "title": "SessionQueueResponse"
+       },
++      "SessionReadyRequest": {
++        "properties": {
++          "cwd": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 1024
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cwd"
++          }
++        },
++        "type": "object",
++        "title": "SessionReadyRequest",
++        "description": "Body for POST /sessions/{session_id}/ready（可选）.\n\n2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报\n捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；\nrecover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不\n发 body（端点参数可选 ``None``）零影响；空串 no-op。"
++      },
+       "SessionRecoverRequest": {
+         "properties": {
+           "runtime_id": {
+@@ -73145,6 +73181,18 @@
+               }
+             ],
+             "title": "Reason"
++          },
++          "cwd": {
++            "anyOf": [
++              {
++                "type": "string",
++                "maxLength": 1024
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Cwd"
+           }
+         },
+         "type": "object",
+@@ -73152,7 +73200,7 @@
+           "runtime_id"
+         ],
+         "title": "SessionRuntimeRequest",
+-        "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1).\n\nDS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次\nSESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前\nlease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。"
++        "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1).\n\nDS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次\nSESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前\nlease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。\n\n2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon\n恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库\n``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本\n模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略\n（独立审查已确认非缺口）。"
+       },
+       "SessionSuspendBatchRequest": {
+         "properties": {
+@@ -80248,6 +80296,17 @@
+               }
+             ],
+             "title": "Reason"
++          },
++          "index_sync": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Index Sync"
+           }
+         },
+         "type": "object",
+@@ -80255,7 +80314,7 @@
+           "results"
+         ],
+         "title": "VectorSearchOut",
+-        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"
++        "description": "检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。\n\nindex_sync=\"scheduled\"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧\n已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results\n不受影响，字段供观测与测试断言。"
+       },
+       "VectorSearchResultItem": {
+         "properties": {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 088df015a..7810ad3fb 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -6014,7 +6014,13 @@ export interface paths {
+          *
+          *     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+          *     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+-         *     发现）。daemon 不上报 payload，故无 body 模型。
++         *     发现）。
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发
++         *     body → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库
++         *     ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串
++         *     no-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，
++         *     cwd 属最终一致增强项，reopen 兜底链覆盖）。
+          *
+          *     越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
+          *     主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
+@@ -26648,6 +26654,19 @@ export interface components {
+             /** Items */
+             items?: components["schemas"]["SessionQueueEntry"][];
+         };
++        /**
++         * SessionReadyRequest
++         * @description Body for POST /sessions/{session_id}/ready（可选）.
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报
++         *     捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；
++         *     recover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不
++         *     发 body（端点参数可选 ``None``）零影响；空串 no-op。
++         */
++        SessionReadyRequest: {
++            /** Cwd */
++            cwd?: string | null;
++        };
+         /**
+          * SessionRecoverRequest
+          * @description Body for POST /sessions/{session_id}/recover (gap-8.1).
+@@ -26832,6 +26851,12 @@ export interface components {
+          *     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
+          *     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
+          *     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon
++         *     恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库
++         *     ``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本
++         *     模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略
++         *     （独立审查已确认非缺口）。
+          */
+         SessionRuntimeRequest: {
+             /**
+@@ -26843,6 +26868,8 @@ export interface components {
+             lease_id?: string | null;
+             /** Reason */
+             reason?: string | null;
++            /** Cwd */
++            cwd?: string | null;
+         };
+         /**
+          * SessionSuspendBatchRequest
+@@ -30051,6 +30078,10 @@ export interface components {
+         /**
+          * VectorSearchOut
+          * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
++         *
++         *     index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
++         *     已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
++         *     不受影响，字段供观测与测试断言。
+          */
+         VectorSearchOut: {
+             /**
+@@ -30067,6 +30098,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * VectorSearchResultItem
+@@ -41079,7 +41112,11 @@ export interface operations {
+             };
+             cookie?: never;
+         };
+-        requestBody?: never;
++        requestBody?: {
++            content: {
++                "application/json": components["schemas"]["SessionReadyRequest"] | null;
++            };
++        };
+         responses: {
+             /** @description Successful Response */
+             200: {
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 088df015a..7810ad3fb 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -6014,7 +6014,13 @@ export interface paths {
+          *
+          *     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
+          *     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
+-         *     发现）。daemon 不上报 payload，故无 body 模型。
++         *     发现）。
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 body（老 daemon 不发
++         *     body → ``data`` 为 ``None`` 零影响）捎带实际生效 ``cwd``——非空字符串才落库
++         *     ``agent_sessions.cwd``（daemon 为目录真相源 D-003，异值覆写；缺省/空串
++         *     no-op），值原样透传不归一化。落库失败不阻断 ready 语义（mark_ready 已完成，
++         *     cwd 属最终一致增强项，reopen 兜底链覆盖）。
+          *
+          *     越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
+          *     主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
+@@ -26648,6 +26654,19 @@ export interface components {
+             /** Items */
+             items?: components["schemas"]["SessionQueueEntry"][];
+         };
++        /**
++         * SessionReadyRequest
++         * @description Body for POST /sessions/{session_id}/ready（可选）.
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：daemon 会话就绪上报
++         *     捎带实际生效 cwd（create 路径=borrow sandbox/workspace 兜底后目录；
++         *     recover 路径=record.cwd 三级链结果），backend 非空落库。老 daemon 不
++         *     发 body（端点参数可选 ``None``）零影响；空串 no-op。
++         */
++        SessionReadyRequest: {
++            /** Cwd */
++            cwd?: string | null;
++        };
+         /**
+          * SessionRecoverRequest
+          * @description Body for POST /sessions/{session_id}/recover (gap-8.1).
+@@ -26832,6 +26851,12 @@ export interface components {
+          *     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
+          *     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
+          *     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
++         *
++         *     2026-11-06-session-reopen-no-cwd（D-007/FR-03）：可选 ``cwd``——daemon
++         *     恢复成功时捎带三级链解析出的实际工作目录，confirm 端点非空落库
++         *     ``agent_sessions.cwd``（缺省/空串 no-op）。mark-recovery-failed 共享本
++         *     模型：该端点 OpenAPI 同步暴露此键，daemon 调用点不发、backend 忽略
++         *     （独立审查已确认非缺口）。
+          */
+         SessionRuntimeRequest: {
+             /**
+@@ -26843,6 +26868,8 @@ export interface components {
+             lease_id?: string | null;
+             /** Reason */
+             reason?: string | null;
++            /** Cwd */
++            cwd?: string | null;
+         };
+         /**
+          * SessionSuspendBatchRequest
+@@ -30051,6 +30078,10 @@ export interface components {
+         /**
+          * VectorSearchOut
+          * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
++         *
++         *     index_sync="scheduled"（2026-11-05-knowledge-vector-async-refresh）= 索引缺失/陈旧
++         *     已调度后台构建、本次返回的是空结果（缺索引）或旧索引（陈旧）——CLI 只读 results
++         *     不受影响，字段供观测与测试断言。
+          */
+         VectorSearchOut: {
+             /**
+@@ -30067,6 +30098,8 @@ export interface components {
+             model_ready: boolean;
+             /** Reason */
+             reason?: string | null;
++            /** Index Sync */
++            index_sync?: string | null;
+         };
+         /**
+          * VectorSearchResultItem
+@@ -41079,7 +41112,11 @@ export interface operations {
+             };
+             cookie?: never;
+         };
+-        requestBody?: never;
++        requestBody?: {
++            content: {
++                "application/json": components["schemas"]["SessionReadyRequest"] | null;
++            };
++        };
+         responses: {
+             /** @description Successful Response */
+             200: {
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 0eb4dce13..be05a0a6d 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1189,7 +1189,10 @@ interface ClientLike {
+    * 修复 /model 等 inject 在 daemon create 完成前到达被丢的时序竞态）。best-effort：
+    * hub-client 实现失败 warn 不抛，调用点无需额外 try/catch。W1 已在 hub-client.ts 实现。
+    */
+-  notifySessionReady(sessionId: string): Promise<void>;
++  notifySessionReady(
++    sessionId: string,
++    opts?: { cwd?: string },
++  ): Promise<void>;
+   /**
+    * 2026-10-26-session-stage-progress task-02（FR-02/FR-03）：轮阶段上报。
+    * 运行时真实 _client 为 HubClient 实例（hub-client.ts notifyTurnPhase 已实现，
+@@ -1246,7 +1249,7 @@ interface ClientLike {
+    */
+   confirmReconnected?(
+     sessionId: string,
+-    opts?: { leaseId?: string; runtimeId?: string },
++    opts?: { leaseId?: string; runtimeId?: string; cwd?: string },
+   ): Promise<void>;
+   /**
+    * task-06（session-reopen-resume / DS-3 / FR-04）：reopen 恢复失败（含
+@@ -9444,6 +9447,49 @@ export class Daemon {
+     return Date.now();
+   }
+ 
++  /**
++   * 2026-11-06-session-reopen-no-cwd（D-002@v2）：SESSION_RESUME 恢复记录的 cwd
++   * 三级同源兜底链——payload 非空串 → 本地 sessions.json 持久化快照 →
++   * ``config.workspace_dir``。
++   *
++   * 背景：非工作区会话 backend 侧 ``session.cwd`` 恒空（DS-7 放行后 backend
++   * SESSION_RESUME payload 对空 cwd 会话省略整键），但 create 时 daemon 就是
++   * 用 workspace_dir 兜底跑的（``_startInteractiveSession`` 的 ``cwd =
++   * rawRootPath ? rawRootPath : this._config.workspace_dir`` 同一条规则）——
++   * 第三级与 create 兜底同源，快照被清后依然直指原 transcript 归档目录，
++   * 工作区会话（payload cwd 非空）第一级命中行为零变化。
++   *
++   * 「非空串」门：payload cwd 键缺省 / null / 空串三者同判空（空串非
++   * nullish，``??`` 不拦，须显式门；工作区 root_path 历史脏数据空串同样被
++   * 跳过——此类会话原本 resume 必败，现由三级链接管属良性变化）。cwd 值
++   * 原样透传不归一化（与快照/配置值同源同拼写）。解析错配由 SDK resume
++   * throw → 既有 markRecoveryFailed 链收敛，不做 transcript 预扫描
++   * （design D-002@v2 YAGNI）。load 失败（损坏隔离/权限）静默兜底，不阻断
++   * resume——与 ``_resolveResumeLastActiveAt`` 同构。
++   */
++  private async _resolveResumeCwd(
++    raw: Record<string, unknown>,
++    sessionId: string,
++  ): Promise<string> {
++    const payloadCwd = raw.cwd as string | undefined;
++    if (typeof payloadCwd === 'string' && payloadCwd !== '') {
++      return payloadCwd;
++    }
++    if (this._persistence) {
++      try {
++        const local = (await this._persistence.load()).find(
++          (r) => r.sessionId === sessionId,
++        );
++        if (local && typeof local.cwd === 'string' && local.cwd !== '') {
++          return local.cwd;
++        }
++      } catch {
++        // 读失败当无记录：兜底 workspace_dir，不阻断 resume。
++      }
++    }
++    return this._config.workspace_dir;
++  }
++
+   private async _routeSessionResume(
+     raw: Record<string, unknown>,
+   ): Promise<void> {
+@@ -9500,7 +9546,10 @@ export class Daemon {
+       sessionId,
+       leaseId,
+       agentSessionId,
+-      cwd: (raw.cwd as string | undefined) ?? '',
++      // 2026-11-06-session-reopen-no-cwd（D-002@v2）：cwd 三级同源兜底链
++      //（payload 非空串 → 本地快照 → workspace_dir），空 cwd 会话不再得空串
++      // 必败——详见 _resolveResumeCwd 注释。
++      cwd: await this._resolveResumeCwd(raw, sessionId),
+       provider,
+       pathToClaudeCodeExecutable: exePath,
+       pathToAgentExecutable: exePath,
+@@ -9563,8 +9612,14 @@ export class Daemon {
+     // 显式携 payload 的 runtimeId（F1：不依赖 recover 映射）与 leaseId（供 backend
+     // 防陈旧确认误翻）。best-effort：失败仅 warn——本地已恢复 active 不回滚，
+     // backend 180s sweeper 兜底收敛（DS-6）。
++    // 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：cwd 捎带三级链解析结果
++    //（record.cwd）——backend 落 agent_sessions.cwd，后续 reopen 直查。
+     try {
+-      await this._client.confirmReconnected?.(sessionId, { leaseId, runtimeId });
++      await this._client.confirmReconnected?.(sessionId, {
++        leaseId,
++        runtimeId,
++        cwd: record.cwd,
++      });
+     } catch (e) {
+       this._logger.warn('session_resume_confirm_reconnected_failed', {
+         session_id: sessionId,
+@@ -9578,7 +9633,9 @@ export class Daemon {
+     // 避免 recover 后 inject 等 ready 超时降级 fallback。best-effort：notifySessionReady
+     // 自身失败 warn 不抛（hub-client.ts 实现），调用点无需 try/catch；恢复失败已在
+     // 上方 catch 分支 return，不会走到本行，故仅成功路径上报。
+-    await this._client.notifySessionReady(sessionId);
++    // 2026-11-06-session-reopen-no-cwd（D-007）：ready 同点捎带 record.cwd（幂等兜底
++    //——confirm 丢失时 ready 仍可落库）。
++    await this._client.notifySessionReady(sessionId, { cwd: record.cwd });
+   }
+ 
+   /**
+@@ -10778,8 +10835,11 @@ export class Daemon {
+       //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
+       // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
+       // turn_phase=ready（FR-02）：notifySessionReady 同点位——进程就绪、等待 AI 响应。
++      // 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：捎带本次会话实际运行目录
++      //（cwd 局部变量=borrow sandbox / workspace 兜底后的实际值），backend 落
++      // agent_sessions.cwd——非工作区会话防患在前。
+       reportTurnPhase('ready');
+-      await this._client.notifySessionReady(sessionId);
++      await this._client.notifySessionReady(sessionId, { cwd });
+       // quick-c1ac3c85（SWR）：specStep 挂起的旧缓存后台再验证在此 fire——
+       // 会话已确认启动、ready 通知已发（首响关键路径走完），~40s 拉取全程后台。
+       if (pendingSpecRevalidate) {
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 6f4788bc8..9de3c81fa 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -1456,11 +1456,20 @@ export class HubClient {
+    *
+    * @param sessionId  AgentSession.id（SessionState.sessionId）
+    */
+-  async notifySessionReady(sessionId: string): Promise<void> {
++  async notifySessionReady(
++    sessionId: string,
++    opts?: { cwd?: string },
++  ): Promise<void> {
+     try {
++      // 2026-11-06-session-reopen-no-cwd（D-007）：捎带可选 cwd 键回报实际生效
++      // 工作目录（backend 落 agent_sessions.cwd）。不传/空串不发 body（老 backend
++      // 零感知）；值原样透传不归一化。
++      const body: Record<string, unknown> | undefined =
++        opts?.cwd ? { cwd: opts.cwd } : undefined;
+       await this._request(
+         'POST',
+         `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/ready`,
++        body,
+       );
+     } catch (e) {
+       // best-effort：ready 上报失败不抛不阻塞；backend 30s 超时 fallback 兼容（R-02）。
+@@ -1833,13 +1842,16 @@ export class HubClient {
+    */
+   async confirmReconnected(
+     sessionId: string,
+-    opts?: { leaseId?: string; runtimeId?: string },
++    opts?: { leaseId?: string; runtimeId?: string; cwd?: string },
+   ): Promise<void> {
+     const runtimeId =
+       opts?.runtimeId ?? this._recoveryRuntimeBySession.get(sessionId);
+     if (!runtimeId) return;
+     const body: Record<string, unknown> = { runtime_id: runtimeId };
+     if (opts?.leaseId) body.lease_id = opts.leaseId;
++    // 2026-11-06-session-reopen-no-cwd（D-007）：捎带可选 cwd 键（三级链解析
++    // 结果）供 backend 落 agent_sessions.cwd；不传/空串不发键，老 backend 零感知。
++    if (opts?.cwd) body.cwd = opts.cwd;
+     await this._request(
+       'POST',
+       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/confirm-reconnected`,
+diff --git a/sillyhub-daemon/tests/daemon-session-resume-route.test.ts b/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+index d90bb10db..ae17023a6 100644
+--- a/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
++++ b/sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+@@ -303,15 +303,20 @@ describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume /
+ 
+     // FR-03：恢复成功必须真实发出 confirm（携 payload 的 leaseId/runtimeId，
+     // 不依赖 _recoveryRuntimeBySession 映射——reopen 路径从未写映射）。
++    // 2026-11-06-session-reopen-no-cwd（D-007）：confirm/ready 均捎带 cwd
++    //（=record.cwd，payload 第一级命中值）——断言随新契约更新。
+     expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
+     expect(client.confirmReconnected).toHaveBeenCalledWith('sess-confirm-1', {
+       leaseId: 'lease-confirm-1',
+       runtimeId: 'runtime-from-payload',
++      cwd: '/tmp/p',
+     });
+     // 失败端点不应被触碰。
+     expect(client.markRecoveryFailed).not.toHaveBeenCalled();
+     // notifySessionReady 保持在其后（仍执行，不被 confirm 阻断）。
+-    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-confirm-1');
++    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-confirm-1', {
++      cwd: '/tmp/p',
++    });
+     expect(
+       client.confirmReconnected.mock.invocationCallOrder[0]!,
+     ).toBeLessThan(client.notifySessionReady.mock.invocationCallOrder[0]!);
+@@ -404,10 +409,12 @@ describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume /
+     await new Promise((r) => setTimeout(r, 5));
+ 
+     // confirm HTTP 失败仅 warn：本地已恢复 active 不回滚，ready 上报继续
+-    //（backend 180s sweeper 兜底收敛）。
++    //（backend 180s sweeper 兜底收敛）。ready 现捎带 cwd（D-007，=record.cwd）。
+     expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
+     expect(sm.markReconnected).toHaveBeenCalledWith('sess-502');
+-    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-502');
++    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-502', {
++      cwd: '/tmp/502',
++    });
+     expect(client.markRecoveryFailed).not.toHaveBeenCalled();
+   });
+ });
+@@ -664,3 +671,248 @@ describe('daemon SESSION_RESUME 恢复不续命 lastActiveAt（FR-01 / 2026-11-0
+     expect(record.lastActiveAt).toBeGreaterThanOrEqual(before);
+   });
+ });
++
++// FR-01/FR-04（2026-11-06-session-reopen-no-cwd / D-002@v2）：SESSION_RESUME
++// 恢复记录的 cwd 三级同源兜底链——payload 非空串 → 本地 sessions.json 快照 →
++// config.workspace_dir（与 create 兜底同一条规则）。空 cwd 会话（非工作区，
++// backend DS-7 放行后 payload 省略 cwd 键）不再得空串必败；键缺省/null/空串
++// 三者同判空；cwd 原样透传不归一化。
++describe('daemon SESSION_RESUME cwd 三级同源兜底链（D-002@v2 / 2026-11-06-session-reopen-no-cwd）', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      if (d.isRunning) {
++        await d.stop().catch(() => undefined);
++      }
++    }
++    daemons = [];
++  });
++
++  function createFakePersistence(records: unknown[]) {
++    return {
++      load: vi.fn(async () => records),
++      save: vi.fn(async () => {}),
++    };
++  }
++
++  function buildDaemonWithPersistence(
++    persistence: ReturnType<typeof createFakePersistence>,
++  ): {
++    daemon: Daemon;
++    sm: SessionManager;
++  } {
++    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
++    const client = createMockClient();
++    const sm = createMockSessionManager();
++    const daemon = new Daemon(
++      mockConfig,
++      client as never,
++      createMockTaskRunner() as never,
++      { detector, sessionManager: sm, persistence } as never,
++    );
++    return { daemon, sm: sm as SessionManager };
++  }
++
++  function snapshotRecord(sessionId: string, cwd: string): unknown {
++    return {
++      sessionId,
++      leaseId: 'lease-snap',
++      agentSessionId: `agent-sid-${sessionId}`,
++      cwd,
++      provider: 'claude',
++      turnCount: 1,
++      lastActiveAt: 1700000000000,
++    };
++  }
++
++  it('payload cwd 非空 → 第一级命中（快照异值不覆盖，工作区会话零变化）', async () => {
++    const persistence = createFakePersistence([
++      snapshotRecord('sess-cwd-ws', '/tmp/snap-wrong'),
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-ws',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-sess-cwd-ws',
++        cwd: '/tmp/proj-ws',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('/tmp/proj-ws');
++  });
++
++  it('payload 缺 cwd 键（非工作区会话 DS-7 放行形态）→ 快照 cwd 兜底', async () => {
++    const persistence = createFakePersistence([
++      snapshotRecord('sess-cwd-snap', '/tmp/snap-cwd'),
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-snap',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-sess-cwd-snap',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('/tmp/snap-cwd');
++  });
++
++  it('payload cwd 为 null（旧 backend 显式 null）→ 跳过 null 落快照级', async () => {
++    const persistence = createFakePersistence([
++      snapshotRecord('sess-cwd-null', '/tmp/snap-null'),
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-null',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-sess-cwd-null',
++        cwd: null,
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('/tmp/snap-null');
++  });
++
++  it('payload cwd 为空串（工作区 root_path 历史脏数据）→ 跳过空串落快照级', async () => {
++    const persistence = createFakePersistence([
++      snapshotRecord('sess-cwd-empty', '/tmp/snap-empty'),
++    ]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-empty',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-sess-cwd-empty',
++        cwd: '',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('/tmp/snap-empty');
++  });
++
++  it('payload 缺 cwd 且快照无记录 → workspace_dir 兜底（与 create 同源）', async () => {
++    const persistence = createFakePersistence([]);
++    const { daemon, sm } = buildDaemonWithPersistence(persistence);
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-fallback',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-fallback',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    // mockConfig.workspace_dir = '/tmp/ws'——第三级与 create 兜底同一条规则。
++    expect(record.cwd).toBe('/tmp/ws');
++  });
++
++  it('无 persistence 注入（生产前形态）→ workspace_dir 兜底恒非空', async () => {
++    const { daemon, sm } = buildDaemon();
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-nopersist',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-nopersist',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('/tmp/ws');
++  });
++
++  it('cwd 值原样透传不归一化（尾斜杠/大小写保真）', async () => {
++    const { daemon, sm } = buildDaemon();
++    daemons.push(daemon);
++
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-raw',
++        lease_id: 'lease-new',
++        agent_session_id: 'agent-sid-raw',
++        cwd: 'C:/Work/Dir/',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
++    expect(record.cwd).toBe('C:/Work/Dir/');
++  });
++
++  it('resume 成功后 confirm 与 ready 均捎带 cwd（=record.cwd 三级链结果，D-007）', async () => {
++    const persistence = createFakePersistence([
++      snapshotRecord('sess-cwd-report', '/tmp/snap-report'),
++    ]);
++    const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
++    const client = createMockClient();
++    const sm = createMockSessionManager();
++    const daemon = new Daemon(
++      mockConfig,
++      client as never,
++      createMockTaskRunner() as never,
++      { detector, sessionManager: sm, persistence } as never,
++    );
++    daemons.push(daemon);
++
++    // payload 无 cwd（非工作区形态）→ 三级链落快照值，confirm/ready 携同值。
++    await emit(daemon, {
++      type: MSG.SESSION_RESUME,
++      payload: {
++        session_id: 'sess-cwd-report',
++        lease_id: 'lease-report',
++        agent_session_id: 'agent-sid-sess-cwd-report',
++        runtime_id: 'runtime-uuid-123',
++        provider: 'claude',
++      },
++    });
++    await new Promise((r) => setTimeout(r, 5));
++
++    expect(client.confirmReconnected).toHaveBeenCalledWith('sess-cwd-report', {
++      leaseId: 'lease-report',
++      runtimeId: 'runtime-uuid-123',
++      cwd: '/tmp/snap-report',
++    });
++    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-cwd-report', {
++      cwd: '/tmp/snap-report',
++    });
++  });
++});
+diff --git a/sillyhub-daemon/tests/hub-client.test.ts b/sillyhub-daemon/tests/hub-client.test.ts
+index 90b7a956b..3ae7ee2ef 100644
+--- a/sillyhub-daemon/tests/hub-client.test.ts
++++ b/sillyhub-daemon/tests/hub-client.test.ts
+@@ -983,3 +983,66 @@ describe('HubClient — task-11 getMissionStatus（mission_status 工具）', ()
+   });
+ });
+ 
++// ── 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：cwd 回报捎带键序列化契约。
++// 「不传不发键」：undefined/空串不产生 body（ready）或不入键（confirm）——老
++// backend 零感知；非空字符串才写入；值原样透传不归一化。
++describe('HubClient — cwd 回报捎带键（D-007 / 2026-11-06-session-reopen-no-cwd）', () => {
++  it('notifySessionReady 无 opts → POST ready 无 body（老 backend 零感知）', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.notifySessionReady('sess-1');
++    expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/sessions/sess-1/ready`);
++    expect(lastCall!.init.method).toBe('POST');
++    expect(lastCall!.init.body).toBeUndefined();
++  });
++
++  it('notifySessionReady cwd 空串 → 不发 body', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.notifySessionReady('sess-1', { cwd: '' });
++    expect(lastCall!.init.body).toBeUndefined();
++  });
++
++  it('notifySessionReady cwd 非空 → body {cwd} 原样透传（尾斜杠/大小写保真）', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.notifySessionReady('sess-1', { cwd: 'C:/Work/Dir/' });
++    expect(JSON.parse(lastCall!.init.body as string)).toEqual({ cwd: 'C:/Work/Dir/' });
++  });
++
++  it('confirmReconnected 携 cwd → body 含 cwd 键（与 lease_id/runtime_id 并列）', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.confirmReconnected('sess-1', {
++      leaseId: 'lease-9',
++      runtimeId: 'rt-9',
++      cwd: '/tmp/ws',
++    });
++    expect(lastCall!.url).toBe(
++      `http://x:8000${REST_PREFIX}/sessions/sess-1/confirm-reconnected`,
++    );
++    expect(JSON.parse(lastCall!.init.body as string)).toEqual({
++      runtime_id: 'rt-9',
++      lease_id: 'lease-9',
++      cwd: '/tmp/ws',
++    });
++  });
++
++  it('confirmReconnected 不传 cwd → body 无 cwd 键（既有行为零变化）', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.confirmReconnected('sess-1', { leaseId: 'l', runtimeId: 'rt' });
++    const body = JSON.parse(lastCall!.init.body as string);
++    expect(body).toEqual({ runtime_id: 'rt', lease_id: 'l' });
++    expect('cwd' in body).toBe(false);
++  });
++
++  it('confirmReconnected cwd 空串 → body 无 cwd 键', async () => {
++    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
++    const c = new HubClient('http://x:8000', 't');
++    await c.confirmReconnected('sess-1', { runtimeId: 'rt', cwd: '' });
++    const body = JSON.parse(lastCall!.init.body as string);
++    expect('cwd' in body).toBe(false);
++  });
++});
++

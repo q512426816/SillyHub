@@ -1456,11 +1456,20 @@ export class HubClient {
    *
    * @param sessionId  AgentSession.id（SessionState.sessionId）
    */
-  async notifySessionReady(sessionId: string): Promise<void> {
+  async notifySessionReady(
+    sessionId: string,
+    opts?: { cwd?: string },
+  ): Promise<void> {
     try {
+      // 2026-11-06-session-reopen-no-cwd（D-007）：捎带可选 cwd 键回报实际生效
+      // 工作目录（backend 落 agent_sessions.cwd）。不传/空串不发 body（老 backend
+      // 零感知）；值原样透传不归一化。
+      const body: Record<string, unknown> | undefined =
+        opts?.cwd ? { cwd: opts.cwd } : undefined;
       await this._request(
         'POST',
         `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/ready`,
+        body,
       );
     } catch (e) {
       // best-effort：ready 上报失败不抛不阻塞；backend 30s 超时 fallback 兼容（R-02）。
@@ -1833,13 +1842,16 @@ export class HubClient {
    */
   async confirmReconnected(
     sessionId: string,
-    opts?: { leaseId?: string; runtimeId?: string },
+    opts?: { leaseId?: string; runtimeId?: string; cwd?: string },
   ): Promise<void> {
     const runtimeId =
       opts?.runtimeId ?? this._recoveryRuntimeBySession.get(sessionId);
     if (!runtimeId) return;
     const body: Record<string, unknown> = { runtime_id: runtimeId };
     if (opts?.leaseId) body.lease_id = opts.leaseId;
+    // 2026-11-06-session-reopen-no-cwd（D-007）：捎带可选 cwd 键（三级链解析
+    // 结果）供 backend 落 agent_sessions.cwd；不传/空串不发键，老 backend 零感知。
+    if (opts?.cwd) body.cwd = opts.cwd;
     await this._request(
       'POST',
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/confirm-reconnected`,

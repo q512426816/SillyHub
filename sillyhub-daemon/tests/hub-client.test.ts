@@ -983,3 +983,66 @@ describe('HubClient — task-11 getMissionStatus（mission_status 工具）', ()
   });
 });
 
+// ── 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：cwd 回报捎带键序列化契约。
+// 「不传不发键」：undefined/空串不产生 body（ready）或不入键（confirm）——老
+// backend 零感知；非空字符串才写入；值原样透传不归一化。
+describe('HubClient — cwd 回报捎带键（D-007 / 2026-11-06-session-reopen-no-cwd）', () => {
+  it('notifySessionReady 无 opts → POST ready 无 body（老 backend 零感知）', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifySessionReady('sess-1');
+    expect(lastCall!.url).toBe(`http://x:8000${REST_PREFIX}/sessions/sess-1/ready`);
+    expect(lastCall!.init.method).toBe('POST');
+    expect(lastCall!.init.body).toBeUndefined();
+  });
+
+  it('notifySessionReady cwd 空串 → 不发 body', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifySessionReady('sess-1', { cwd: '' });
+    expect(lastCall!.init.body).toBeUndefined();
+  });
+
+  it('notifySessionReady cwd 非空 → body {cwd} 原样透传（尾斜杠/大小写保真）', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.notifySessionReady('sess-1', { cwd: 'C:/Work/Dir/' });
+    expect(JSON.parse(lastCall!.init.body as string)).toEqual({ cwd: 'C:/Work/Dir/' });
+  });
+
+  it('confirmReconnected 携 cwd → body 含 cwd 键（与 lease_id/runtime_id 并列）', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.confirmReconnected('sess-1', {
+      leaseId: 'lease-9',
+      runtimeId: 'rt-9',
+      cwd: '/tmp/ws',
+    });
+    expect(lastCall!.url).toBe(
+      `http://x:8000${REST_PREFIX}/sessions/sess-1/confirm-reconnected`,
+    );
+    expect(JSON.parse(lastCall!.init.body as string)).toEqual({
+      runtime_id: 'rt-9',
+      lease_id: 'lease-9',
+      cwd: '/tmp/ws',
+    });
+  });
+
+  it('confirmReconnected 不传 cwd → body 无 cwd 键（既有行为零变化）', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.confirmReconnected('sess-1', { leaseId: 'l', runtimeId: 'rt' });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ runtime_id: 'rt', lease_id: 'l' });
+    expect('cwd' in body).toBe(false);
+  });
+
+  it('confirmReconnected cwd 空串 → body 无 cwd 键', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true }));
+    const c = new HubClient('http://x:8000', 't');
+    await c.confirmReconnected('sess-1', { runtimeId: 'rt', cwd: '' });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect('cwd' in body).toBe(false);
+  });
+});
+

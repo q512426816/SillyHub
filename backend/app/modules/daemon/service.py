@@ -949,9 +949,10 @@ class DaemonService:
         *,
         runtime_id: uuid.UUID,
         lease_id: uuid.UUID | None = None,
+        cwd: str | None = None,
     ) -> str:
         return await self._sess.confirm_session_reconnected(
-            session_id, runtime_id=runtime_id, lease_id=lease_id
+            session_id, runtime_id=runtime_id, lease_id=lease_id, cwd=cwd
         )
 
     async def mark_session_recovery_failed(

@@ -1,38 +1,39 @@
 ---
-id: task-02
-title: 'daemon cwd 回报携带（hub-client 两方法可选参数 + 三发送点）+ 回报测试'
-title_zh: 'daemon cwd 回报携带（hub-client 两方法可选参数 + 三发送点）+ 回报测试'
+id: task-04
+title: 'backend SESSION_RESUME payload cwd 条件键（lifecycle + sweep 两处构造）+ 测试'
+title_zh: 'backend SESSION_RESUME payload cwd 条件键（lifecycle + sweep 两处构造）+ 测试'
 author: 'qinyi'
 generated_by: sillyspec-taskcard
 created_at: 2026-11-06 23:03:28
 priority: P0
 blocks: []
-requirement_ids: [FR-03]
-decision_ids: [D-007@v1]
-depends_on: [task-01]
+requirement_ids: [FR-01, FR-05]
+decision_ids: [D-002@v2]
+depends_on: [task-01, task-03]
 allowed_paths:
-  - sillyhub-daemon/src/daemon.ts
-  - sillyhub-daemon/src/hub-client.ts
-  - sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  - backend/app/modules/daemon/session/service/session_lifecycle.py
+  - backend/app/modules/daemon/sweep.py
+  - backend/app/modules/daemon/tests/test_session_reopen.py
+  - backend/app/modules/daemon/tests/test_session_sweep_recover.py
 target_files:
-  - sillyhub-daemon/src/daemon.ts
-  - sillyhub-daemon/src/hub-client.ts
-  - sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  - backend/app/modules/daemon/session/service/session_lifecycle.py
+  - backend/app/modules/daemon/sweep.py
+  - backend/app/modules/daemon/tests/test_session_reopen.py
+  - backend/app/modules/daemon/tests/test_session_sweep_recover.py
 goal: >
-  daemon 在会话就绪时机把实际生效 cwd 回报 backend——notifySessionReady 与 confirmReconnected 加可选 cwd 参数（不传不发键），三处发送点携带实际运行目录，为 backend 落库 session.cwd 供给数据。
+  SESSION_RESUME payload 的 cwd 由恒发改为条件键（session.cwd 非空才入键、不发 null）——reopen 主路径与 sweep 恢复路径两处构造同步，daemon 三级链自然接管空 cwd 会话。
 implementation:
-  - sillyhub-daemon/src/hub-client.ts：notifySessionReady 与 confirmReconnected 两方法加可选 cwd 参数（undefined/空串不发键——请求体不加 cwd 字段；非空字符串才写入请求体）
-  - 三处发送点携带（sillyhub-daemon/src/daemon.ts）：create 路径 ready（:10782，`_startInteractiveSession` 内携带 cwd 局部变量=borrow sandbox/workspace 兜底后实际运行目录）；recover 路径 ready（:9581，`_routeSessionResume` 尾部携带 record.cwd 三级链结果）；confirm（:9567 options 加 cwd 键，值=record.cwd）
-  - 新增测试：不传 opts 时请求体无 cwd 键（老 backend 零感知）；传非空 cwd 时键存在且值原样（含尾斜杠/盘符大小写不归一化，盲区 #3）；create/recover 两发送点值语义区分断言
+  - backend/app/modules/daemon/session/service/session_lifecycle.py :296-303 resume_payload 构造：`"cwd": session.cwd` 恒发改条件入键（cwd 非空字符串才写入 dict，空/None 省略整键——对齐同函数 provider_config 条件入键先例 :304-307）
+  - backend/app/modules/daemon/sweep.py 恢复路径 payload 构造（:611-755 区间内，enqueue_and_push 通道同款字段）同步条件化
+  - 测试：空 cwd 会话 resume payload 无 cwd 键（断言 dict 无键，非 None 值）；工作区会话 payload 含 cwd 且值与 session.cwd 一致（逐字节不变断言，FR-05）
 acceptance:
-  - 「不传不发键」口径有测试（请求体序列化断言无 cwd 字段）
-  - 三发送点各自携带值语义正确（create=实际运行目录 / recover+confirm=record.cwd）
-  - cwd 字符串原样透传（无 trim/normalize/join 归一化）
+  - 空 cwd 会话的 SESSION_RESUME payload 序列化后无 cwd 键（不发 null）
+  - 工作区会话 payload 与现状逐字节一致（FR-05 零回归）
+  - lifecycle 与 sweep 两处构造行为一致（两测试文件各有形态覆盖）
 verify:
-  - pnpm -C sillyhub-daemon test -- daemon-session-resume-route
+  - uv run --project backend pytest app/modules/daemon/tests/test_session_reopen.py app/modules/daemon/tests/test_session_reconnect_sweep.py -x -q
 constraints:
-  - 不新增 REST 端点（D-008 负向约束）
-  - hub-client 方法签名向后兼容（新增参数可选，既有调用点零改动可编译）
+  - 不改 payload 其它字段与 enqueue 通道
   - 聚焦测试，禁跑全量
 ---
 

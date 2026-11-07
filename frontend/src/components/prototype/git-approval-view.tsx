@@ -341,7 +341,7 @@ function CommitCard() {
     >
       {/* 原始命令（等宽，供对照 agent 意图） */}
       <p className="mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-        $ git commit -m "feat(daemon): git 提交人工接管——识别与挂起"
+        $ git commit -m &quot;feat(daemon): git 提交人工接管——识别与挂起&quot;
       </p>
       {/* commit msg 编辑（预填解析值，用户可改） */}
       <label className="mb-1 block text-xs font-medium text-foreground">
@@ -583,7 +583,7 @@ function RejectCard() {
       subtitle="拒绝后将把原因反馈给 Agent，它可调整后重新发起"
     >
       <p className="mb-2 truncate rounded border border-border bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-        $ git commit -m "feat(daemon): git 提交人工接管——识别与挂起"
+        $ git commit -m &quot;feat(daemon): git 提交人工接管——识别与挂起&quot;
       </p>
       <p className="mb-1 text-xs font-medium text-foreground">拒绝原因（将反馈给 Agent）</p>
       <div className="mb-2 flex flex-wrap gap-1.5">

@@ -491,6 +491,7 @@ async def confirm_session_reconnected(
     *,
     runtime_id: uuid.UUID,
     lease_id: uuid.UUID | None = None,
+    cwd: str | None = None,
 ) -> str:
     """Flip a reconnecting session to active after daemon resume succeeds.
 
@@ -555,6 +556,13 @@ async def confirm_session_reconnected(
 
         session.status = "active"
         session.last_active_at = datetime.now(UTC)
+        # 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：捎带可选 cwd 落库
+        # （daemon 三级链解析结果）。daemon 为目录真相源（D-003）——非空回报
+        # 覆写既有值（工作区会话同值幂等；异值以 daemon 实际为准）；空/缺省
+        # no-op。随本翻转事务同 commit。stale-skip / 非 reconnecting 分支
+        # （上方早退 rollback）不落库——迟到回报不写第二次 reopen 的会话。
+        if cwd:
+            session.cwd = cwd
         svc._session.add(session)
         await svc._session.commit()
         await svc._session.refresh(session)

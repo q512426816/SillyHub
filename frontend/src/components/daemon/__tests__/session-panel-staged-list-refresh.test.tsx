@@ -122,6 +122,9 @@ vi.mock("@/lib/api/llm-providers", async () => {
     listProviders: vi.fn().mockResolvedValue([
       { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: false },
     ]),
+    listUsableProviders: vi.fn().mockResolvedValue([
+      { id: "prov-glm", name: "GLM 平台", models: [], agent_kinds: ["claude"], is_default: false },
+    ]),
   };
 });
 

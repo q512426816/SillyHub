@@ -35,7 +35,9 @@ vi.mock("@/lib/agent-profiles", async () => {
 });
 vi.mock("@/lib/api/llm-providers", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>("@/lib/api/llm-providers");
-  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+  // 2026-11-06 存量红适配（cascade 后组件数据源改 listUsableProviders）。
+  const listProviders = vi.fn().mockResolvedValue([]);
+  return { ...actual, listProviders, listUsableProviders: listProviders };
 });
 
 const PAGE_SIZE = 400; // quick（ql-20260916-013）：页距 50→400 后对齐源常量

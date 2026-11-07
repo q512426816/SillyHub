@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-11-06-session-reopen-no-cwd",
+  "appliedAt": "2026-11-07T05:43:46.063Z",
+  "baseHash": "1b9b2ea32a363df760a183b79d5d37eef2634802",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/router/notify.py",
+      "sha256": "de1def2c4d77eac3a105772a41f9cf609b9f3cc922727e8d0ea5c3172cb82067"
+    },
+    {
+      "path": "backend/app/modules/daemon/service.py",
+      "sha256": "dea8f6e5dbb3ba1d8bc5fc25d722c4b0fc47d77e4df4dc16458f7249cd3b62d3"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/__init__.py",
+      "sha256": "f18cd31d3673a96de1fbfca8d209772e4e8c901189cf64985e69aab6773d122a"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/errors.py",
+      "sha256": "e75db9cbc12b809db61f556567e1ad6b67c9942f7c816a5ad31fefed8297816f"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/recovery.py",
+      "sha256": "222b156f259a5492ddd0d60535cd653774e2bed7ff86f22a240f1a64b4580805"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/session_lifecycle.py",
+      "sha256": "d100153679c64cd7f817f438b602501502bf995ec2c1e731611e8269617970b8"
+    },
+    {
+      "path": "backend/app/modules/daemon/sweep.py",
+      "sha256": "21cd2193f34f9ed8febd179e986d6d96a3a85d6570ee2aeb503a054b2ba2df77"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_reopen.py",
+      "sha256": "1cd86624b0b5c02ad59ebd44bf19a7c7b8e392401a042a38032014dffe8e0c6b"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_sweep_recover.py",
+      "sha256": "17ecf25d716b278775c5d1185ce9b4d3cc7d0332ce1c6571739ee812786a202c"
+    },
+    {
+      "path": "sillyhub-daemon/src/hub-client.ts",
+      "sha256": "f5b5b797027199e69c08e7b6907a7241a8511b18e7e5dfd646dff8a0c2647ccd"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-session-resume-route.test.ts",
+      "sha256": "28fe8d73fa716985f6f3e44322493027b9a0a0f707b51746c40a8938ae9daa12"
+    },
+    {
+      "path": "sillyhub-daemon/tests/hub-client.test.ts",
+      "sha256": "6095f6fb266de8e89578da6fa0174bf537d9e8ac7fc338bbbb9106438fdde198"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "623d13c044ec798a16b1c3437ceff4230b9e78a486afbf0fbb3df73d0f1309ad"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "8725a1cd82f8bc5ccd2015839b60ff7e2167f4ec2ae351cc1528d4ac30e35aaf"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "8725a1cd82f8bc5ccd2015839b60ff7e2167f4ec2ae351cc1528d4ac30e35aaf"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "f8b2ff78773a34415838126e260953b3fb40aac46542f5f58681e072974174f4"
+    }
+  ]
+}

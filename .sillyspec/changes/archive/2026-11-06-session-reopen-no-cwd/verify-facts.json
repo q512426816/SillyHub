@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-11-06-session-reopen-no-cwd",
+  "generatedAt": "2026-11-06T15:56:48.332Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "backendEndpoints": 2473,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-11-06-session-reopen-no-cwd",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/sessions/{session_id}/ready",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/sessions/{session_id}/ready",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend/daemon 双侧聚焦测试全绿（本案契约链跨进程，非 deployment-critical）",
+      "command": "uv run --project backend pytest backend/app/modules/daemon/tests/test_session_reopen.py backend/app/modules/daemon/tests/test_session_sweep_recover.py -q && pnpm -C sillyhub-daemon test -- daemon-session-resume-route hub-client.test",
+      "exitCode": 0,
+      "logPath": "C:\\Users\\qinyi\\IdeaProjects\\multi-agent-platform\\.sillyspec\\.runtime\\logs\\task06-gen1.log（生成物）与 task03-test.log 等 execute 期日志"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "存量已 409 会话重开实测（含用户报障实例 e3599588-7b67-499f-9539-66f6149c0684）",
+        "condition": "部署发版后（先 daemon 后 backend）在平台对该会话点「重新开启」：预期不再 409、daemon 三级链解析 cwd、confirm 回 active 可续聊；若 daemon 本地快照与 workspace_dir 均无 transcript 则明确 failed（预期行为非静默）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "frontend/src/components/daemon/session-panel/page-helpers.tsx:91/103 残留不可达的 HTTP_409_DAEMON_SESSION_NO_CWD 文案映射",
+        "condition": "execute 验收审查 gap（非阻断、design 未列该文件）——后续任一前端变更顺带清理死键与注释",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_session_reopen.py",
+      "backend/app/modules/daemon/tests/test_session_sweep_recover.py",
+      "sillyhub-daemon/tests/daemon-session-resume-route.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe5"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe5",
+        "snapshot": 2473,
+        "rerun": 2474,
+        "severity": "warning",
+        "note": "facts 快照 backend 端点数与重跑不符（扫描根口径环境敏感，WARNING）"
+      }
+    ]
+  },
+  "tests": {
+    "command": "module[]+deps(py3+jsx3+jsx8)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-11-07T05:41:54.113Z"
+  }
+}

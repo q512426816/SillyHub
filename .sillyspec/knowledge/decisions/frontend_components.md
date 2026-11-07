@@ -608,7 +608,7 @@ supersedes：D-002@v1
 锚点：未记录
 文件：backend/app/modules/daemon/lease/service.py
 最近确认：ad53f7271
-理由：Grill 独立审查 UB-1 实证：daemon init 失败仍以 status='failed' 走 completeLease 上报（sillyhub-daemon/src/task-runner.ts:1070-1080），后端回写段只判 mode=='init' 不分成败（backend/app/modules/daemon/lease/service.py:531-542）——失败数秒内 init_synced_at 即被写入。修复：回写段加 `result.get("status") != "failed"` 门，失败跳过回写 + warn 日志 init_lease_failed_no_synced。这也是 FR-04 前端"轮询非空=成功"语义成立的前置。
+理由：Grill 独立审查 UB-1 实证：daemon init 失败仍以 status='failed' 走 completeLease 上报（sillyhub-daemon/src/task-runner.ts:1070-1080），后端回写段只判 mode=='init' 不分成败（backend/app/modules/daemon/lease/service.py:551）——失败数秒内 init_synced_at 即被写入。修复：回写段加 `result.get("status") != "failed"` 门，失败跳过回写 + warn 日志 init_lease_failed_no_synced。这也是 FR-04 前端"轮询非空=成功"语义成立的前置。
 故障面：init 失败后 init_synced_at 恒 NULL，若用户不重试则详情页长期显示"未初始化"——正确语义，重试路径通畅（新 lease 行）。
 退役判据：无（字段语义修正，不回退）。
 

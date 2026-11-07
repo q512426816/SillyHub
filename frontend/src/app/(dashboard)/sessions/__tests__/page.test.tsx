@@ -232,6 +232,9 @@ vi.mock("@/lib/api/llm-providers", async () => {
   return {
     ...actual,
     listProviders: (...args: unknown[]) => mocks.listProviders(...args),
+    // 2026-11-06 存量红适配（cascade 后配置条数据源改 listUsableProviders）——
+    // 转发同一 mock，用例经 mocks.listProviders 注入对两者同效。
+    listUsableProviders: (...args: unknown[]) => mocks.listProviders(...args),
     getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
   };
 });

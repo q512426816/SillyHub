@@ -12,11 +12,15 @@ decision_ids: [D-003@v1, D-007@v1]
 depends_on: [task-02]
 allowed_paths:
   - backend/app/modules/daemon/router/notify.py
-  - backend/app/modules/daemon/schema.py
+  - backend/app/modules/daemon/service.py
+  - backend/app/modules/daemon/session/service/recovery.py
+  - backend/app/modules/daemon/session/service/__init__.py
   - backend/app/modules/daemon/tests/test_session_reopen.py
 target_files:
   - backend/app/modules/daemon/router/notify.py
-  - backend/app/modules/daemon/schema.py
+  - backend/app/modules/daemon/service.py
+  - backend/app/modules/daemon/session/service/recovery.py
+  - backend/app/modules/daemon/session/service/__init__.py
   - backend/app/modules/daemon/tests/test_session_reopen.py
 goal: >
   backend 两接收端点解析可选 cwd 键落库 agent_sessions.cwd——daemon 回报的数据落地侧；daemon 为目录真相源，异值以回报覆写。

@@ -10498,3 +10498,251 @@
   confirmed_at: fe0e2fc23ab20952fdc9c00c759381f0592883ab
   source_change: 2026-11-06-session-git-approval
   status: active
+
+## FR-daemon-388 非工作区会话重开续聊（存量救回）
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-002@v2、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 一条 `cwd` 为空且 `agent_session_id` 非空的已结束（ended/failed）会话；When 用户点「重新开启」；Then backend 不再以 `HTTP_409_DAEMON_SESSION_NO_CWD` 拒绝；SESSION_RESUME 下发不含 cwd 键；daemon
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-01
+最近确认：ee6c18fa7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-reopen-no-cwd:task-01:acc-0-ba470339
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-01:acc-1-849b4e39
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-01:acc-2-80ca5ded
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-03:acc-0-2de6b2d3
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-03:acc-1-205ac879
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-03:acc-2-03e39b4f
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-03:acc-3-bc1a6a3b
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-04:acc-0-2cb11eec
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-04:acc-1-63497c14
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-04:acc-2-2b40f0b3
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | backend/app/modules/daemon/tests/test_session_sweep_recover.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+
+## FR-daemon-389 reopen 放行口径
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 一条 `agent_session_id` 也无法自愈（从未成功建立 SDK 会话）的会话；When 用户点「重新开启」；Then 仍被拒绝（`DaemonSessionNoAgentSession` 409）——放行只放宽 cwd 维度，SDK 标识维度维持现状；放行不按会话来源（orig
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-02
+最近确认：ee6c18fa7
+
+## FR-daemon-390 新建会话 cwd 回报落库
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 一条新建非工作区会话在 daemon 侧创建成功（create 或 recover 路径）；When daemon 上报 session ready（或 reopen 后 confirm reconnected）；Then 请求体携带可选 `cwd` 键（值为实际生效目录）；backend 端点对非空字符串落 `agent_sessions.cwd`，缺键/空串 no-op；dae
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-03
+最近确认：ee6c18fa7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-reopen-no-cwd:task-02:acc-0-15d6daf4
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-02:acc-1-9c8bacc8
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-02:acc-2-4529fc6b
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py | sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-05:acc-0-2c13b4cc
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-05:acc-1-1a209f82
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-05:acc-2-d3c56d9e
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-05:acc-3-e02bd4f2
+  tests: backend/app/modules/daemon/tests/test_session_reopen.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+
+## FR-daemon-391 daemon 解析失败收敛
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-002@v2
+场景正文：
+- 场景：默认场景 — Given 三级链解析出的目录无法完成 SDK resume（目录错配/快照与 transcript 均不存在）；Then 走既有 markRecoveryFailed 链将会话翻 failed，用户看到明确失败——不静默错聊、不挂起。
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-04
+最近确认：ee6c18fa7
+
+## FR-daemon-392 工作区会话零回归
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 一条 cwd 非空的工作区会话；When 重开或续聊；Then 行为与现状逐字节一致：payload cwd 键照发、daemon 三级链第一级命中、回报值与库中一致（幂等）。
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-05
+最近确认：ee6c18fa7
+
+## FR-daemon-393 schema 与生成物义务
+变更：2026-11-06-session-reopen-no-cwd
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given backend 请求 schema 增加 `cwd` 可选字段（SessionRuntimeRequest / ready 端点 body）；When 同一变更内；Then 前端 `pnpm gen:types` 与 `pnpm -C sillyhub-daemon gen:types` 双端跑并提交 `frontend/src/l
+全文：.sillyspec/changes/archive/2026-11-06-session-reopen-no-cwd/requirements.md#FR-06
+最近确认：ee6c18fa7
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-11-06-session-reopen-no-cwd:task-06:acc-0-f5e5cc0d
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-06:acc-1-2a8b1b8b
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active
+- row: 2026-11-06-session-reopen-no-cwd:task-06:acc-2-0b917fa4
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py | backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py | backend/app/modules/agent/tests/test_coordinator_approval_signal.py | backend/app/modules/agent/tests/test_finalizer.py | backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_orchestrator.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_profile_router.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/agent/tests/test_worktree_integration.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_dispatch_execute_team_mode.py | backend/app/modules/change/tests/test_files_refresh_sync.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_parser.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-11-06-session-reopen-no-cwd
+  status: active

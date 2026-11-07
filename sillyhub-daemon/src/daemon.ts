@@ -1189,7 +1189,10 @@ interface ClientLike {
    * 修复 /model 等 inject 在 daemon create 完成前到达被丢的时序竞态）。best-effort：
    * hub-client 实现失败 warn 不抛，调用点无需额外 try/catch。W1 已在 hub-client.ts 实现。
    */
-  notifySessionReady(sessionId: string): Promise<void>;
+  notifySessionReady(
+    sessionId: string,
+    opts?: { cwd?: string },
+  ): Promise<void>;
   /**
    * 2026-10-26-session-stage-progress task-02（FR-02/FR-03）：轮阶段上报。
    * 运行时真实 _client 为 HubClient 实例（hub-client.ts notifyTurnPhase 已实现，
@@ -1246,7 +1249,7 @@ interface ClientLike {
    */
   confirmReconnected?(
     sessionId: string,
-    opts?: { leaseId?: string; runtimeId?: string },
+    opts?: { leaseId?: string; runtimeId?: string; cwd?: string },
   ): Promise<void>;
   /**
    * task-06（session-reopen-resume / DS-3 / FR-04）：reopen 恢复失败（含
@@ -9444,6 +9447,49 @@ export class Daemon {
     return Date.now();
   }
 
+  /**
+   * 2026-11-06-session-reopen-no-cwd（D-002@v2）：SESSION_RESUME 恢复记录的 cwd
+   * 三级同源兜底链——payload 非空串 → 本地 sessions.json 持久化快照 →
+   * ``config.workspace_dir``。
+   *
+   * 背景：非工作区会话 backend 侧 ``session.cwd`` 恒空（DS-7 放行后 backend
+   * SESSION_RESUME payload 对空 cwd 会话省略整键），但 create 时 daemon 就是
+   * 用 workspace_dir 兜底跑的（``_startInteractiveSession`` 的 ``cwd =
+   * rawRootPath ? rawRootPath : this._config.workspace_dir`` 同一条规则）——
+   * 第三级与 create 兜底同源，快照被清后依然直指原 transcript 归档目录，
+   * 工作区会话（payload cwd 非空）第一级命中行为零变化。
+   *
+   * 「非空串」门：payload cwd 键缺省 / null / 空串三者同判空（空串非
+   * nullish，``??`` 不拦，须显式门；工作区 root_path 历史脏数据空串同样被
+   * 跳过——此类会话原本 resume 必败，现由三级链接管属良性变化）。cwd 值
+   * 原样透传不归一化（与快照/配置值同源同拼写）。解析错配由 SDK resume
+   * throw → 既有 markRecoveryFailed 链收敛，不做 transcript 预扫描
+   * （design D-002@v2 YAGNI）。load 失败（损坏隔离/权限）静默兜底，不阻断
+   * resume——与 ``_resolveResumeLastActiveAt`` 同构。
+   */
+  private async _resolveResumeCwd(
+    raw: Record<string, unknown>,
+    sessionId: string,
+  ): Promise<string> {
+    const payloadCwd = raw.cwd as string | undefined;
+    if (typeof payloadCwd === 'string' && payloadCwd !== '') {
+      return payloadCwd;
+    }
+    if (this._persistence) {
+      try {
+        const local = (await this._persistence.load()).find(
+          (r) => r.sessionId === sessionId,
+        );
+        if (local && typeof local.cwd === 'string' && local.cwd !== '') {
+          return local.cwd;
+        }
+      } catch {
+        // 读失败当无记录：兜底 workspace_dir，不阻断 resume。
+      }
+    }
+    return this._config.workspace_dir;
+  }
+
   private async _routeSessionResume(
     raw: Record<string, unknown>,
   ): Promise<void> {
@@ -9500,7 +9546,10 @@ export class Daemon {
       sessionId,
       leaseId,
       agentSessionId,
-      cwd: (raw.cwd as string | undefined) ?? '',
+      // 2026-11-06-session-reopen-no-cwd（D-002@v2）：cwd 三级同源兜底链
+      //（payload 非空串 → 本地快照 → workspace_dir），空 cwd 会话不再得空串
+      // 必败——详见 _resolveResumeCwd 注释。
+      cwd: await this._resolveResumeCwd(raw, sessionId),
       provider,
       pathToClaudeCodeExecutable: exePath,
       pathToAgentExecutable: exePath,
@@ -9563,8 +9612,14 @@ export class Daemon {
     // 显式携 payload 的 runtimeId（F1：不依赖 recover 映射）与 leaseId（供 backend
     // 防陈旧确认误翻）。best-effort：失败仅 warn——本地已恢复 active 不回滚，
     // backend 180s sweeper 兜底收敛（DS-6）。
+    // 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：cwd 捎带三级链解析结果
+    //（record.cwd）——backend 落 agent_sessions.cwd，后续 reopen 直查。
     try {
-      await this._client.confirmReconnected?.(sessionId, { leaseId, runtimeId });
+      await this._client.confirmReconnected?.(sessionId, {
+        leaseId,
+        runtimeId,
+        cwd: record.cwd,
+      });
     } catch (e) {
       this._logger.warn('session_resume_confirm_reconnected_failed', {
         session_id: sessionId,
@@ -9578,7 +9633,9 @@ export class Daemon {
     // 避免 recover 后 inject 等 ready 超时降级 fallback。best-effort：notifySessionReady
     // 自身失败 warn 不抛（hub-client.ts 实现），调用点无需 try/catch；恢复失败已在
     // 上方 catch 分支 return，不会走到本行，故仅成功路径上报。
-    await this._client.notifySessionReady(sessionId);
+    // 2026-11-06-session-reopen-no-cwd（D-007）：ready 同点捎带 record.cwd（幂等兜底
+    //——confirm 丢失时 ready 仍可落库）。
+    await this._client.notifySessionReady(sessionId, { cwd: record.cwd });
   }
 
   /**
@@ -10808,8 +10865,11 @@ export class Daemon {
       //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
       // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
       // turn_phase=ready（FR-02）：notifySessionReady 同点位——进程就绪、等待 AI 响应。
+      // 2026-11-06-session-reopen-no-cwd（D-007/FR-03）：捎带本次会话实际运行目录
+      //（cwd 局部变量=borrow sandbox / workspace 兜底后的实际值），backend 落
+      // agent_sessions.cwd——非工作区会话防患在前。
       reportTurnPhase('ready');
-      await this._client.notifySessionReady(sessionId);
+      await this._client.notifySessionReady(sessionId, { cwd });
       // quick-c1ac3c85（SWR）：specStep 挂起的旧缓存后台再验证在此 fire——
       // 会话已确认启动、ready 通知已发（首响关键路径走完），~40s 拉取全程后台。
       if (pendingSpecRevalidate) {

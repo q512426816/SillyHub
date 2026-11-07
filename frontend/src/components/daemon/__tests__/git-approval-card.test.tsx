@@ -102,7 +102,9 @@ const PUSH_PAYLOAD = {
 
 beforeEach(() => {
   respondMock.mockReset();
-  respondMock.mockResolvedValue(undefined);
+  // respondSessionPermission 返回 Promise<{accepted: boolean}>——mock 值与签名
+  // 对齐（原 undefined 属类型不匹配，tsc --noEmit 即红；运行时断言未消费该值）。
+  respondMock.mockResolvedValue({ accepted: true });
   apiFetchMock.mockClear();
 });
 

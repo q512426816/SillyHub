@@ -143,7 +143,9 @@ vi.mock("@/lib/api/llm-providers", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
     "@/lib/api/llm-providers",
   );
-  return { ...actual, listProviders: llmApi.listProviders };
+  // 2026-11-06 存量红适配（model-provider-cascade 后组件数据源改
+  // listUsableProviders）——指向同一 mock fn，用例注入逻辑零改。
+  return { ...actual, listProviders: llmApi.listProviders, listUsableProviders: llmApi.listProviders };
 });
 
 /* ----- 回归锚字面量（硬编码防源文件漂移自证；2026-09-09-sessions-visual-refresh

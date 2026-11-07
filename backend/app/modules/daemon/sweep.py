@@ -717,10 +717,13 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
             "session_id": str(row.id),
             "lease_id": str(row.lease_id) if row.lease_id is not None else None,
             "agent_session_id": sess.agent_session_id,
-            "cwd": sess.cwd,
             "provider": sess.provider,
             "runtime_id": str(row.runtime_id),
         }
+        # 2026-11-06-session-reopen-no-cwd（D-002@v2）：cwd 条件键——非空才入键
+        # （与 reopen 主路径 session_lifecycle.py 同款），daemon 三级链接管空值。
+        if sess.cwd:
+            payload["cwd"] = sess.cwd
         if row.llm_provider_id is not None:
             try:
                 provider_config = await resolve_bound_provider_config(
